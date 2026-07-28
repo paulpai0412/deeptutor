@@ -9,7 +9,7 @@ import {
   useRef,
   useState,
 } from "react";
-import { useParams, useRouter } from "next/navigation";
+import { useParams, useRouter, useSearchParams } from "next/navigation";
 
 import {
   BarChart3,
@@ -78,6 +78,7 @@ import {
 import {
   DEFAULT_QUIZ_CONFIG,
   buildQuizWSConfig,
+  normalizeQuizConfig,
   type DeepQuestionFormConfig,
 } from "@/lib/quiz-types";
 import {
@@ -240,10 +241,18 @@ const CAPABILITIES: CapabilityDef[] = [
   {
     value: "deep_question",
     label: "Quiz",
-    description: "Auto-validated question generation",
+    description: "Custom and mimic paper question generation",
     icon: PenLine,
     allowedTools: ["web_search", "code_execution"],
     defaultTools: ["web_search", "code_execution"],
+  },
+  {
+    value: "exam",
+    label: "Exam",
+    description: "Take a selected Paper Library paper",
+    icon: GraduationCap,
+    allowedTools: [],
+    defaultTools: [],
   },
   {
     value: "deep_research",
@@ -310,9 +319,13 @@ function getCapability(value: string | null): CapabilityDef {
 
 export default function ChatPage() {
   const params = useParams<{ sessionId?: string[] }>();
+  const searchParams = useSearchParams();
   const router = useRouter();
   const { t } = useTranslation();
   const sessionIdParam = params.sessionId?.[0] ?? null;
+  const originalPaperIdParam = searchParams.get("original_paper_id");
+  const examPaperIdParam = searchParams.get("exam_paper_id");
+  const examLibraryIdParam = searchParams.get("exam_library_id");
   const { setActiveSessionId, language: appLanguage } = useAppShell();
 
   const {
@@ -347,6 +360,11 @@ export default function ChatPage() {
         ? null
         : new URLSearchParams(window.location.search).get("agent");
   }
+  // Paper Library's "Start Exam" action opens a fresh draft
+  // session with this opaque ID. The query is dropped once the server assigns
+  // the new session URL (see the URL effect below).
+  const originalPaperSetupRef = useRef(false);
+  const examSetupRef = useRef(false);
   const agentPreselectDoneRef = useRef(false);
   const [llmOptions, setLLMOptions] = useState<LLMOption[]>([]);
   const [activeLLMDefault, setActiveLLMDefault] = useState<LLMSelection | null>(
@@ -462,7 +480,16 @@ export default function ChatPage() {
         researchConfig?: DeepResearchFormConfig;
         capabilityConfigConfirmed?: boolean;
       };
-      if (parsed.quizConfig) setQuizConfig(parsed.quizConfig);
+      if (parsed.quizConfig) {
+        const restoredQuizConfig = normalizeQuizConfig(parsed.quizConfig);
+        if (restoredQuizConfig.mode === "original_paper") {
+          restoredQuizConfig.mode = "custom";
+          restoredQuizConfig.paper_id = "";
+          restoredQuizConfig.paper_library_id = "";
+          restoredQuizConfig.paper_path = "";
+        }
+        setQuizConfig(restoredQuizConfig);
+      }
       if (parsed.visualizeConfig) setVisualizeConfig(parsed.visualizeConfig);
       if (parsed.researchConfig) setResearchConfig(parsed.researchConfig);
       if (typeof parsed.capabilityConfigConfirmed === "boolean") {
@@ -561,17 +588,20 @@ export default function ChatPage() {
     () => getCapability(state.activeCapability),
     [state.activeCapability],
   );
+
   const isQuizMode = activeCap.value === "deep_question";
+  const isExamMode = activeCap.value === "exam";
   const isVisualizeMode = activeCap.value === "visualize";
   const isResearchMode = activeCap.value === "deep_research";
-  const capabilityNeedsConfig = isQuizMode || isVisualizeMode || isResearchMode;
+  const capabilityNeedsConfig =
+    isQuizMode || isExamMode || isVisualizeMode || isResearchMode;
 
   // Edit-invalidates-confirm wrappers — flipping any field after the user
   // hit *Confirm* should restore the gate so they re-confirm intentionally.
   // `useCallback` keeps identities stable so the memoized ChatComposer /
   // CapabilityConfigCard don't churn on every keystroke.
   const handleChangeQuizConfig = useCallback((next: DeepQuestionFormConfig) => {
-    setQuizConfig(next);
+    setQuizConfig(normalizeQuizConfig(next));
     setCapabilityConfigConfirmed(false);
   }, []);
   const handleUploadQuizPdf = useCallback((file: File | null) => {
@@ -923,6 +953,49 @@ export default function ChatPage() {
     };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // The UnifiedChatProvider initializes its draft session in its own mount
+  // effect. Apply the paper preset on the next macrotask so that initialization
+  // cannot replace the capability/config immediately afterwards.
+  useEffect(() => {
+    const paperId = originalPaperIdParam?.trim();
+    if (sessionIdParam || !paperId || originalPaperSetupRef.current) return;
+    const timer = window.setTimeout(() => {
+      if (originalPaperSetupRef.current) return;
+      originalPaperSetupRef.current = true;
+      // Legacy links are still accepted, but Original Paper is now an Exam
+      // concern; never reopen it inside the ordinary Quiz capability.
+      setCapability("exam");
+      setQuizConfig((previous) => ({
+        ...normalizeQuizConfig(previous),
+        mode: "original_paper",
+        paper_id: paperId,
+        paper_library_id: "",
+        paper_path: "",
+      }));
+      setCapabilityConfigConfirmed(false);
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [originalPaperIdParam, sessionIdParam, setCapability]);
+
+  useEffect(() => {
+    const paperId = examPaperIdParam?.trim();
+    if (sessionIdParam || !paperId || examSetupRef.current) return;
+    const timer = window.setTimeout(() => {
+      if (examSetupRef.current) return;
+      examSetupRef.current = true;
+      setCapability("exam");
+      setQuizConfig((previous) => ({
+        ...normalizeQuizConfig(previous),
+        mode: "original_paper",
+        paper_id: paperId,
+        paper_library_id: examLibraryIdParam?.trim() || "",
+        paper_path: "",
+      }));
+      setCapabilityConfigConfirmed(false);
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [examLibraryIdParam, examPaperIdParam, sessionIdParam, setCapability]);
+
   // When URL param changes (sidebar navigation), load the corresponding session
   const prevSessionIdParam = useRef(sessionIdParam);
   useEffect(() => {
@@ -1106,6 +1179,16 @@ export default function ChatPage() {
         storageKey,
         cap.allowedTools,
       );
+      if (cap.value === "deep_question" && quizConfig.mode === "original_paper") {
+        setQuizConfig((previous) => ({
+          ...previous,
+          mode: "custom",
+          paper_id: "",
+          paper_library_id: "",
+          paper_path: "",
+        }));
+        setQuizPdf(null);
+      }
       setCapability(cap.value || null);
       // Per-capability tool selection now derives from the user's saved
       // settings (/settings/tools) intersected with the capability's
@@ -1125,7 +1208,14 @@ export default function ChatPage() {
       setCapabilityConfigConfirmed(false);
       setCapMenuOpen(false);
     },
-    [capabilityConfigs, setCapability, setKBs, setTools, userEnabledTools],
+    [
+      capabilityConfigs,
+      quizConfig.mode,
+      setCapability,
+      setKBs,
+      setTools,
+      userEnabledTools,
+    ],
   );
 
   const fileToAttachment = useCallback(
@@ -1262,12 +1352,14 @@ export default function ChatPage() {
    */
   const capabilityConfigSection = useMemo(() => {
     if (!capabilityNeedsConfig) return null;
-    if (isQuizMode) {
+    if (isQuizMode || isExamMode) {
       return (
         <CapabilityConfigCard
-          capability="deep_question"
+          capability={isExamMode ? "exam" : "deep_question"}
           confirmed={capabilityConfigConfirmed}
-          canConfirm
+          canConfirm={
+            isExamMode ? quizConfig.paper_id.trim().length > 0 : true
+          }
           onConfirm={handleConfirmCapabilityConfig}
         >
           <QuizConfigPanel
@@ -1275,6 +1367,7 @@ export default function ChatPage() {
             onChange={handleChangeQuizConfig}
             uploadedPdf={quizPdf}
             onUploadPdf={handleUploadQuizPdf}
+            examMode={isExamMode}
           />
         </CapabilityConfigCard>
       );
@@ -1316,6 +1409,7 @@ export default function ChatPage() {
   }, [
     capabilityNeedsConfig,
     isQuizMode,
+    isExamMode,
     isVisualizeMode,
     capabilityConfigConfirmed,
     handleConfirmCapabilityConfig,
@@ -1451,8 +1545,12 @@ export default function ChatPage() {
       }));
       let config: Record<string, unknown> | undefined;
 
-      if (isQuizMode) {
-        config = buildQuizWSConfig(quizConfig);
+      if (isQuizMode || isExamMode) {
+        config = buildQuizWSConfig(
+          isExamMode
+            ? { ...quizConfig, mode: "original_paper" }
+            : quizConfig,
+        );
         if (quizConfig.mode === "mimic" && quizPdf) {
           const b64 = extractBase64FromDataUrl(
             await readFileAsDataUrl(quizPdf),
@@ -1521,6 +1619,7 @@ export default function ChatPage() {
       bookReferencesPayload,
       historyReferencesPayload,
       isQuizMode,
+      isExamMode,
       isResearchMode,
       isVisualizeMode,
       memoryReferencesPayload,

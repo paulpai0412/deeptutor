@@ -113,7 +113,17 @@ export interface QuizResultItem {
   correct_answer: string;
   explanation?: string;
   difficulty?: string;
-  is_correct: boolean;
+  source_type?: string;
+  paper_library_id?: string;
+  paper_library_name?: string;
+  paper_id?: string;
+  paper_display_name?: string;
+  source_question_number?: string;
+  source_snapshot_id?: string;
+  grading_method?: string;
+  is_multi_select?: boolean;
+  image_dependent?: boolean;
+  is_correct: boolean | null;
 }
 
 async function expectJson<T>(response: Response): Promise<T> {

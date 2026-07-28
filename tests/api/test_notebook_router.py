@@ -14,6 +14,7 @@ notebook_router = importlib.import_module("deeptutor.api.routers.question_notebo
 sessions_router = importlib.import_module("deeptutor.api.routers.sessions").router
 
 from deeptutor.services.session.sqlite_store import SQLiteSessionStore
+from deeptutor.services.storage.attachment_store import LocalDiskAttachmentStore
 
 
 def _build_app(store: SQLiteSessionStore) -> FastAPI:
@@ -106,6 +107,116 @@ def test_quiz_results_upserts_on_retry(store: SQLiteSessionStore) -> None:
         q1 = next(e for e in listing["items"] if e["question_id"] == "q1")
         assert q1["is_correct"] is True
         assert q1["user_answer"] == "B"
+
+
+
+
+def test_upsert_computes_objective_grade_and_preserves_manual_source(store: SQLiteSessionStore) -> None:
+    session = asyncio.run(store.create_session())
+    sid = session["id"]
+
+    with TestClient(_build_app(store)) as client:
+        objective = client.post(
+            "/api/v1/question-notebook/entries/upsert",
+            json={
+                "session_id": sid,
+                "turn_id": "turn-1",
+                "question_id": "paper-q1",
+                "question": "Pick one",
+                "question_type": "choice",
+                "options": {"A": "Alpha", "B": "Beta"},
+                "correct_answer": "B",
+                "user_answer": "A",
+                "is_correct": True,
+                "source_type": "original_paper",
+                "paper_library_id": "library-deleted-later",
+                "paper_library_name": "History library",
+                "paper_id": "paper-deleted-later",
+                "paper_display_name": "History paper",
+                "source_question_number": "7",
+                "source_snapshot_id": "snap-1",
+            },
+        )
+        assert objective.status_code == 200
+        assert objective.json()["is_correct"] is False
+        assert objective.json()["grading_method"] == "deterministic"
+        assert objective.json()["paper_library_id"] == "library-deleted-later"
+        assert objective.json()["paper_library_name"] == "History library"
+        assert objective.json()["paper_display_name"] == "History paper"
+
+        manual = client.post(
+            "/api/v1/question-notebook/entries/upsert",
+            json={
+                "session_id": sid,
+                "turn_id": "turn-1",
+                "question_id": "paper-q2",
+                "question": "Explain the image",
+                "question_type": "choice",
+                "options": {"A": "Alpha", "B": "Beta"},
+                "correct_answer": "B",
+                "user_answer": "B",
+                "is_correct": True,
+                "image_dependent": True,
+                "source_type": "original_paper",
+            },
+        )
+        assert manual.status_code == 200
+        assert manual.json()["is_correct"] is None
+        assert manual.json()["grading_method"] == "manual"
+
+        cleared = client.patch(
+            f"/api/v1/question-notebook/entries/{manual.json()['id']}",
+            json={"is_correct": None},
+        )
+        assert cleared.status_code == 200
+        refreshed = client.get(
+            f"/api/v1/question-notebook/entries/{manual.json()['id']}"
+        )
+        assert refreshed.json()["is_correct"] is None
+        judged = client.patch(
+            f"/api/v1/question-notebook/entries/{manual.json()['id']}",
+            json={"ai_judgment": "Manual review: the answer is plausible."},
+        )
+        assert judged.status_code == 200
+        judged_entry = client.get(
+            f"/api/v1/question-notebook/entries/{manual.json()['id']}"
+        )
+        assert judged_entry.json()["ai_judgment"].startswith("Manual review")
+
+
+def test_upsert_persists_image_answer(store: SQLiteSessionStore, monkeypatch) -> None:
+    session = asyncio.run(store.create_session())
+    attachments = LocalDiskAttachmentStore(root=Path(store.db_path).parent / "attachments")
+    monkeypatch.setattr(
+        "deeptutor.api.routers.question_notebook.get_attachment_store",
+        lambda: attachments,
+    )
+
+    with TestClient(_build_app(store)) as client:
+        response = client.post(
+            "/api/v1/question-notebook/entries/upsert",
+            json={
+                "session_id": session["id"],
+                "turn_id": "turn-image",
+                "question_id": "image-q",
+                "question": "Draw the structure",
+                "question_type": "written",
+                "user_answer_images": [
+                    {
+                        "id": "answer-image-1",
+                        "base64": "aGVsbG8=",
+                        "filename": "answer.png",
+                        "mime_type": "image/png",
+                    }
+                ],
+                "is_correct": None,
+            },
+        )
+        assert response.status_code == 200
+        image = response.json()["user_answer_images"][0]
+        assert image["id"] == "answer-image-1"
+        assert image["url"].startswith("/api/attachments/")
+        assert list((Path(store.db_path).parent / "attachments").rglob("*answer.png"))
 
 
 def test_bookmark_toggle(store: SQLiteSessionStore) -> None:

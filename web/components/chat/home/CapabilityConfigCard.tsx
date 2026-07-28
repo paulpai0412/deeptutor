@@ -22,12 +22,14 @@ import {
   Clapperboard,
   Microscope,
   PenLine,
+  GraduationCap,
   type LucideIcon,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 export type ConfigurableCapability =
   | "deep_question"
+  | "exam"
   | "math_animator"
   | "visualize"
   | "deep_research";
@@ -39,6 +41,7 @@ interface CapabilityChrome {
 
 const CAPABILITY_CHROME: Record<ConfigurableCapability, CapabilityChrome> = {
   deep_question: { icon: PenLine, label: "Quiz settings" },
+  exam: { icon: GraduationCap, label: "Exam settings" },
   math_animator: { icon: Clapperboard, label: "Animator settings" },
   visualize: { icon: BarChart3, label: "Visualize settings" },
   deep_research: { icon: Microscope, label: "Research settings" },

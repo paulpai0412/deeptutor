@@ -104,6 +104,212 @@ export interface KnowledgeUploadPolicy {
   max_file_size_bytes: number;
 }
 
+export interface PaperLibrarySummary {
+  library_id: string;
+  name: string;
+  description?: string;
+  settings?: Record<string, unknown>;
+  created_at?: string;
+  updated_at?: string;
+  paper_count: number;
+}
+
+export interface PaperLibraryRecord {
+  paper_id: string;
+  display_name: string;
+  original_filename: string;
+  source_hash: string;
+  status: string;
+  question_count: number;
+  warning_count: number;
+  created_at: string;
+  updated_at: string;
+  error?: string;
+  warnings?: string[];
+  progress?: { stage?: string; message?: string; percent?: number; task_id?: string };
+  task_id?: string;
+  parser_engine?: string;
+  library_id?: string;
+  extraction_config?: Record<string, unknown>;
+}
+
+export interface PaperLibraryQuestion {
+  question_id: string;
+  question_number: string;
+  question_text: string;
+  options: Record<string, string>;
+  question_type: string;
+  difficulty?: string | null;
+  answer: string;
+  images: string[];
+  page?: number | null;
+  is_multi_select: boolean;
+  source_question_type?: string | null;
+  warnings: string[];
+  source_question_id?: string | null;
+}
+
+export interface PaperLibraryDetail extends PaperLibraryRecord {
+  questions: PaperLibraryQuestion[];
+}
+
+export interface PaperPaperListResponse {
+  papers: PaperLibraryRecord[];
+}
+
+export interface PaperUploadResponse {
+  papers: PaperLibraryRecord[];
+  rejected: Array<{ filename: string; error: string }>;
+  batch_id?: string;
+}
+
+export interface PaperLibraryListResponse {
+  libraries: PaperLibrarySummary[];
+}
+
+export interface PaperLibraryOptions {
+  llm: {
+    active: { profile_id: string; model_id: string } | null;
+    options: Array<{
+      profile_id: string;
+      model_id: string;
+      profile_name: string;
+      model_name: string;
+      model: string;
+      provider?: string;
+      provider_label?: string;
+    }>;
+  };
+  parsers: Array<{
+    id: string;
+    name: string;
+    description: string;
+    available: boolean;
+  }>;
+  failure_policies: Array<{ id: string; label: string }>;
+  llm_required: boolean;
+}
+
+export async function getPaperLibraryOptions(): Promise<PaperLibraryOptions> {
+  const response = await apiFetch(
+    apiUrl(`${PAPER_LIBRARY_PATH}/libraries/options`),
+    { cache: "no-store" },
+  );
+  if (!response.ok) {
+    throw new Error(await readErrorDetail(response, "Failed to load Paper Library options"));
+  }
+  return (await response.json()) as PaperLibraryOptions;
+}
+
+export async function listPaperLibraries(options?: {
+  force?: boolean;
+}): Promise<PaperLibrarySummary[]> {
+  return withClientCache<PaperLibrarySummary[]>(
+    `${PAPER_LIBRARY_PREFIX}libraries`,
+    async () => {
+      const response = await apiFetch(
+        apiUrl(`${PAPER_LIBRARY_PATH}/libraries`),
+        { cache: "no-store" },
+      );
+      if (!response.ok) {
+        throw new Error(await readErrorDetail(response, "Failed to list Paper Libraries"));
+      }
+      const data = (await response.json()) as PaperLibraryListResponse;
+      return Array.isArray(data?.libraries) ? data.libraries : [];
+    },
+    { force: options?.force, ttlMs: 5_000 },
+  );
+}
+
+export async function createPaperLibrary(payload: {
+  name: string;
+  description?: string;
+  settings?: Record<string, unknown>;
+}): Promise<PaperLibrarySummary> {
+  const response = await apiFetch(apiUrl(`${PAPER_LIBRARY_PATH}/libraries`), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!response.ok) {
+    throw new Error(await readErrorDetail(response, "Failed to create Paper Library"));
+  }
+  invalidateClientCache(PAPER_LIBRARY_PREFIX);
+  return (await response.json()) as PaperLibrarySummary;
+}
+
+export async function updatePaperLibrary(
+  libraryId: string,
+  payload: {
+    name?: string;
+    description?: string;
+    settings?: Record<string, unknown>;
+  },
+): Promise<PaperLibrarySummary> {
+  const response = await apiFetch(
+    apiUrl(`${PAPER_LIBRARY_PATH}/libraries/${encodeURIComponent(libraryId)}`),
+    {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    },
+  );
+  if (!response.ok) {
+    throw new Error(await readErrorDetail(response, "Failed to update Paper Library"));
+  }
+  invalidateClientCache(PAPER_LIBRARY_PREFIX);
+  return (await response.json()) as PaperLibrarySummary;
+}
+
+export async function deletePaperLibrary(libraryId: string): Promise<void> {
+  const response = await apiFetch(
+    apiUrl(`${PAPER_LIBRARY_PATH}/libraries/${encodeURIComponent(libraryId)}`),
+    { method: "DELETE" },
+  );
+  if (!response.ok) {
+    throw new Error(await readErrorDetail(response, "Failed to delete Paper Library"));
+  }
+  invalidateClientCache(PAPER_LIBRARY_PREFIX);
+}
+
+export async function listLibraryPapers(
+  libraryId: string,
+  options?: { search?: string; status?: string },
+): Promise<PaperLibraryRecord[]> {
+  const params = new URLSearchParams();
+  if (options?.search?.trim()) params.set("search", options.search.trim());
+  if (options?.status?.trim()) params.set("status", options.status.trim());
+  const suffix = params.toString() ? `?${params.toString()}` : "";
+  const response = await apiFetch(
+    apiUrl(
+      `${PAPER_LIBRARY_PATH}/libraries/${encodeURIComponent(libraryId)}/papers${suffix}`,
+    ),
+    { cache: "no-store" },
+  );
+  if (!response.ok) {
+    throw new Error(await readErrorDetail(response, "Failed to list library papers"));
+  }
+  const data = (await response.json()) as PaperPaperListResponse;
+  return Array.isArray(data?.papers) ? data.papers : [];
+}
+
+export async function uploadPaperLibraryToLibrary(
+  libraryId: string,
+  files: File[],
+): Promise<PaperUploadResponse> {
+  const form = new FormData();
+  files.forEach((file) => form.append("files", file));
+  const response = await apiFetch(
+    apiUrl(`${PAPER_LIBRARY_PATH}/libraries/${encodeURIComponent(libraryId)}/upload`),
+    { method: "POST", body: form },
+  );
+  if (!response.ok) {
+    throw new Error(await readErrorDetail(response, "Failed to upload papers"));
+  }
+  invalidateClientCache(PAPER_LIBRARY_PREFIX);
+  return (await response.json()) as PaperUploadResponse;
+}
+
 export interface KnowledgeBaseFile {
   /** POSIX path relative to the KB's raw/ root (may include folders). */
   name: string;
@@ -223,6 +429,244 @@ export async function getKnowledgeUploadPolicy(options?: { force?: boolean }) {
 
 export function invalidateKnowledgeCaches() {
   invalidateClientCache(KNOWLEDGE_CACHE_PREFIX);
+}
+
+const PAPER_LIBRARY_PREFIX = "paper-library:";
+const PAPER_LIBRARY_PATH = "/api/v1/papers";
+
+export async function listPaperLibrary(options?: {
+  search?: string;
+  status?: string;
+}): Promise<PaperLibraryRecord[]> {
+  const params = new URLSearchParams();
+  if (options?.search?.trim()) params.set("search", options.search.trim());
+  if (options?.status?.trim()) params.set("status", options.status.trim());
+  const suffix = params.toString() ? `?${params.toString()}` : "";
+  return withClientCache<PaperLibraryRecord[]>(
+    `${PAPER_LIBRARY_PREFIX}list:${suffix}`,
+    async () => {
+      const response = await apiFetch(
+        apiUrl(`${PAPER_LIBRARY_PATH}${suffix}`),
+        { cache: "no-store" },
+      );
+      if (!response.ok) {
+        throw new Error(
+          await readErrorDetail(response, "Failed to list papers"),
+        );
+      }
+      const data = (await response.json()) as PaperPaperListResponse;
+      return Array.isArray(data?.papers) ? data.papers : [];
+    },
+    { force: true, ttlMs: 5_000 },
+  );
+}
+
+export async function getPaperLibraryPaper(
+  paperId: string,
+): Promise<PaperLibraryDetail> {
+  const response = await apiFetch(
+    apiUrl(`${PAPER_LIBRARY_PATH}/${encodeURIComponent(paperId)}`),
+    { cache: "no-store" },
+  );
+  if (!response.ok) {
+    throw new Error(await readErrorDetail(response, "Failed to load paper"));
+  }
+  return (await response.json()) as PaperLibraryDetail;
+}
+
+export async function updatePaperQuestion(
+  paperId: string,
+  questionId: string,
+  payload: { question_number: string; answer: string; images?: string[] },
+): Promise<PaperLibraryQuestion> {
+  const response = await apiFetch(
+    apiUrl(
+      `${PAPER_LIBRARY_PATH}/${encodeURIComponent(paperId)}/questions/${encodeURIComponent(questionId)}`,
+    ),
+    {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    },
+  );
+  if (!response.ok) {
+    throw new Error(await readErrorDetail(response, "Failed to update question"));
+  }
+  invalidateClientCache(PAPER_LIBRARY_PREFIX);
+  return (await response.json()) as PaperLibraryQuestion;
+}
+
+export async function updateLibraryPaperQuestion(
+  libraryId: string,
+  paperId: string,
+  questionId: string,
+  payload: { question_number: string; answer: string; images?: string[] },
+): Promise<PaperLibraryQuestion> {
+  const response = await apiFetch(
+    apiUrl(
+      `${PAPER_LIBRARY_PATH}/libraries/${encodeURIComponent(libraryId)}/papers/${encodeURIComponent(paperId)}/questions/${encodeURIComponent(questionId)}`,
+    ),
+    {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    },
+  );
+  if (!response.ok) {
+    throw new Error(await readErrorDetail(response, "Failed to update question"));
+  }
+  invalidateClientCache(PAPER_LIBRARY_PREFIX);
+  return (await response.json()) as PaperLibraryQuestion;
+}
+
+export async function uploadPaperLibrary(
+  files: File[],
+): Promise<PaperUploadResponse> {
+  const form = new FormData();
+  files.forEach((file) => form.append("files", file));
+  const response = await apiFetch(
+    apiUrl(`${PAPER_LIBRARY_PATH}/upload`),
+    { method: "POST", body: form },
+  );
+  if (!response.ok) {
+    throw new Error(await readErrorDetail(response, "Failed to upload papers"));
+  }
+  invalidateClientCache(PAPER_LIBRARY_PREFIX);
+  return (await response.json()) as PaperUploadResponse;
+}
+
+export function paperSourcePath(paperId: string): string {
+  return `${PAPER_LIBRARY_PATH}/${encodeURIComponent(paperId)}/source`;
+}
+
+export function paperAssetPath(paperId: string, filename: string): string {
+  const encodedName = filename
+    .split("/")
+    .filter(Boolean)
+    .map((segment) => encodeURIComponent(segment))
+    .join("/");
+  return `${PAPER_LIBRARY_PATH}/${encodeURIComponent(paperId)}/assets/${encodedName}`;
+}
+
+export async function renameLibraryPaper(
+  libraryId: string,
+  paperId: string,
+  displayName: string,
+): Promise<PaperLibraryRecord> {
+  const response = await apiFetch(
+    apiUrl(
+      `${PAPER_LIBRARY_PATH}/libraries/${encodeURIComponent(libraryId)}/papers/${encodeURIComponent(paperId)}`,
+    ),
+    {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ display_name: displayName }),
+    },
+  );
+  if (!response.ok) {
+    throw new Error(await readErrorDetail(response, "Failed to rename paper"));
+  }
+  invalidateClientCache(PAPER_LIBRARY_PREFIX);
+  return (await response.json()) as PaperLibraryRecord;
+}
+
+export async function movePaper(
+  libraryId: string,
+  paperId: string,
+  targetLibraryId: string,
+): Promise<PaperLibraryRecord> {
+  const response = await apiFetch(
+    apiUrl(
+      `${PAPER_LIBRARY_PATH}/libraries/${encodeURIComponent(libraryId)}/papers/${encodeURIComponent(paperId)}/move`,
+    ),
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ target_library_id: targetLibraryId }),
+    },
+  );
+  if (!response.ok) {
+    throw new Error(await readErrorDetail(response, "Failed to move paper"));
+  }
+  invalidateClientCache(PAPER_LIBRARY_PREFIX);
+  return (await response.json()) as PaperLibraryRecord;
+}
+
+export async function deleteLibraryPaper(
+  libraryId: string,
+  paperId: string,
+): Promise<void> {
+  const response = await apiFetch(
+    apiUrl(
+      `${PAPER_LIBRARY_PATH}/libraries/${encodeURIComponent(libraryId)}/papers/${encodeURIComponent(paperId)}`,
+    ),
+    { method: "DELETE" },
+  );
+  if (!response.ok) {
+    throw new Error(await readErrorDetail(response, "Failed to delete paper"));
+  }
+  invalidateClientCache(PAPER_LIBRARY_PREFIX);
+}
+
+export async function retryLibraryPaper(
+  libraryId: string,
+  paperId: string,
+): Promise<PaperLibraryRecord> {
+  const response = await apiFetch(
+    apiUrl(
+      `${PAPER_LIBRARY_PATH}/libraries/${encodeURIComponent(libraryId)}/papers/${encodeURIComponent(paperId)}/retry`,
+    ),
+    { method: "POST" },
+  );
+  if (!response.ok) {
+    throw new Error(await readErrorDetail(response, "Failed to retry paper extraction"));
+  }
+  invalidateClientCache(PAPER_LIBRARY_PREFIX);
+  return (await response.json()) as PaperLibraryRecord;
+}
+
+export async function retryPaper(
+  paperId: string,
+): Promise<PaperLibraryRecord> {
+  const response = await apiFetch(
+    apiUrl(`${PAPER_LIBRARY_PATH}/${encodeURIComponent(paperId)}/retry`),
+    { method: "POST" },
+  );
+  if (!response.ok) {
+    throw new Error(await readErrorDetail(response, "Failed to retry paper extraction"));
+  }
+  invalidateClientCache(PAPER_LIBRARY_PREFIX);
+  return (await response.json()) as PaperLibraryRecord;
+}
+
+export async function deletePaper(paperId: string): Promise<void> {
+  const response = await apiFetch(
+    apiUrl(`${PAPER_LIBRARY_PATH}/${encodeURIComponent(paperId)}`),
+    { method: "DELETE" },
+  );
+  if (!response.ok) {
+    throw new Error(await readErrorDetail(response, "Failed to delete paper"));
+  }
+  invalidateClientCache(PAPER_LIBRARY_PREFIX);
+}
+
+export async function renamePaper(
+  paperId: string,
+  displayName: string,
+): Promise<PaperLibraryRecord> {
+  const response = await apiFetch(
+    apiUrl(`${PAPER_LIBRARY_PATH}/${encodeURIComponent(paperId)}`),
+    {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ display_name: displayName }),
+    },
+  );
+  if (!response.ok) {
+    throw new Error(await readErrorDetail(response, "Failed to rename paper"));
+  }
+  invalidateClientCache(PAPER_LIBRARY_PREFIX);
+  return (await response.json()) as PaperLibraryRecord;
 }
 
 const PAGEINDEX_CONFIG_PATH =

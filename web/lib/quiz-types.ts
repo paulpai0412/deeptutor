@@ -7,7 +7,7 @@ import {
   normalizeQuizQuestionType,
 } from "./quiz-question-type";
 
-export type DeepQuestionMode = "custom" | "mimic";
+export type DeepQuestionMode = "custom" | "mimic" | "original_paper";
 
 export interface DeepQuestionFormConfig {
   mode: DeepQuestionMode;
@@ -27,6 +27,10 @@ export interface DeepQuestionFormConfig {
    */
   per_type_counts: Partial<Record<NormalizedQuizQuestionType, number>>;
   paper_path: string;
+  /** Opaque Paper Library ID used only by Original Paper/Exam mode. */
+  paper_id: string;
+  /** UI-only library scope; never sent in the public Exam request. */
+  paper_library_id?: string;
   max_questions: number;
 }
 
@@ -38,8 +42,37 @@ export const DEFAULT_QUIZ_CONFIG: DeepQuestionFormConfig = {
   question_types: [],
   per_type_counts: {},
   paper_path: "",
+  paper_id: "",
+  paper_library_id: "",
   max_questions: 10,
 };
+
+/** Restore fields added to quiz config after older localStorage entries. */
+export function normalizeQuizConfig(
+  config: Partial<DeepQuestionFormConfig> | null | undefined,
+): DeepQuestionFormConfig {
+  const stored = config ?? {};
+  return {
+    ...DEFAULT_QUIZ_CONFIG,
+    ...stored,
+    topic: typeof stored.topic === "string" ? stored.topic : "",
+    difficulty:
+      typeof stored.difficulty === "string" ? stored.difficulty : "auto",
+    question_types: Array.isArray(stored.question_types)
+      ? stored.question_types
+      : [],
+    per_type_counts:
+      stored.per_type_counts &&
+      typeof stored.per_type_counts === "object" &&
+      !Array.isArray(stored.per_type_counts)
+        ? stored.per_type_counts
+        : {},
+    paper_path: typeof stored.paper_path === "string" ? stored.paper_path : "",
+    paper_id: typeof stored.paper_id === "string" ? stored.paper_id : "",
+    paper_library_id:
+      typeof stored.paper_library_id === "string" ? stored.paper_library_id : "",
+  };
+}
 
 export interface QuizQuestion {
   question_id: string;
@@ -51,6 +84,24 @@ export interface QuizQuestion {
   difficulty?: string;
   concentration?: string;
   knowledge_context?: string;
+  source_type?: string;
+  paper_library_id?: string;
+  paper_library_name?: string;
+  paper_id?: string;
+  paper_display_name?: string;
+  source_question_number?: string;
+  source_page?: number | null;
+  source_images?: string[];
+  source_image_attachments?: Array<{
+    attachment_id?: string;
+    url?: string;
+    filename?: string;
+    mime_type?: string;
+    source_name?: string;
+  }>;
+  is_multi_select?: boolean;
+  snapshot_id?: string;
+  source?: Record<string, unknown>;
 }
 
 export interface QuizFollowupContext {
@@ -116,6 +167,39 @@ export function extractStreamingQuizQuestions(
       explanation: String(qa.explanation ?? ""),
       difficulty: qa.difficulty ? String(qa.difficulty) : undefined,
       concentration: qa.concentration ? String(qa.concentration) : undefined,
+      source_type: qa.source_type ? String(qa.source_type) : undefined,
+      paper_library_id: qa.paper_library_id
+        ? String(qa.paper_library_id)
+        : undefined,
+      paper_library_name: qa.paper_library_name
+        ? String(qa.paper_library_name)
+        : undefined,
+      paper_id: qa.paper_id ? String(qa.paper_id) : undefined,
+      paper_display_name: qa.paper_display_name
+        ? String(qa.paper_display_name)
+        : undefined,
+      source_question_number: qa.source_question_number
+        ? String(qa.source_question_number)
+        : undefined,
+      source_page:
+        qa.source_page === null || qa.source_page === undefined
+          ? undefined
+          : Number(qa.source_page),
+      source_images: Array.isArray(qa.source_images)
+        ? qa.source_images.map((image) => String(image))
+        : undefined,
+      source_image_attachments: Array.isArray(qa.source_image_attachments)
+        ? qa.source_image_attachments.filter(
+            (image): image is Record<string, unknown> =>
+              Boolean(image && typeof image === "object"),
+          )
+        : undefined,
+      is_multi_select: Boolean(qa.is_multi_select),
+      snapshot_id: qa.snapshot_id ? String(qa.snapshot_id) : undefined,
+      source:
+        qa.source && typeof qa.source === "object"
+          ? (qa.source as Record<string, unknown>)
+          : undefined,
     };
     const key = question.question_id || String(idx);
     byId.set(key, {
@@ -186,6 +270,39 @@ export function extractQuizQuestions(
         "knowledge_context" in qa.metadata &&
         qa.metadata.knowledge_context
           ? String(qa.metadata.knowledge_context)
+          : undefined,
+      source_type: qa.source_type ? String(qa.source_type) : undefined,
+      paper_library_id: qa.paper_library_id
+        ? String(qa.paper_library_id)
+        : undefined,
+      paper_library_name: qa.paper_library_name
+        ? String(qa.paper_library_name)
+        : undefined,
+      paper_id: qa.paper_id ? String(qa.paper_id) : undefined,
+      paper_display_name: qa.paper_display_name
+        ? String(qa.paper_display_name)
+        : undefined,
+      source_question_number: qa.source_question_number
+        ? String(qa.source_question_number)
+        : undefined,
+      source_page:
+        qa.source_page === null || qa.source_page === undefined
+          ? undefined
+          : Number(qa.source_page),
+      source_images: Array.isArray(qa.source_images)
+        ? qa.source_images.map((image) => String(image))
+        : undefined,
+      source_image_attachments: Array.isArray(qa.source_image_attachments)
+        ? qa.source_image_attachments.filter(
+            (image): image is Record<string, unknown> =>
+              Boolean(image && typeof image === "object"),
+          )
+        : undefined,
+      is_multi_select: Boolean(qa.is_multi_select),
+      snapshot_id: qa.snapshot_id ? String(qa.snapshot_id) : undefined,
+      source:
+        qa.source && typeof qa.source === "object"
+          ? (qa.source as Record<string, unknown>)
           : undefined,
     };
     return question;
@@ -260,6 +377,11 @@ export function summarizeQuizConfig(
   translate?: (key: string) => string,
 ): string {
   const tr = translate ?? ((s: string) => s);
+  if (cfg.mode === "original_paper") {
+    return [tr("Original Paper"), cfg.paper_id.trim() || tr("no paper")].join(
+      " · ",
+    );
+  }
   if (cfg.mode === "mimic") {
     const target = cfg.paper_path.trim() || tr("no paper");
     return [
@@ -289,6 +411,12 @@ export function summarizeQuizConfig(
 export function buildQuizWSConfig(
   cfg: DeepQuestionFormConfig,
 ): Record<string, unknown> {
+  if (cfg.mode === "original_paper") {
+    return {
+      mode: "original_paper",
+      paper_id: cfg.paper_id.trim(),
+    };
+  }
   if (cfg.mode === "mimic") {
     return {
       mode: "mimic",

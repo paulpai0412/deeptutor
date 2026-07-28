@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="zh-Hant-TW">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>DeepTutor Knowledge Center → Exam 真實 E2E SOP</title>
+  <style>
+    :root { color-scheme: light; --ink:#172033; --muted:#5d687b; --line:#dce2ec; --panel:#f7f9fc; --blue:#2563eb; --green:#087f5b; --amber:#9a6700; --red:#b42318; }
+    * { box-sizing:border-box; }
+    body { margin:0; color:var(--ink); background:#fff; font:16px/1.7 -apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans TC","Microsoft JhengHei",sans-serif; }
+    main { max-width:1180px; margin:0 auto; padding:42px 28px 80px; }
+    h1,h2,h3 { line-height:1.25; } h1 { margin:0 0 8px; font-size:clamp(30px,5vw,48px); letter-spacing:-.03em; }
+    h2 { margin-top:48px; padding-bottom:10px; border-bottom:2px solid var(--line); font-size:28px; } h3 { margin:28px 0 8px; font-size:21px; }
+    p { margin:8px 0 14px; } a { color:var(--blue); } code,pre { font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; }
+    code { padding:2px 5px; border-radius:5px; background:#eef2f7; font-size:.9em; } pre { overflow:auto; padding:16px; border:1px solid var(--line); border-radius:10px; background:#101828; color:#eef4ff; line-height:1.5; }
+    .lead { color:var(--muted); font-size:19px; max-width:940px; } .meta,.note,.warning,.success { margin:20px 0; padding:16px 18px; border:1px solid var(--line); border-radius:12px; background:var(--panel); }
+    .success { border-color:#8dd8bd; background:#effcf7; } .warning { border-color:#f0c36a; background:#fff9e8; } .note { border-left:4px solid var(--blue); }
+    .meta-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(250px,1fr)); gap:10px 24px; margin-top:12px; } .meta-grid div { min-width:0; }
+    .label { display:block; color:var(--muted); font-size:13px; } .value { display:block; overflow-wrap:anywhere; font-weight:650; }
+    ol.steps { padding-left:28px; } ol.steps > li { margin:20px 0 32px; padding-left:5px; } ol.steps > li::marker { color:var(--blue); font-weight:700; }
+    .operator-action { font-weight:700; color:var(--blue); } .expected { color:var(--green); }
+    table { width:100%; border-collapse:collapse; margin:14px 0 20px; } th,td { padding:10px 12px; border:1px solid var(--line); text-align:left; vertical-align:top; overflow-wrap:anywhere; } th { background:#eef3fa; }
+    figure { margin:0; } figure img { display:block; width:100%; height:auto; border:1px solid var(--line); border-radius:10px; box-shadow:0 8px 26px rgba(23,32,51,.08); background:#fff; }
+    figcaption { margin:9px 0 28px; color:var(--muted); font-size:14px; } .step-shot { margin:18px 0 10px; max-width:980px; }
+    .gallery { display:grid; grid-template-columns:repeat(auto-fit,minmax(420px,1fr)); gap:22px; align-items:start; } .gallery figure { min-width:0; } .gallery figcaption { margin-bottom:0; }
+    .checklist { padding-left:0; list-style:none; } .checklist li { margin:7px 0; padding-left:28px; position:relative; } .checklist li::before { content:"✓"; position:absolute; left:0; color:var(--green); font-weight:800; }
+    .footer { margin-top:52px; padding-top:18px; border-top:1px solid var(--line); color:var(--muted); font-size:14px; } .small { color:var(--muted); font-size:14px; }
+    @media (max-width:650px) { main { padding:28px 16px 56px; } .gallery { grid-template-columns:1fr; } th,td { padding:8px; font-size:14px; } }
+  </style>
+</head>
+<body>
+<main>
+  <header>
+    <p class="small">DeepTutor · Knowledge Center / Paper Libraries / Exam</p>
+    <h1>Knowledge Center → Exam：真實 PDF 歷史保存 SOP</h1>
+    <p class="lead">本 SOP 是一次 release-level Playwright tracer bullet：從建立 Paper Library、設定真實 extraction LLM／parser、上傳 PDF 與背景擷取，到 Paper Review、搬移、Exam、逐題保存、AI Judge，再刪除 live Paper Library 並重新讀取歷史 snapshot。</p>
+    <div class="success"><strong>真實證據：</strong>本次以 <code>PAPER_REAL_E2E=1</code> 執行，使用真實 PDF、真實 frontend、backend、WebSocket 與網路 LLM；沒有 route mock、fake record、synthetic stream 或 fallback 證據。測試：<code>web/tests/e2e/knowledge-center-exam.e2e.ts</code>。</div>
+  </header>
+
+  <section>
+    <h2>1. 實際驗收案例</h2>
+    <div class="meta"><div class="meta-grid">
+      <div><span class="label">實際輸入 PDF</span><span class="value">02-115國中社會2上歷史平時測驗卷-L02-商周至隋唐時期的民族與文化-PDF教用(115f318346).pdf</span></div>
+      <div><span class="label">Frontend / Backend</span><span class="value"><code>http://localhost:3782</code> / <code>http://localhost:8001</code></span></div>
+      <div><span class="label">Extraction LLM / parser / policy</span><span class="value"><code>openai-codex/gpt-5.5</code> / <code>pymupdf4llm</code> / <code>keep_partial</code></span></div>
+      <div><span class="label">Paper ID（opaque）</span><span class="value"><code>1e7d7343-1f4d-4c1f-a05e-650c6df0a235</code></span></div>
+      <div><span class="label">Extraction 結果</span><span class="value">29 questions；真實 retry 後可用</span></div>
+      <div><span class="label">Exam snapshot ID</span><span class="value"><code>12</code>；first question emitted 前建立</span></div>
+      <div><span class="label">Exam session / turn</span><span class="value"><code>unified_1785275149125_e4ef0370</code> / <code>turn_1785275149163_46ebbf6b80</code></span></div>
+      <div><span class="label">Question Bank entry</span><span class="value">ID <code>262</code>；AI Judge 與 source provenance 均保存</span></div>
+      <div><span class="label">完成時間</span><span class="value">2026-07-28 21:45 UTC</span></div>
+    </div></div>
+    <p>Archive library 在 Exam 建立後被刪除；live paper API 變成 <code>404</code>，但 snapshot、圖片 attachment、Question Bank row、作答與 AI Judge 仍可讀取。測試也確認 move 前後 <code>paper_id</code> 不變。</p>
+    <table>
+      <thead><tr><th>保存欄位</th><th>實際值</th><th>用途</th></tr></thead>
+      <tbody>
+        <tr><td><code>paper_library_id</code> / name</td><td><code>b5cd0bb2-ac90-434d-ae6b-fed69bfc4224</code> / <code>Archive ms56ls6k</code></td><td>library provenance snapshot，不依賴 live library。</td></tr>
+        <tr><td><code>paper_id</code> / display name</td><td><code>1e7d7343-1f4d-4c1f-a05e-650c6df0a235</code> / <code>Renamed 02-…pdf</code></td><td>保存搬移／重新命名後的 source identity。</td></tr>
+        <tr><td><code>source_question_number</code></td><td><code>一、1-reviewed</code></td><td>Review 修正後的原卷題號。</td></tr>
+        <tr><td><code>source_snapshot_id</code></td><td><code>12</code></td><td>Question Bank 指向 immutable Exam snapshot。</td></tr>
+        <tr><td><code>ai_judgment</code></td><td>非空實際 LLM judgment</td><td>刪除 live library 後仍能重新顯示。</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section>
+    <h2>2. 前置條件與真實執行命令</h2>
+    <ul>
+      <li>專案根目錄：<code>/home/timmypai/apps/DeepTutor</code>。</li>
+      <li>服務：backend <code>8001</code>、frontend <code>3782</code>；Extraction LLM credentials／網路可用。</li>
+      <li>瀏覽器必須使用指定動態函式庫路徑；不以 mock 或 fake 取代 Chromium。</li>
+    </ul>
+    <pre><code>cd /home/timmypai/apps/DeepTutor
+BACKEND_PORT=8001 FRONTEND_PORT=3782 PORT=3782 .venv/bin/deeptutor start
+
+cd web
+PAPER_REAL_E2E=1 \
+PAPER_E2E_PDF='/home/timmypai/apps/DeepTutor/data/knowledge_bases/歷史/raw/02-115國中社會2上歷史平時測驗卷-L02-商周至隋唐時期的民族與文化-PDF教用(115f318346).pdf' \
+WEB_BASE_URL=http://localhost:3782 \
+LD_LIBRARY_PATH=/tmp/playwright-libs/usr/lib/x86_64-linux-gnu:$LD_LIBRARY_PATH \
+npx playwright test tests/e2e/knowledge-center-exam.e2e.ts --project=ui-e2e --workers=1</code></pre>
+    <p>Python regression 使用指定形式：</p>
+    <pre><code>PYTHONPATH=. .venv/bin/python -m pytest -c /dev/null ...</code></pre>
+  </section>
+
+  <section>
+    <h2>3. 完整操作步驟與 screenshots</h2>
+    <ol class="steps">
+      <li><h3>進入 Knowledge Center 的 Paper Libraries</h3><p class="operator-action">操作：開啟 <code>/space/questions</code>，切換 <code>Paper Libraries</code> tab。</p><p class="expected">預期：看到 private library 清單與建立 library 表單；不建立預設 library。</p><figure class="step-shot"><img src="assets/knowledge-center-exam-e2e/01-knowledge-center-paper-libraries.png" alt="Knowledge Center Paper Libraries tab" loading="lazy"><figcaption>Screenshot 01：Knowledge Center → Paper Libraries。</figcaption></figure></li>
+      <li><h3>建立 library 並保存 extraction 設定</h3><p class="operator-action">操作：建立本案例 library，選擇實際 LLM option、<code>pymupdf4llm</code> parser，按 <code>Save settings</code>。</p><p class="expected">預期：API 保存 LLM profile/model、parser engine 與 <code>keep_partial</code>；LLM 為必要設定。</p><figure class="step-shot"><img src="assets/knowledge-center-exam-e2e/02-library-extraction-settings.png" alt="Paper Library extraction settings" loading="lazy"><figcaption>Screenshot 02：真實 extraction LLM、parser 與 failure policy 設定。</figcaption></figure></li>
+      <li><h3>選擇並上傳真實 PDF</h3><p class="operator-action">操作：選擇上述真實 PDF，確認檔名後按 <code>Upload PDFs</code>。</p><p class="expected">預期：Paper record 進入 <code>pending</code>／<code>processing</code>，以背景工作執行真實 parser 與 LLM；不使用 fallback。</p><figure class="step-shot"><img src="assets/knowledge-center-exam-e2e/03-real-pdf-selected.png" alt="Real PDF selected" loading="lazy"><figcaption>Screenshot 03：真實 PDF 已選取。</figcaption></figure><figure class="step-shot"><img src="assets/knowledge-center-exam-e2e/04-upload-submitted.png" alt="Real PDF upload submitted" loading="lazy"><figcaption>Screenshot 04：上傳已送出，Paper record 已建立。</figcaption></figure></li>
+      <li><h3>等待背景擷取完成並執行 retry</h3><p class="operator-action">操作：輪詢 status；terminal status 為 <code>ready</code>、<code>ready_with_warnings</code> 或 <code>partial</code> 後，由 UI 按 <code>Retry</code> 並再次等待 terminal status。</p><p class="expected">預期：兩次都由實際 extraction pipeline 完成，題目數大於 1；retry 不建立另一個 paper identity。</p><figure class="step-shot"><img src="assets/knowledge-center-exam-e2e/05-paper-ready-after-llm-extraction.png" alt="Paper ready after real extraction" loading="lazy"><figcaption>Screenshot 05：真實 LLM extraction 後可用。</figcaption></figure><figure class="step-shot"><img src="assets/knowledge-center-exam-e2e/06-retry-complete.png" alt="Paper retry complete" loading="lazy"><figcaption>Screenshot 06：真實 retry 完成。</figcaption></figure></li>
+      <li><h3>Paper Review 修正題號／答案並解除圖片關聯</h3><p class="operator-action">操作：rename paper；進入 <code>Review</code>，將第一個 image question 的題號改成 <code>一、1-reviewed</code>、保存 reference answer，並按圖片上的 <code>Remove</code>。</p><p class="expected">預期：PATCH 只更新 question metadata；PDF 不被修改，圖片 asset 不被當成 PDF 刪除；本案例保留另一題圖片供 Exam snapshot 驗證。</p><figure class="step-shot"><img src="assets/knowledge-center-exam-e2e/07-paper-review-corrected-and-image-unlinked.png" alt="Paper Review correction and image unlink" loading="lazy"><figcaption>Screenshot 07：Review 修正與圖片解除關聯。</figcaption></figure></li>
+      <li><h3>搬移到另一個 Paper Library</h3><p class="operator-action">操作：建立 archive library，在原 library 的 paper row 使用 <code>Move</code> 選擇 archive。</p><p class="expected">預期：目的 library 出現同一個 <code>paper_id</code>，原 library 不再列出；hash conflict 與跨 library scope 由 API 保護。</p><figure class="step-shot"><img src="assets/knowledge-center-exam-e2e/08-paper-moved-to-archive-library.png" alt="Paper moved to archive library" loading="lazy"><figcaption>Screenshot 08：paper 已搬移，identity 保持不變。</figcaption></figure></li>
+      <li><h3>Exam 的 library → paper picker</h3><p class="operator-action">操作：從 moved paper 的 Review 按 <code>Start Exam</code>。</p><p class="expected">預期：新 Chat session 顯示 <code>Exam settings</code>；Paper Library 與 Exam paper 都選中，沒有一般 Knowledge selector、Count、Difficulty 或 Type。前端送出的 source 只有 opaque paper ID。</p><figure class="step-shot"><img src="assets/knowledge-center-exam-e2e/09-exam-library-to-paper-picker.png" alt="Exam library to paper picker" loading="lazy"><figcaption>Screenshot 09：Exam library-to-paper picker。</figcaption></figure></li>
+      <li><h3>透過真實 WebSocket 開始 Exam</h3><p class="operator-action">操作：按 <code>Confirm</code>，輸入啟動文字並按 <code>Send</code>。</p><p class="expected">預期：第一題以原始順序出現；source card 顯示 <code>Exam</code>、renamed paper 與 source question number。backend 先建立 snapshot，再發出第一題。</p><figure class="step-shot"><img src="assets/knowledge-center-exam-e2e/10-exam-first-question-snapshot-source-card.png" alt="Exam first question with snapshot source card" loading="lazy"><figcaption>Screenshot 10：Exam 第一題與 snapshot-backed source card。</figcaption></figure></li>
+      <li><h3>逐題作答並保存 Question Bank provenance</h3><p class="operator-action">操作：選取第一題答案，按 <code>Check Answer</code>。</p><p class="expected">預期：逐題 upsert 保存 library ID/name、paper ID/name、source question number、source type 與 snapshot ID；本案例沒有 score、percentage 或 completion result。</p><div class="gallery"><figure><img src="assets/knowledge-center-exam-e2e/11-exam-answer-selected.png" alt="Exam answer selected" loading="lazy"><figcaption>Screenshot 11：答案已選取。</figcaption></figure><figure><img src="assets/knowledge-center-exam-e2e/12-exam-answer-saved-question-bank-provenance.png" alt="Question Bank provenance saved" loading="lazy"><figcaption>Screenshot 12：Question Bank provenance 已保存。</figcaption></figure></div></li>
+      <li><h3>執行真實 AI Judge</h3><p class="operator-action">操作：按 <code>AI Judge</code>，等待 real LLM streaming 完成。</p><p class="expected">預期：AI judgment 非空並 PATCH 到相同 Question Bank entry，供 reload 與 library delete 後讀取。</p><figure class="step-shot"><img src="assets/knowledge-center-exam-e2e/13-exam-ai-judge-result.png" alt="Exam AI Judge result" loading="lazy"><figcaption>Screenshot 13：真實 AI Judge 結果。</figcaption></figure></li>
+      <li><h3>確認 snapshot 圖片與 Next／Previous</h3><p class="operator-action">操作：按 <code>Next</code> 再按 <code>Previous</code>；切換到未解除關聯的 image question。</p><p class="expected">預期：題目保持原始順序，snapshot attachment URL 可正常載入，不依賴 live paper path。</p><figure class="step-shot"><img src="assets/knowledge-center-exam-e2e/14-exam-snapshot-image-before-delete.png" alt="Exam snapshot image before library deletion" loading="lazy"><figcaption>Screenshot 14：Exam snapshot image。</figcaption></figure></li>
+      <li><h3>刪除 library 後重新讀取歷史</h3><p class="operator-action">操作：刪除 archive Paper Library；確認 live paper 與 library API 為 <code>404</code>，reload 同一 Exam session。</p><p class="expected">預期：Exam 題目、圖片、作答、Question Bank provenance 與 AI Judgment 仍可讀取；沒有 hard foreign key 阻止刪除，也沒有 cascade 到歷史 attachment／snapshot。</p><figure class="step-shot"><img src="assets/knowledge-center-exam-e2e/15-history-readable-after-library-delete.png" alt="Historical Exam remains readable after Paper Library deletion" loading="lazy"><figcaption>Screenshot 15：刪除 live library 後，歷史 Exam 仍可讀取。</figcaption></figure></li>
+    </ol>
+  </section>
+
+  <section>
+    <h2>4. 驗收 checklist</h2>
+    <ul class="checklist">
+      <li>真實 PDF、backend、frontend、WebSocket 與網路 LLM；僅 <code>PAPER_REAL_E2E=1</code> 執行。</li>
+      <li>Library 建立、LLM/parser/failure policy 設定、upload、background polling、Review、retry 均完成。</li>
+      <li>題號／答案修正、圖片解除關聯、rename、move、library cascade delete 均完成。</li>
+      <li>Exam picker 使用 library → paper；request 驗證 opaque paper ID，不含 filesystem path 或 <code>source_path</code>。</li>
+      <li>Snapshot 在第一題前建立；保存原始順序、題目欄位、library/paper provenance 與必要圖片。</li>
+      <li>刪除 live Paper Library 後，歷史 snapshot、圖片、作答、Question Bank 與 AI Judge 均可讀取。</li>
+      <li>本功能沒有計分、points、percentage、completion result、statistics 或 ranking。</li>
+    </ul>
+  </section>
+
+  <section>
+    <h2>5. 證據完整性檢查</h2>
+    <p>本 SOP 的 15 個 image reference 均指向 <code>docs/sop/assets/knowledge-center-exam-e2e/</code> 下實際 Playwright screenshots；執行了 broken-image 檢查，全部存在且可讀。若要重新產生，保留相同相對路徑並以真實 E2E 測試重新截圖。</p>
+    <div class="note"><strong>重要：</strong>不要以 fixture、mock response 或 synthetic question 取代上述 release flow。若沒有 real LLM credentials，保持測試 skip（未設定 <code>PAPER_REAL_E2E=1</code>），不要宣稱 E2E 通過。</div>
+  </section>
+
+  <p class="footer">產出：<code>docs/sop/knowledge-center-exam-e2e-sop.html</code> · screenshots：<code>docs/sop/assets/knowledge-center-exam-e2e/</code> · 真實測試：<code>web/tests/e2e/knowledge-center-exam.e2e.ts</code></p>
+</main>
+</body>
+</html>

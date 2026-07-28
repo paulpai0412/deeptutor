@@ -8,6 +8,7 @@ import { useKnowledgeBases } from "@/hooks/useKnowledgeBases";
 import { updateRagProviderMode } from "@/lib/knowledge-api";
 import KnowledgeBaseDetail from "./KnowledgeBaseDetail";
 import KnowledgeHome from "./KnowledgeHome";
+import PaperLibrariesHome from "./PaperLibrariesHome";
 import EngineDetail from "./EngineDetail";
 import CreateKbModal from "./CreateKbModal";
 import PageIndexSettingsModal from "./PageIndexSettingsModal";
@@ -18,6 +19,7 @@ export default function KnowledgePage() {
   const searchParams = useSearchParams();
   const initialKb = searchParams.get("kb");
   const initialEngine = searchParams.get("engine");
+  const initialResourceTab = searchParams.get("tab") === "papers" ? "papers" : "bases";
 
   const {
     kbs: allKbs,
@@ -61,6 +63,9 @@ export default function KnowledgePage() {
     source?: string;
   } | null>(null);
   const [pipelineOpen, setPipelineOpen] = useState(false);
+  const [resourceTab, setResourceTab] = useState<"bases" | "papers">(
+    initialResourceTab,
+  );
 
   const openCreate = useCallback(() => {
     setCreatePreset(null);
@@ -78,11 +83,13 @@ export default function KnowledgePage() {
   );
 
   const openKb = useCallback((name: string) => {
+    setResourceTab("bases");
     setExplicitSelection(name);
     setView("kb");
   }, []);
 
   const openEngine = useCallback((id: string) => {
+    setResourceTab("bases");
     setSelectedEngineId(id);
     setView("engine");
   }, []);
@@ -111,13 +118,15 @@ export default function KnowledgePage() {
 
   // Keep ?kb / ?engine in sync with the effective selection so deep links work.
   // The Overview view carries neither, so reloading the console stays on it.
-  const urlKb = view === "kb" ? (selectedKbName ?? null) : null;
-  const urlEngine = view === "engine" ? (selectedProvider?.id ?? null) : null;
+  const urlKb = resourceTab === "bases" && view === "kb" ? (selectedKbName ?? null) : null;
+  const urlEngine = resourceTab === "bases" && view === "engine" ? (selectedProvider?.id ?? null) : null;
+  const urlTab = resourceTab === "papers" ? "papers" : null;
   useEffect(() => {
     if (typeof window === "undefined") return;
     if (
       searchParams.get("kb") === urlKb &&
-      searchParams.get("engine") === urlEngine
+      searchParams.get("engine") === urlEngine &&
+      searchParams.get("tab") === urlTab
     ) {
       return;
     }
@@ -126,9 +135,11 @@ export default function KnowledgePage() {
     else params.delete("kb");
     if (urlEngine) params.set("engine", urlEngine);
     else params.delete("engine");
+    if (urlTab) params.set("tab", urlTab);
+    else params.delete("tab");
     const search = params.toString();
     router.replace(search ? `?${search}` : "?", { scroll: false });
-  }, [router, searchParams, urlKb, urlEngine]);
+  }, [router, searchParams, urlKb, urlEngine, urlTab]);
 
   const handleCreate = useCallback(
     async (params: { name: string; provider: string; files: File[] }) => {
@@ -220,6 +231,34 @@ export default function KnowledgePage() {
 
   return (
     <div className="flex h-full flex-col bg-[var(--background)]">
+      <div
+        role="tablist"
+        aria-label={t("Knowledge Center resources")}
+        className="flex shrink-0 items-center gap-1 border-b border-[var(--border)] px-6 pt-3"
+      >
+        {([
+          ["bases", "Knowledge Bases"],
+          ["papers", "Paper Libraries"],
+        ] as const).map(([tab, label]) => (
+          <button
+            key={tab}
+            type="button"
+            role="tab"
+            aria-selected={resourceTab === tab}
+            onClick={() => {
+              setResourceTab(tab);
+              setView("home");
+            }}
+            className={`border-b-2 px-3 py-2 text-[12px] font-medium transition-colors ${
+              resourceTab === tab
+                ? "border-[var(--primary)] text-[var(--foreground)]"
+                : "border-transparent text-[var(--muted-foreground)] hover:text-[var(--foreground)]"
+            }`}
+          >
+            {t(label)}
+          </button>
+        ))}
+      </div>
       {error && (
         <div className="flex items-center justify-between gap-3 border-b border-red-200 bg-red-50 px-4 py-2 text-[12.5px] text-red-700 dark:border-red-900 dark:bg-red-950/30 dark:text-red-300">
           <span className="truncate">{error}</span>
@@ -248,7 +287,9 @@ export default function KnowledgePage() {
         </div>
       ) : (
         <div className="flex min-h-0 flex-1">
-          {view === "home" ? (
+          {resourceTab === "papers" ? (
+            <PaperLibrariesHome />
+          ) : view === "home" ? (
             <KnowledgeHome
               kbs={kbs}
               providers={providers}

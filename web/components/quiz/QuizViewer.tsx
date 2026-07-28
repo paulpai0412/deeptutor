@@ -77,6 +77,8 @@ interface QuizViewerProps {
    */
   turnId?: string | null;
   language?: string;
+  /** Render source-paper copy as an Exam turn rather than ordinary Quiz. */
+  examMode?: boolean;
 }
 
 type AnswerImage = {
@@ -150,11 +152,30 @@ function isMultipleChoice(question: QuizQuestion): boolean {
  * string match.
  */
 function isAutoGradable(question: QuizQuestion): boolean {
+  // Multi-select and image-dependent questions are deliberately manual: a
+  // single selected value cannot conservatively represent their grading.
   return (
-    isMultipleChoice(question) ||
-    isConceptQuizQuestion(question.question_type) ||
-    isFillInBlankQuizQuestion(question.question_type)
+    !question.is_multi_select &&
+    !!question.correct_answer.trim() &&
+    !(question.source_images && question.source_images.length > 0) &&
+    !(
+      question.source_image_attachments &&
+      question.source_image_attachments.length > 0
+    ) &&
+    (isMultipleChoice(question) ||
+      isConceptQuizQuestion(question.question_type) ||
+      isFillInBlankQuizQuestion(question.question_type))
   );
+}
+
+function normalizeFillAnswer(value: string): string {
+  const punctuation = /^[.,!?;:，。！？；：、"'「」『』（）()【】[\]…]+|[.,!?;:，。！？；：、"'「」『』（）()【】[\]…]+$/gu;
+  return value
+    .normalize("NFKC")
+    .trim()
+    .replace(/\s+/gu, " ")
+    .replace(punctuation, "")
+    .toLocaleLowerCase();
 }
 
 function getUserAnswer(question: QuizQuestion, answer: AnswerState): string {
@@ -185,7 +206,10 @@ function isAnswerCorrect(question: QuizQuestion, answer: AnswerState): boolean {
     const correctTF = resolveConceptAnswer(correct);
     return userAnswer.toLowerCase() === correctTF;
   }
-  return userAnswer.toLowerCase() === correct.toLowerCase();
+  if (isFillInBlankQuizQuestion(question.question_type)) {
+    return normalizeFillAnswer(userAnswer) === normalizeFillAnswer(correct);
+  }
+  return userAnswer.toLocaleLowerCase() === correct.toLocaleLowerCase();
 }
 
 export default function QuizViewer({
@@ -193,6 +217,7 @@ export default function QuizViewer({
   sessionId,
   turnId,
   language = "en",
+  examMode = false,
 }: QuizViewerProps) {
   const { t } = useTranslation();
   const followupController = useQuizFollowupController();
@@ -219,6 +244,7 @@ export default function QuizViewer({
   const [categoryBusy, setCategoryBusy] = useState(false);
 
   const [judgments, setJudgments] = useState<Record<number, JudgmentState>>({});
+  const judgeTextsRef = useRef<Map<number, string>>(new Map());
   const [answerViews, setAnswerViews] = useState<Record<number, AnswerView>>(
     {},
   );
@@ -417,7 +443,7 @@ export default function QuizViewer({
   const currentUserAnswer = q ? getUserAnswer(q, ans) : "";
 
   const isCorrect = useMemo(() => {
-    if (!q || !ans.submitted) return null;
+    if (!q || !ans.submitted || !isAutoGradable(q)) return null;
     return isAnswerCorrect(q, ans);
   }, [ans, q]);
 
@@ -436,7 +462,22 @@ export default function QuizViewer({
             correct_answer: question.correct_answer,
             explanation: question.explanation ?? "",
             difficulty: question.difficulty ?? "",
-            is_correct: isAnswerCorrect(question, answer),
+            source_type: question.source_type,
+            paper_library_id: question.paper_library_id,
+            paper_library_name: question.paper_library_name,
+            paper_id: question.paper_id,
+            paper_display_name: question.paper_display_name,
+            source_question_number: question.source_question_number,
+            source_snapshot_id: question.snapshot_id,
+            grading_method: isAutoGradable(question) ? "deterministic" : "manual",
+            is_multi_select: question.is_multi_select,
+            image_dependent: Boolean(
+              question.source_images?.length ||
+                question.source_image_attachments?.length,
+            ),
+            is_correct: isAutoGradable(question)
+              ? isAnswerCorrect(question, answer)
+              : null,
           },
         ];
       }),
@@ -444,6 +485,9 @@ export default function QuizViewer({
   );
 
   useEffect(() => {
+    // Exam intentionally does not create the existing Quiz Performance
+    // summary; this feature has no score/completion statistics.
+    if (examMode) return;
     // Reporting requires a turn identity: an empty ``turn_id`` write lands
     // in the shared legacy namespace, where the next quiz's identically
     // numbered questions would pick it up as their own answers (#677).
@@ -466,6 +510,7 @@ export default function QuizViewer({
       });
   }, [
     completedCount,
+    examMode,
     questions,
     refreshEntryId,
     sessionId,
@@ -480,7 +525,7 @@ export default function QuizViewer({
       answer: AnswerState,
       questionIndex: number,
     ) => {
-      if (!sessionId || !turnId) return;
+      if (!sessionId || !turnId) return null;
       const key = getQuestionKey(question, questionIndex);
       try {
         const imagePayload = answer.images.map((image) => ({
@@ -502,7 +547,22 @@ export default function QuizViewer({
           difficulty: question.difficulty ?? "",
           user_answer: getUserAnswer(question, answer),
           user_answer_images: imagePayload,
-          is_correct: isAnswerCorrect(question, answer),
+          is_correct: isAutoGradable(question)
+            ? isAnswerCorrect(question, answer)
+            : null,
+          source_type: question.source_type,
+          paper_library_id: question.paper_library_id,
+          paper_library_name: question.paper_library_name,
+          paper_id: question.paper_id,
+          paper_display_name: question.paper_display_name,
+          source_question_number: question.source_question_number,
+          source_snapshot_id: question.snapshot_id,
+          grading_method: isAutoGradable(question) ? "deterministic" : "manual",
+          is_multi_select: question.is_multi_select,
+          image_dependent: Boolean(
+            question.source_images?.length ||
+              question.source_image_attachments?.length,
+          ),
         });
         setEntryIds((prev) => ({ ...prev, [key]: entry.id }));
         setBookmarked((prev) => ({ ...prev, [key]: entry.bookmarked }));
@@ -532,8 +592,9 @@ export default function QuizViewer({
             };
           });
         }
+        return entry;
       } catch {
-        /* best-effort */
+        return null;
       }
     },
     [sessionId, turnId],
@@ -638,13 +699,18 @@ export default function QuizViewer({
       judgeHandlesRef.current.delete(idx);
     }
 
+    judgeTextsRef.current.set(idx, "");
     setJudgments((prev) => ({
       ...prev,
       [idx]: { text: "", isStreaming: true, error: null },
     }));
     setAnswerViews((prev) => ({ ...prev, [idx]: "judgment" }));
 
-    const judgeLanguage: "zh" | "en" = language === "zh" ? "zh" : "en";
+    const judgeLanguage: "zh" | "zh-TW" | "en" = language.startsWith("zh-TW")
+      ? "zh-TW"
+      : language.startsWith("zh")
+        ? "zh"
+        : "en";
 
     const handle = startQuizJudge(
       {
@@ -660,23 +726,39 @@ export default function QuizViewer({
           filename: image.filename,
           mime_type: image.mime,
         })),
+        question_images:
+          q.source_image_attachments && q.source_image_attachments.length > 0
+            ? q.source_image_attachments.map((image) => ({
+                base64: null,
+                url: image.url ?? null,
+                filename: image.filename ?? "question.png",
+                mime_type: image.mime_type ?? "image/png",
+              }))
+            : (q.source_images ?? []).map((url) => ({
+                base64: null,
+                url,
+                filename: "question.png",
+                mime_type: "image/png",
+              })),
         language: judgeLanguage,
       },
       {
         onChunk: (chunk) => {
+          const text = (judgeTextsRef.current.get(idx) ?? "") + chunk;
+          judgeTextsRef.current.set(idx, text);
           setJudgments((prev) => {
             const current = prev[idx] ?? EMPTY_JUDGMENT;
             return {
               ...prev,
-              [idx]: { ...current, text: current.text + chunk },
+              [idx]: { ...current, text },
             };
           });
         },
-        onDone: () => {
-          let finalText = "";
+        onDone: (streamedText) => {
+          const finalText =
+            streamedText || judgeTextsRef.current.get(idx) || "";
           setJudgments((prev) => {
             const current = prev[idx] ?? EMPTY_JUDGMENT;
-            finalText = current.text;
             return {
               ...prev,
               [idx]: { ...current, isStreaming: false },
@@ -688,10 +770,25 @@ export default function QuizViewer({
           // means the next reload won't have the judgment cached.
           const key = q ? getQuestionKey(q, idx) : "";
           const eId = key ? entryIds[key] : undefined;
-          if (eId && finalText.trim().length > 0) {
-            void updateNotebookEntry(eId, { ai_judgment: finalText }).catch(
-              () => {},
-            );
+          if (finalText.trim().length > 0) {
+            if (eId) {
+              void updateNotebookEntry(eId, { ai_judgment: finalText }).catch(
+                () => {},
+              );
+            } else if (q) {
+              // Submission and judge can complete in either order. If the
+              // first upsert has not returned its row id yet, create/update
+              // the same Question Bank entry before attaching the judgment.
+              void upsertSingleQuestion(q, answers[idx] ?? EMPTY_ANSWER, idx).then(
+                (createdEntry) => {
+                  if (createdEntry?.id) {
+                    void updateNotebookEntry(createdEntry.id, {
+                      ai_judgment: finalText,
+                    }).catch(() => {});
+                  }
+                },
+              );
+            }
           }
         },
         onError: (message) => {
@@ -707,7 +804,7 @@ export default function QuizViewer({
       },
     );
     judgeHandlesRef.current.set(idx, handle);
-  }, [answers, entryIds, idx, language, q]);
+  }, [answers, entryIds, idx, language, q, upsertSingleQuestion]);
 
   const handleToggleAnswerView = useCallback(
     (view: AnswerView) => {
@@ -897,6 +994,15 @@ export default function QuizViewer({
             <span className="rounded-md bg-[var(--muted)] px-1.5 py-0.5 text-[10px] font-medium text-[var(--muted-foreground)]">
               {q.question_type}
             </span>
+            {q.source_type === "original_paper" && (
+              <span className="max-w-[320px] truncate rounded-md bg-blue-100 px-1.5 py-0.5 text-[10px] font-medium text-blue-700 dark:bg-blue-950/30 dark:text-blue-300">
+                {examMode ? t("Exam") : t("Original Paper")}
+                {q.paper_display_name ? ` · ${q.paper_display_name}` : ""}
+                {q.source_question_number
+                  ? ` · Q${q.source_question_number}`
+                  : ""}
+              </span>
+            )}
           </div>
 
           {ans.submitted && (
@@ -999,15 +1105,42 @@ export default function QuizViewer({
           />
         </div>
 
+        {q.source_images && q.source_images.length > 0 && (
+          <div className="mb-3 grid gap-2 sm:grid-cols-2">
+            {q.source_images.map((image, imageIndex) => {
+              const src = resolveImageSrc(image);
+              if (!src) return null;
+              return (
+                <img
+                  key={`${image}-${imageIndex}`}
+                  src={src}
+                  alt={`${t("Original Paper image")} ${imageIndex + 1}`}
+                  className="max-h-72 w-full rounded-md border border-[var(--border)] bg-[var(--background)] object-contain"
+                />
+              );
+            })}
+          </div>
+        )}
+
         {isChoice ? (
           <div className="space-y-1.5">
             {Object.entries(q.options!).map(([key, text]) => {
-              const isSelected = ans.selected === key;
-              const correctKey = q.correct_answer
-                .trim()
-                .charAt(0)
-                .toUpperCase();
-              const isCorrectOption = key.toUpperCase() === correctKey;
+              const selectedKeys = new Set(
+                (ans.selected ?? "")
+                  .split(",")
+                  .map((value) => value.trim().toUpperCase())
+                  .filter(Boolean),
+              );
+              const isSelected = q.is_multi_select
+                ? selectedKeys.has(key.toUpperCase())
+                : ans.selected === key;
+              const correctKeys = new Set(
+                q.correct_answer
+                  .split(/[,\s]+/u)
+                  .map((value) => value.trim().toUpperCase())
+                  .filter(Boolean),
+              );
+              const isCorrectOption = correctKeys.has(key.toUpperCase());
               const showFeedback = ans.submitted;
 
               let optionClass =
@@ -1028,7 +1161,19 @@ export default function QuizViewer({
                 <button
                   key={key}
                   disabled={ans.submitted}
-                  onClick={() => updateAnswer({ selected: key })}
+                  onClick={() => {
+                    if (!q.is_multi_select) {
+                      updateAnswer({ selected: key });
+                      return;
+                    }
+                    const next = new Set(selectedKeys);
+                    const normalizedKey = key.toUpperCase();
+                    if (next.has(normalizedKey)) next.delete(normalizedKey);
+                    else next.add(normalizedKey);
+                    updateAnswer({
+                      selected: next.size > 0 ? Array.from(next).join(",") : null,
+                    });
+                  }}
                   className={`flex w-full items-start gap-2.5 rounded-lg border px-3 py-2 text-left text-[13px] transition-all ${optionClass}`}
                 >
                   <span

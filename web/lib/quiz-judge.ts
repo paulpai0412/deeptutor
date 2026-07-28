@@ -18,7 +18,9 @@ export interface QuizJudgeRequest {
   user_answer: string;
   /** Multi-image list — backend builds a multimodal user message from this. */
   user_answer_images: QuizJudgeImage[];
-  language: "zh" | "en";
+  /** Persisted question images for image-dependent questions. */
+  question_images?: QuizJudgeImage[];
+  language: "zh" | "zh-TW" | "en";
 }
 
 export interface QuizJudgeHandle {
@@ -46,7 +48,10 @@ export function startQuizJudge(
     if (kind === "done") {
       handlers.onDone(buffer);
     } else {
-      handlers.onError(message ?? "AI judge failed.");
+      handlers.onError(
+        message ??
+          (payload.language === "zh-TW" ? "AI 評判失敗。" : "AI judge failed."),
+      );
     }
     try {
       ws.close();
@@ -89,12 +94,22 @@ export function startQuizJudge(
   };
 
   ws.onerror = () => {
-    finalize("error", "AI judge connection error.");
+    finalize(
+      "error",
+      payload.language === "zh-TW"
+        ? "AI 評判連線錯誤。"
+        : "AI judge connection error.",
+    );
   };
 
   ws.onclose = () => {
     if (!finished) {
-      finalize("error", "AI judge connection closed unexpectedly.");
+      finalize(
+        "error",
+        payload.language === "zh-TW"
+          ? "AI 評判連線意外中斷。"
+          : "AI judge connection closed unexpectedly.",
+      );
     }
   };
 

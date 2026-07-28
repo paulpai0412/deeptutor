@@ -1,7 +1,12 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import type { TFunction } from "i18next";
 
-import { kbCanReindex, type KnowledgeBase } from "../lib/knowledge-helpers";
+import {
+  kbCanReindex,
+  validateFiles,
+  type KnowledgeBase,
+} from "../lib/knowledge-helpers";
 
 function kb(overrides: Partial<KnowledgeBase>): KnowledgeBase {
   return {
@@ -48,5 +53,34 @@ test("kbCanReindex preserves mismatch and needs-reindex behavior", () => {
   assert.equal(
     kbCanReindex(kb({ statistics: { raw_documents: 1, active_match: true } })),
     false,
+  );
+});
+
+test("paper upload validation keeps only PDF files within the size limit", () => {
+  const t = ((key: string) => key) as TFunction;
+  const selection = validateFiles(
+    [
+      new File(["pdf"], "practice.pdf"),
+      new File(["text"], "notes.txt"),
+      new File(["too-large"], "large.pdf"),
+    ],
+    {
+      extensions: [".pdf"],
+      accept: ".pdf,application/pdf",
+      max_file_size_bytes: 5,
+    },
+    t,
+  );
+
+  assert.deepEqual(
+    selection.validFiles.map((file) => file.name),
+    ["practice.pdf"],
+  );
+  assert.deepEqual(
+    selection.invalidFiles.map((item) => [item.file.name, item.error]),
+    [
+      ["notes.txt", "Unsupported file type"],
+      ["large.pdf", "This file exceeds the maximum size of {{size}}."],
+    ],
   );
 });

@@ -26,6 +26,8 @@ deeptutor/services/rag/eg_only_for_analysis/
 *.synctex.gz
 *.pdf
 !demo/*.pdf
+# Keep deterministic parser fixtures versioned.
+!tests/fixtures/paper_library/*.pdf
 
 # ============================================
 # Python Related

@@ -15,10 +15,12 @@ import {
   MessageSquare,
   Pencil,
   Plus,
+  Sparkles,
   Trash2,
   X,
 } from "lucide-react";
 import SpaceSectionHeader from "@/components/space/SpaceSectionHeader";
+import PaperLibraryPanel from "@/components/space/PaperLibraryPanel";
 import {
   createCategory,
   deleteCategory,
@@ -31,6 +33,7 @@ import {
   type NotebookCategory,
   type NotebookEntry,
 } from "@/lib/notebook-api";
+import { apiUrl } from "@/lib/api";
 
 const MarkdownRenderer = dynamic(
   () => import("@/components/common/MarkdownRenderer"),
@@ -47,6 +50,7 @@ const FILTERS: { mode: FilterMode; label: string }[] = [
 
 export default function QuestionBankSection() {
   const { t } = useTranslation();
+  const [activeTab, setActiveTab] = useState<"saved" | "papers">("saved");
   const [items, setItems] = useState<NotebookEntry[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -202,6 +206,34 @@ export default function QuestionBankSection() {
         }
       />
 
+      <div
+        role="tablist"
+        aria-label={t("Question Bank sections")}
+        className="flex items-center gap-1 border-b border-[var(--border)]"
+      >
+        {([
+          ["saved", "Saved Questions"],
+          ["papers", "Paper Library"],
+        ] as const).map(([tab, label]) => (
+          <button
+            key={tab}
+            type="button"
+            role="tab"
+            aria-selected={activeTab === tab}
+            onClick={() => setActiveTab(tab)}
+            className={`border-b-2 px-3 py-2 text-[12px] font-medium transition-colors ${
+              activeTab === tab
+                ? "border-[var(--primary)] text-[var(--foreground)]"
+                : "border-transparent text-[var(--muted-foreground)] hover:text-[var(--foreground)]"
+            }`}
+          >
+            {t(label)}
+          </button>
+        ))}
+      </div>
+
+      {activeTab === "papers" ? <PaperLibraryPanel /> : (
+        <div className="space-y-4">
       {/* Category manager */}
       <div
         className={`overflow-hidden rounded-xl border transition-colors ${
@@ -395,6 +427,7 @@ export default function QuestionBankSection() {
         <ul className="flex flex-col gap-3">
           {items.map((item) => {
             const disabled = pendingId === item.id;
+            const answerImages = item.user_answer_images ?? [];
             return (
               <li
                 key={item.id}
@@ -425,13 +458,30 @@ export default function QuestionBankSection() {
                       )}
                       <span
                         className={`rounded-md px-1.5 py-0.5 text-[10px] font-semibold ${
-                          item.is_correct
-                            ? "bg-green-100 text-green-700 dark:bg-green-950/30 dark:text-green-400"
-                            : "bg-red-100 text-red-700 dark:bg-red-950/30 dark:text-red-400"
+                          item.is_correct === null
+                            ? "bg-amber-100 text-amber-700 dark:bg-amber-950/30 dark:text-amber-300"
+                            : item.is_correct
+                              ? "bg-green-100 text-green-700 dark:bg-green-950/30 dark:text-green-400"
+                              : "bg-red-100 text-red-700 dark:bg-red-950/30 dark:text-red-400"
                         }`}
                       >
-                        {item.is_correct ? t("Correct") : t("Incorrect")}
+                        {item.is_correct === null
+                          ? t("Manual review")
+                          : item.is_correct
+                            ? t("Correct")
+                            : t("Incorrect")}
                       </span>
+                      {item.source_type === "original_paper" && (
+                        <span className="rounded-md bg-blue-100 px-1.5 py-0.5 text-[10px] font-medium text-blue-700 dark:bg-blue-950/30 dark:text-blue-300">
+                          {t("Original Paper")}
+                          {item.paper_display_name
+                            ? ` · ${item.paper_display_name}`
+                            : ""}
+                          {item.source_question_number
+                            ? ` · Q${item.source_question_number}`
+                            : ""}
+                        </span>
+                      )}
                     </div>
                     <div className="text-[14px] font-medium text-[var(--foreground)]">
                       <MarkdownRenderer
@@ -483,12 +533,22 @@ export default function QuestionBankSection() {
                 {item.options && Object.keys(item.options).length > 0 && (
                   <div className="mb-3 space-y-1.5">
                     {Object.entries(item.options).map(([key, text]) => {
-                      const isUserAnswer =
-                        item.user_answer?.toUpperCase() === key.toUpperCase();
-                      const isCorrectAnswer =
-                        item.correct_answer?.toUpperCase() ===
-                        key.toUpperCase();
-                      const isWrongPick = isUserAnswer && !item.is_correct;
+                      const userAnswerKeys = new Set(
+                        (item.user_answer || "")
+                          .split(/[,\s]+/u)
+                          .map((value) => value.trim().toUpperCase())
+                          .filter(Boolean),
+                      );
+                      const correctAnswerKeys = new Set(
+                        (item.correct_answer || "")
+                          .split(/[,\s]+/u)
+                          .map((value) => value.trim().toUpperCase())
+                          .filter(Boolean),
+                      );
+                      const isUserAnswer = userAnswerKeys.has(key.toUpperCase());
+                      const isCorrectAnswer = correctAnswerKeys.has(key.toUpperCase());
+                      const isWrongPick =
+                        isUserAnswer && item.is_correct === false;
                       return (
                         <div
                           key={key}
@@ -540,19 +600,23 @@ export default function QuestionBankSection() {
                   <div className="mb-3 space-y-2 text-[13px]">
                     <div
                       className={`rounded-lg border px-3 py-2.5 ${
-                        !item.is_correct
+                        item.is_correct === false
                           ? "border-red-200/60 bg-red-50/40 dark:border-red-900/40 dark:bg-red-950/15"
-                          : "border-green-200/60 bg-green-50/40 dark:border-green-900/40 dark:bg-green-950/15"
+                          : item.is_correct === true
+                            ? "border-green-200/60 bg-green-50/40 dark:border-green-900/40 dark:bg-green-950/15"
+                            : "border-amber-200/60 bg-amber-50/40 dark:border-amber-900/40 dark:bg-amber-950/15"
                       }`}
                     >
                       <div
                         className={`mb-1 text-[11px] font-medium uppercase tracking-wide ${
-                          !item.is_correct
+                          item.is_correct === false
                             ? "text-red-500 dark:text-red-400"
-                            : "text-green-600 dark:text-green-400"
+                            : item.is_correct === true
+                              ? "text-green-600 dark:text-green-400"
+                              : "text-amber-600 dark:text-amber-400"
                         }`}
                       >
-                        {t("Your Answer")} {item.is_correct ? "✓" : "✗"}
+                        {t("Your Answer")} {item.is_correct === null ? "" : item.is_correct ? "✓" : "✗"}
                       </div>
                       <div className="text-[var(--foreground)]">
                         {item.user_answer ? (
@@ -611,6 +675,24 @@ export default function QuestionBankSection() {
                   </div>
                 )}
 
+                {answerImages.length > 0 && (
+                  <div className="mb-3 rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 py-2.5">
+                    <div className="mb-1 text-[11px] font-medium uppercase tracking-wide text-[var(--muted-foreground)]">
+                      {t("Answer images")}
+                    </div>
+                    <div className="grid gap-2 sm:grid-cols-2">
+                      {answerImages.map((image) => (
+                        <img
+                          key={image.id || image.url}
+                          src={apiUrl(image.url)}
+                          alt={image.filename || t("Answer image")}
+                          className="max-h-56 w-full rounded-md border border-[var(--border)] object-contain"
+                        />
+                      ))}
+                    </div>
+                  </div>
+                )}
+
                 {item.explanation && (
                   <div className="mb-3 rounded-lg border border-blue-200/60 bg-blue-50/30 px-3 py-2.5 dark:border-blue-900/40 dark:bg-blue-950/15">
                     <div className="mb-1 text-[11px] font-medium uppercase tracking-wide text-blue-600 dark:text-blue-400">
@@ -623,6 +705,20 @@ export default function QuestionBankSection() {
                         className="text-[13px] leading-relaxed"
                       />
                     </div>
+                  </div>
+                )}
+
+                {item.ai_judgment && (
+                  <div className="mb-3 rounded-lg border border-violet-200/60 bg-violet-50/30 px-3 py-2.5 dark:border-violet-900/40 dark:bg-violet-950/15">
+                    <div className="mb-1 flex items-center gap-1 text-[11px] font-medium uppercase tracking-wide text-violet-600 dark:text-violet-400">
+                      <Sparkles size={11} />
+                      {t("AI Judgment")}
+                    </div>
+                    <MarkdownRenderer
+                      content={item.ai_judgment}
+                      variant="prose"
+                      className="text-[13px] leading-relaxed"
+                    />
                   </div>
                 )}
 
@@ -653,6 +749,8 @@ export default function QuestionBankSection() {
             );
           })}
         </ul>
+      )}
+        </div>
       )}
     </div>
   );

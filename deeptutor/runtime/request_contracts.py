@@ -36,7 +36,7 @@ class DeepSolveRequestConfig(BaseModel):
 class DeepQuestionRequestConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    mode: Literal["custom", "mimic"] = "custom"
+    mode: Literal["custom", "mimic", "original_paper"] = "custom"
     topic: str = ""
     num_questions: int = Field(default=1, ge=1, le=50)
     difficulty: str = ""
@@ -48,7 +48,18 @@ class DeepQuestionRequestConfig(BaseModel):
     # "no per-type targets — distribute freely across allowed types".
     per_type_counts: dict[str, int] = Field(default_factory=dict)
     paper_path: str = ""
+    # Original Paper resolves this opaque identifier through the current
+    # user's Paper Library workspace. File paths and KB names are never part
+    # of that mode's request contract.
+    paper_id: str = ""
     max_questions: int = Field(default=10, ge=1, le=100)
+
+
+class ExamRequestConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    mode: Literal["original_paper"] = "original_paper"
+    paper_id: str = ""
 
 
 class VisualizeRequestConfig(BaseModel):
@@ -112,7 +123,36 @@ def validate_deep_solve_request_config(
 def validate_deep_question_request_config(
     raw_config: dict[str, Any] | None,
 ) -> DeepQuestionRequestConfig:
-    return _validate_model(DeepQuestionRequestConfig, raw_config, label="deep question")
+    model = _validate_model(DeepQuestionRequestConfig, raw_config, label="deep question")
+    if model.mode == "original_paper":
+        cleaned = _clean_public_config(raw_config)
+        allowed = {"mode", "paper_id"}
+        unexpected = sorted(set(cleaned) - allowed)
+        if unexpected:
+            names = ", ".join(unexpected)
+            raise ValueError(
+                "Invalid deep question config: Original Paper accepts only mode and paper_id; "
+                f"unexpected field(s): {names}."
+            )
+        if not model.paper_id.strip():
+            raise ValueError(
+                "Invalid deep question config: Original Paper requires paper_id."
+            )
+    return model
+
+
+def validate_exam_request_config(raw_config: dict[str, Any] | None) -> ExamRequestConfig:
+    model = _validate_model(ExamRequestConfig, raw_config, label="exam")
+    if not model.paper_id.strip():
+        raise ValueError("Invalid exam config: paper_id is required.")
+    cleaned = _clean_public_config(raw_config)
+    unexpected = sorted(set(cleaned) - {"mode", "paper_id"})
+    if unexpected:
+        raise ValueError(
+            "Invalid exam config: only mode and paper_id are accepted; "
+            f"unexpected field(s): {', '.join(unexpected)}."
+        )
+    return model
 
 
 def validate_visualize_request_config(
@@ -129,6 +169,7 @@ CAPABILITY_CONFIG_VALIDATORS: dict[str, Callable[[dict[str, Any] | None], Any]] 
     "chat": validate_chat_request_config,
     "deep_solve": validate_deep_solve_request_config,
     "deep_question": validate_deep_question_request_config,
+    "exam": validate_exam_request_config,
     "deep_research": validate_research_request_config,
     "math_animator": validate_math_animator_request_config,
     "visualize": validate_visualize_request_config,
@@ -138,6 +179,7 @@ CAPABILITY_REQUEST_SCHEMAS: dict[str, dict[str, Any]] = {
     "chat": build_request_schema(ChatRequestConfig),
     "deep_solve": build_request_schema(DeepSolveRequestConfig),
     "deep_question": build_request_schema(DeepQuestionRequestConfig),
+    "exam": build_request_schema(ExamRequestConfig),
     "deep_research": build_request_schema(DeepResearchRequestConfig),
     "math_animator": build_request_schema(MathAnimatorRequestConfig),
     "visualize": build_request_schema(VisualizeRequestConfig),
@@ -165,6 +207,7 @@ __all__ = [
     "CAPABILITY_REQUEST_SCHEMAS",
     "ChatRequestConfig",
     "DeepQuestionRequestConfig",
+    "ExamRequestConfig",
     "DeepSolveRequestConfig",
     "VisualizeRequestConfig",
     "build_request_schema",
@@ -172,6 +215,7 @@ __all__ = [
     "validate_capability_config",
     "validate_chat_request_config",
     "validate_deep_question_request_config",
+    "validate_exam_request_config",
     "validate_deep_solve_request_config",
     "validate_visualize_request_config",
 ]

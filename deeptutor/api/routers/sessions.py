@@ -10,6 +10,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field, field_validator
 
+from deeptutor.services.quiz import deterministic_grade
 from deeptutor.services.session import get_session_store, get_sqlite_session_store
 from deeptutor.services.storage.attachment_store import get_attachment_store
 
@@ -41,7 +42,17 @@ class QuizResultItem(BaseModel):
     correct_answer: str = ""
     explanation: str | None = ""
     difficulty: str | None = ""
-    is_correct: bool
+    source_type: str = ""
+    paper_library_id: str = ""
+    paper_library_name: str = ""
+    paper_id: str = ""
+    paper_display_name: str = ""
+    source_question_number: str = ""
+    source_snapshot_id: str = ""
+    grading_method: str = ""
+    is_multi_select: bool = False
+    image_dependent: bool = False
+    is_correct: bool | None = None
 
     @field_validator("options", mode="before")
     @classmethod
@@ -61,19 +72,30 @@ class QuizResultsRequest(BaseModel):
 
 def _format_quiz_results_message(answers: list[QuizResultItem]) -> str:
     total = len(answers)
-    correct = sum(1 for item in answers if item.is_correct)
-    score_pct = round((correct / total) * 100) if total else 0
+    graded = [item for item in answers if item.is_correct is not None]
+    correct = sum(1 for item in graded if item.is_correct)
+    score_pct = round((correct / len(graded)) * 100) if graded else 0
     lines = ["[Quiz Performance]"]
     for idx, item in enumerate(answers, 1):
         question = item.question.strip().replace("\n", " ")
         user_answer = (item.user_answer or "").strip() or "(blank)"
-        status = "Correct" if item.is_correct else "Incorrect"
+        status = (
+            "Correct"
+            if item.is_correct is True
+            else "Incorrect"
+            if item.is_correct is False
+            else "Manual review"
+        )
         suffix = f" ({status})"
-        if not item.is_correct and (item.correct_answer or "").strip():
+        if item.is_correct is False and (item.correct_answer or "").strip():
             suffix = f" ({status}, correct: {(item.correct_answer or '').strip()})"
         qid = f"[{item.question_id}] " if item.question_id else ""
         lines.append(f"{idx}. {qid}Q: {question} -> Answered: {user_answer}{suffix}")
-    lines.append(f"Score: {correct}/{total} ({score_pct}%)")
+    manual = total - len(graded)
+    score_line = f"Score: {correct}/{len(graded)} ({score_pct}%)"
+    if manual:
+        score_line += f"; {manual} manual review"
+    lines.append(score_line)
     return "\n".join(lines)
 
 
@@ -204,7 +226,29 @@ async def record_quiz_results(session_id: str, payload: QuizResultsRequest):
     session = await store.get_session(session_id)
     if session is None:
         raise HTTPException(status_code=404, detail="Session not found")
-    content = _format_quiz_results_message(payload.answers)
+    answers: list[QuizResultItem] = []
+    for item in payload.answers:
+        computed = deterministic_grade(
+            question_type=item.question_type,
+            options=item.options,
+            correct_answer=item.correct_answer,
+            user_answer=item.user_answer,
+            is_multi_select=item.is_multi_select,
+            image_dependent=item.image_dependent,
+        )
+        if computed is not None:
+            item = item.model_copy(
+                update={"is_correct": computed, "grading_method": "deterministic"}
+            )
+        elif item.is_multi_select or item.image_dependent or item.is_correct is None:
+            item = item.model_copy(
+                update={
+                    "is_correct": None,
+                    "grading_method": item.grading_method or "manual",
+                }
+            )
+        answers.append(item)
+    content = _format_quiz_results_message(answers)
     await store.add_message(
         session_id=session_id,
         role="user",
@@ -215,7 +259,7 @@ async def record_quiz_results(session_id: str, payload: QuizResultsRequest):
     try:
         notebook_count = await store.upsert_notebook_entries(
             session_id,
-            [{**item.model_dump(), "turn_id": payload.turn_id} for item in payload.answers],
+            [{**item.model_dump(), "turn_id": payload.turn_id} for item in answers],
         )
     except Exception:
         logger.warning(
@@ -224,7 +268,7 @@ async def record_quiz_results(session_id: str, payload: QuizResultsRequest):
     return {
         "recorded": True,
         "session_id": session_id,
-        "answer_count": len(payload.answers),
+        "answer_count": len(answers),
         "notebook_count": notebook_count,
         "content": content,
     }

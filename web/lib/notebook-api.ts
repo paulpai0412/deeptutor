@@ -140,11 +140,19 @@ export interface NotebookEntry {
   difficulty: string;
   user_answer: string;
   user_answer_images?: NotebookAnswerImage[];
-  is_correct: boolean;
+  is_correct: boolean | null;
   bookmarked: boolean;
   followup_session_id: string;
   /** Latest AI-judge text for this entry; empty when never run. */
   ai_judgment?: string;
+  source_type?: string;
+  paper_library_id?: string;
+  paper_library_name?: string;
+  paper_id?: string;
+  paper_display_name?: string;
+  source_question_number?: string;
+  source_snapshot_id?: string;
+  grading_method?: string;
   created_at: number;
   updated_at: number;
   categories?: NotebookCategory[];
@@ -236,6 +244,7 @@ export async function updateNotebookEntry(
     bookmarked?: boolean;
     followup_session_id?: string;
     ai_judgment?: string;
+    is_correct?: boolean | null;
   },
 ): Promise<void> {
   const response = await apiFetch(
@@ -275,7 +284,17 @@ export async function upsertNotebookEntry(data: {
    * leave any stored images untouched; pass an empty array to clear them.
    */
   user_answer_images?: NotebookAnswerImageUpload[];
-  is_correct?: boolean;
+  source_type?: string;
+  paper_library_id?: string;
+  paper_library_name?: string;
+  paper_id?: string;
+  paper_display_name?: string;
+  source_question_number?: string;
+  source_snapshot_id?: string;
+  grading_method?: string;
+  is_multi_select?: boolean;
+  image_dependent?: boolean;
+  is_correct?: boolean | null;
 }): Promise<NotebookEntry> {
   const response = await apiFetch(
     apiUrl("/api/v1/question-notebook/entries/upsert"),

@@ -106,6 +106,7 @@ function getModeBadgeLabel(capability?: string | null): string {
   if (!capability || capability === "chat") return "Chat";
   if (capability === "deep_solve") return "Deep Solve";
   if (capability === "deep_question") return "Quiz Generation";
+  if (capability === "exam") return "Exam";
   if (capability === "deep_research") return "Deep Research";
   if (capability === "math_animator") return "Math Animator";
   if (capability === "visualize") return "Visualize";
@@ -338,7 +339,7 @@ const AssistantMessage = memo(function AssistantMessage({
   }, [msg.capability, resultEvent]);
 
   const quizQuestions = useMemo(() => {
-    if (msg.capability !== "deep_question") return null;
+    if (msg.capability !== "deep_question" && msg.capability !== "exam") return null;
     // Once the final result event lands, it's authoritative — it carries
     // the canonical summary.results[]. Until then, accumulate questions
     // from the live ``quiz_question_emitted`` content events so the
@@ -352,7 +353,7 @@ const AssistantMessage = memo(function AssistantMessage({
   // yet, and a null turn id would let the QuizViewer fall back to
   // session-wide notebook state from a previous quiz (issue #677).
   const quizTurnId = useMemo(() => {
-    if (msg.capability !== "deep_question") return null;
+    if (msg.capability !== "deep_question" && msg.capability !== "exam") return null;
     return extractQuizTurnId(msg.events);
   }, [msg.capability, msg.events]);
 
@@ -477,6 +478,7 @@ const AssistantMessage = memo(function AssistantMessage({
             sessionId={sessionId}
             turnId={quizTurnId}
             language={language}
+            examMode={msg.capability === "exam"}
           />
         </>
       ) : hasInlineAskUser ? (

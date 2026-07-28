@@ -13,17 +13,25 @@ Uses the unified LLM Factory for all LLM calls, supporting:
 
 import argparse
 import asyncio
+import base64
+from collections.abc import Awaitable, Callable
 from datetime import datetime
 import json
 from pathlib import Path
 import sys
+from types import SimpleNamespace
 from typing import Any
 
 from deeptutor.services.config import get_agent_params
 from deeptutor.services.llm import complete as llm_complete
-from deeptutor.services.llm.capabilities import supports_response_format
+from deeptutor.services.llm.capabilities import supports_response_format, supports_vision
 from deeptutor.services.llm.config import get_llm_config
+from deeptutor.services.llm.multimodal import prepare_multimodal_messages
 from deeptutor.utils.json_parser import parse_json_response
+
+_IMAGE_SUFFIXES = frozenset(
+    {".bmp", ".gif", ".jpeg", ".jpg", ".png", ".svg", ".tif", ".tiff", ".webp"}
+)
 
 
 def _find_parsed_content_dir(paper_dir: Path) -> Path:
@@ -103,13 +111,16 @@ def load_parsed_paper(paper_dir: Path) -> tuple[str | None, list[dict] | None, P
 def extract_questions_with_llm(
     markdown_content: str,
     content_list: list[dict] | None,
-    images_dir: Path,
+    images_dir: Path | None,
     api_key: str,
     base_url: str,
     model: str,
     api_version: str | None = None,
     binding: str | None = None,
-) -> list[dict[str, Any]]:
+    max_document_chars: int | None = 15000,
+    return_metadata: bool = False,
+    llm_callable: Callable[..., Awaitable[str]] | None = None,
+) -> list[dict[str, Any]] | dict[str, Any]:
     """
     Use LLM to analyze markdown content and extract questions
 
@@ -136,11 +147,14 @@ def extract_questions_with_llm(
     """
     binding = binding or get_llm_config().binding
 
-    image_list = []
-    if images_dir.exists():
-        for img_file in sorted(images_dir.glob("*")):
-            if img_file.suffix.lower() in [".jpg", ".jpeg", ".png", ".gif", ".webp"]:
-                image_list.append(img_file.name)
+    image_files: list[Path] = []
+    if images_dir is not None and images_dir.exists():
+        image_files = [
+            path
+            for path in sorted(images_dir.rglob("*"))
+            if path.is_file() and path.suffix.lower() in _IMAGE_SUFFIXES
+        ]
+    image_list = [path.relative_to(images_dir).as_posix() for path in image_files] if images_dir else []
 
     system_prompt = """You are a professional exam paper analysis assistant. Your task is to extract all question information from the provided exam paper content.
 
@@ -188,23 +202,32 @@ Please return results in JSON format as follows:
 Important Notes:
 1. Ensure all questions are extracted, do not miss any
 2. Keep the original question text, do not modify or summarize
-3. For multiple choice questions, must merge stem and options in question_text
-4. "question_type" MUST be exactly one of: choice, concept, fill_in_blank, short_answer, written, coding
-5. "difficulty" MUST be exactly one of: easy, medium, hard
-6. If no answer key is present in the paper, set "answer" to ""
+3. For multiple choice questions, keep the complete stem in question_text and return options separately as an object such as {"A": "...", "B": "..."}
+4. "question_type" MUST be exactly one of: choice, concept, fill_in_blank, short_answer, written, coding; preserve multi-select as a raw/manual-review case instead of treating it as single-choice
+5. "difficulty" MUST be exactly one of: easy, medium, hard, or null when unknown
+6. If no answer key is explicit in the paper, set "answer" to "" and do not infer one
 7. If a question has no associated images, set images field to empty array []
 8. Image file names should be actual existing file names
-9. Ensure the returned format is valid JSON
+9. Preserve source page when available as an integer "page" field
+10. Return top-level "complete": true only when the full document was covered; include a top-level "warnings" array for omissions or uncertainty
+11. Ensure the returned format is valid JSON
 """
 
+    document_content = (
+        markdown_content if max_document_chars is None else markdown_content[:max_document_chars]
+    )
+    parsed_blocks = json.dumps(_portable_content_blocks(content_list), ensure_ascii=False, indent=2)
     user_prompt = f"""Exam paper content (Markdown format):
 
-{markdown_content[:15000]}
+{document_content}
+
+Parsed document blocks (when available):
+{parsed_blocks}
 
 Available image files:
 {json.dumps(image_list, ensure_ascii=False, indent=2)}
 
-Please analyze the above exam paper content, extract all question information, and return in JSON format.
+Please analyze the complete document above, extract all question information, and return in JSON format.
 """
 
     print("\n🤖 Using LLM to analyze questions...")
@@ -225,11 +248,55 @@ Please analyze the above exam paper content, extract all question information, a
     if supports_response_format(binding, model):
         llm_kwargs["response_format"] = {"type": "json_object"}
 
+    # Send the complete image set to a known vision-capable primary model.
+    # Text-only models still receive the names and structural blocks above;
+    # paper extraction applies a deterministic page/block fallback later.
+    image_warnings: list[str] = []
+    if image_files and supports_vision(binding, model):
+        attachments = []
+        for image_file in image_files:
+            try:
+                encoded = base64.b64encode(image_file.read_bytes()).decode("ascii")
+            except OSError as exc:
+                image_warnings.append(
+                    f"Vision input could not read image '{image_file.name}': {exc}"
+                )
+                continue
+            attachments.append(
+                SimpleNamespace(
+                    type="image",
+                    base64=encoded,
+                    filename=image_file.name,
+                    mime_type=_image_mime_type(image_file),
+                )
+            )
+        if attachments:
+            multimodal_messages = [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ]
+            result = prepare_multimodal_messages(
+                multimodal_messages,
+                attachments,
+                binding=binding,
+                model=model,
+            )
+            llm_kwargs["messages"] = result.messages
+            if result.url_images_dropped:
+                image_warnings.append(
+                    f"{result.url_images_dropped} image(s) could not be sent to the vision model."
+                )
+    elif image_files:
+        image_warnings.append(
+            "Vision is unavailable; image associations use page/block order and require manual review."
+        )
+
+    complete_call = llm_callable or llm_complete
     try:
         asyncio.get_running_loop()
     except RuntimeError:
         result_text = asyncio.run(
-            llm_complete(
+            complete_call(
                 prompt=user_prompt,
                 system_prompt=system_prompt,
                 model=model,
@@ -246,7 +313,7 @@ Please analyze the above exam paper content, extract all question information, a
         with concurrent.futures.ThreadPoolExecutor() as executor:
             future = executor.submit(
                 asyncio.run,
-                llm_complete(
+                complete_call(
                     prompt=user_prompt,
                     system_prompt=system_prompt,
                     model=model,
@@ -274,10 +341,54 @@ Please analyze the above exam paper content, extract all question information, a
             f"Raw response (first 500 chars): {result_text[:500]!r}"
         ) from e
 
+    if not isinstance(result, dict):
+        raise ValueError("LLM response must be a JSON object")
     questions = result.get("questions", [])
+    if not isinstance(questions, list):
+        raise ValueError("LLM response field 'questions' must be a list")
     print(f"✓ Successfully extracted {len(questions)} questions")
 
+    if return_metadata:
+        raw_warnings = result.get("warnings", [])
+        warnings = raw_warnings if isinstance(raw_warnings, list) else [str(raw_warnings)]
+        warnings.extend(image_warnings)
+        return {
+            "questions": questions,
+            "warnings": [str(warning) for warning in warnings if str(warning).strip()],
+            "complete": bool(result.get("complete", True)),
+        }
     return questions
+
+
+def _portable_content_blocks(content_list: list[dict] | None) -> list[dict]:
+    """Keep parser blocks useful to the model without leaking cache paths."""
+    if not isinstance(content_list, list):
+        return []
+    portable: list[dict] = []
+    for block in content_list:
+        if not isinstance(block, dict):
+            continue
+        copied = dict(block)
+        for key in ("img_path", "image_path", "asset_path"):
+            value = copied.get(key)
+            if isinstance(value, str) and value:
+                copied[key] = Path(value.replace("\\", "/")).name
+        portable.append(copied)
+    return portable
+
+
+def _image_mime_type(path: Path) -> str:
+    return {
+        ".bmp": "image/bmp",
+        ".gif": "image/gif",
+        ".jpeg": "image/jpeg",
+        ".jpg": "image/jpeg",
+        ".png": "image/png",
+        ".svg": "image/svg+xml",
+        ".tif": "image/tiff",
+        ".tiff": "image/tiff",
+        ".webp": "image/webp",
+    }.get(path.suffix.lower(), "image/png")
 
 
 def save_questions_json(questions: list[dict[str, Any]], output_dir: Path, paper_name: str) -> Path:

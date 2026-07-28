@@ -23,7 +23,7 @@ export interface SelectedQuestionEntry {
   id: number;
   question: string;
   session_title: string;
-  is_correct: boolean;
+  is_correct: boolean | null;
   difficulty: string;
 }
 
@@ -261,12 +261,18 @@ export default function QuestionBankPicker({
                           )}
                           <span
                             className={`rounded-md px-1.5 py-0.5 text-[10px] font-semibold ${
-                              entry.is_correct
-                                ? "bg-green-100 text-green-700 dark:bg-green-950/30 dark:text-green-400"
-                                : "bg-red-100 text-red-700 dark:bg-red-950/30 dark:text-red-400"
+                              entry.is_correct === null
+                                ? "bg-amber-100 text-amber-700 dark:bg-amber-950/30 dark:text-amber-300"
+                                : entry.is_correct
+                                  ? "bg-green-100 text-green-700 dark:bg-green-950/30 dark:text-green-400"
+                                  : "bg-red-100 text-red-700 dark:bg-red-950/30 dark:text-red-400"
                             }`}
                           >
-                            {entry.is_correct ? t("Correct") : t("Incorrect")}
+                            {entry.is_correct === null
+                              ? t("Manual review")
+                              : entry.is_correct
+                                ? t("Correct")
+                                : t("Incorrect")}
                           </span>
                           {entry.bookmarked && (
                             <Bookmark

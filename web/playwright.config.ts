@@ -23,5 +23,10 @@ export default defineConfig({
       testMatch: "**/*.audit.ts",
       use: { ...devices["Desktop Chrome"] },
     },
+    {
+      name: "ui-e2e",
+      testMatch: "**/*.e2e.ts",
+      use: { ...devices["Desktop Chrome"] },
+    },
   ],
 });

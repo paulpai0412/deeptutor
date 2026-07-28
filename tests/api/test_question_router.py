@@ -57,6 +57,14 @@ def _load_question_router_module(monkeypatch: pytest.MonkeyPatch):
     fake_config = types.ModuleType("deeptutor.services.config")
     fake_config.PROJECT_ROOT = Path.cwd()
     fake_config.load_config_with_main = lambda *_args, **_kwargs: {}
+    fake_config.load_auth_settings = lambda: {
+        "cookie_secure": False,
+        "enabled": False,
+        "username": "",
+        "password_hash": "",
+        "token_expire_hours": 24,
+    }
+    fake_config.load_integrations_settings = lambda: {"pocketbase_url": ""}
     monkeypatch.setitem(sys.modules, "deeptutor.services.config", fake_config)
 
     fake_llm_package = _package("deeptutor.services.llm")

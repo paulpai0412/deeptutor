@@ -1,5 +1,5 @@
-import QuestionBankSection from "@/components/space/QuestionBankSection";
+import { redirect } from "next/navigation";
 
 export default function SpaceQuestionsPage() {
-  return <QuestionBankSection />;
+  redirect("/knowledge?tab=papers");
 }

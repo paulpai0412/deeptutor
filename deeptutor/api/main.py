@@ -320,6 +320,7 @@ from deeptutor.api.routers import (
     memory,
     notebook,
     partners,
+    paper_library,
     personas,
     plugins_api,
     question,
@@ -396,6 +397,12 @@ app.include_router(
     question_notebook.router,
     prefix="/api/v1/question-notebook",
     tags=["question-notebook"],
+    dependencies=_auth,
+)
+app.include_router(
+    paper_library.router,
+    prefix="/api/v1/papers",
+    tags=["paper-library"],
     dependencies=_auth,
 )
 app.include_router(

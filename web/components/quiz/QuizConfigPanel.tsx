@@ -16,7 +16,6 @@ import {
   summarizeQuizConfig,
   QUIZ_TYPE_LABEL_KEYS,
   type DeepQuestionFormConfig,
-  type DeepQuestionMode,
 } from "@/lib/quiz-types";
 import {
   QUIZ_QUESTION_TYPES,
@@ -27,12 +26,20 @@ import {
   Field,
   INPUT_CLS,
 } from "@/components/chat/home/composer-field";
+import {
+  listLibraryPapers,
+  listPaperLibraries,
+  type PaperLibraryRecord,
+  type PaperLibrarySummary,
+} from "@/lib/knowledge-api";
 
 interface QuizConfigPanelProps {
   value: DeepQuestionFormConfig;
   onChange: (next: DeepQuestionFormConfig) => void;
   uploadedPdf: File | null;
   onUploadPdf: (file: File | null) => void;
+  /** Exam mode chooses a Paper Library before choosing a paper. */
+  examMode?: boolean;
   /**
    * When provided, the panel is wrapped in a `CollapsibleConfigSection` (used
    * by /playground). Omit both to render the bare form — used inside the
@@ -104,19 +111,75 @@ export default memo(function QuizConfigPanel({
   onChange,
   uploadedPdf,
   onUploadPdf,
+  examMode = false,
   collapsed,
   onToggleCollapsed,
 }: QuizConfigPanelProps) {
   const { t } = useTranslation();
   const fileRef = useRef<HTMLInputElement>(null);
   const [dragOver, setDragOver] = useState(false);
+  const [papers, setPapers] = useState<PaperLibraryRecord[]>([]);
+  const [libraries, setLibraries] = useState<PaperLibrarySummary[]>([]);
+  const [papersLoading, setPapersLoading] = useState(true);
+  const [papersError, setPapersError] = useState(false);
+
+  useEffect(() => {
+    if (!examMode) return;
+    let cancelled = false;
+    void listPaperLibraries()
+      .then((records) => {
+        if (!cancelled) {
+          setLibraries(records);
+          setPapersError(false);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setPapersError(true);
+      })
+      .finally(() => {
+        if (!cancelled && !value.paper_library_id) setPapersLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [examMode, value.paper_library_id]);
+
+  useEffect(() => {
+    if (!examMode || !value.paper_library_id) return;
+    let cancelled = false;
+    void listLibraryPapers(value.paper_library_id)
+      .then((records) => {
+        if (!cancelled) {
+          setPapersError(false);
+          setPapers(
+            records.filter((paper) =>
+              ["ready", "ready_with_warnings", "partial"].includes(
+                paper.status,
+              ),
+            ),
+          );
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setPapersError(true);
+      })
+      .finally(() => {
+        if (!cancelled) setPapersLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [examMode, value.paper_library_id]);
 
   const update = <K extends keyof DeepQuestionFormConfig>(
     key: K,
     val: DeepQuestionFormConfig[K],
   ) => onChange({ ...value, [key]: val });
 
-  const setMode = (m: DeepQuestionMode) => update("mode", m);
+  const setMode = (m: "custom" | "mimic") => {
+    if (m === "custom") onUploadPdf(null);
+    onChange({ ...value, mode: m, paper_id: "" });
+  };
 
   // Whenever the selected-type set or the total count drifts out of sync
   // with per_type_counts, auto-rebalance so the user never sees a broken
@@ -167,24 +230,82 @@ export default memo(function QuizConfigPanel({
 
   const body = (
     <>
-      <div className="grid w-full grid-cols-2 gap-1 rounded-lg border border-[var(--border)]/25 p-0.5">
-        {(["custom", "mimic"] as const).map((m) => (
-          <button
-            key={m}
-            type="button"
-            onClick={() => setMode(m)}
-            className={`flex h-[26px] items-center justify-center rounded-md text-[11px] font-medium transition-all ${
-              value.mode === m
-                ? "bg-[var(--muted)] text-[var(--foreground)] shadow-sm"
-                : "text-[var(--muted-foreground)]/50 hover:text-[var(--muted-foreground)]"
-            }`}
-          >
-            {m === "custom" ? t("Custom") : t("Mimic Paper")}
-          </button>
-        ))}
-      </div>
+      {!examMode && (
+        <div className="grid w-full grid-cols-2 gap-1 rounded-lg border border-[var(--border)]/25 p-0.5">
+          {(["custom", "mimic"] as const).map((m) => (
+            <button
+              key={m}
+              type="button"
+              onClick={() => setMode(m)}
+              className={`flex h-[26px] items-center justify-center rounded-md text-[11px] font-medium transition-all ${
+                value.mode === m
+                  ? "bg-[var(--muted)] text-[var(--foreground)] shadow-sm"
+                  : "text-[var(--muted-foreground)]/50 hover:text-[var(--muted-foreground)]"
+              }`}
+            >
+              {m === "custom" ? t("Custom") : t("Mimic Paper")}
+            </button>
+          ))}
+        </div>
+      )}
 
-      {value.mode === "custom" ? (
+      {examMode ? (
+        <div className="space-y-2.5">
+          <Field label={t("Paper Library")} width="w-full">
+            <select
+              aria-label={t("Paper Library")}
+              value={value.paper_library_id ?? ""}
+              onChange={(event) => {
+                setPapers([]);
+                setPapersLoading(true);
+                setPapersError(false);
+                onChange({
+                  ...value,
+                  paper_library_id: event.target.value,
+                  paper_id: "",
+                  mode: "original_paper",
+                });
+              }}
+              disabled={papersLoading && libraries.length === 0}
+              className={`${INPUT_CLS} w-full`}
+            >
+              <option value="">
+                {papersLoading && libraries.length === 0
+                  ? t("Loading libraries...")
+                  : t("Select a Paper Library")}
+              </option>
+              {libraries.map((library) => (
+                <option key={library.library_id} value={library.library_id}>
+                  {library.name} · {library.paper_count} {t("papers")}
+                </option>
+              ))}
+            </select>
+          </Field>
+          <Field label={t("Paper")} width="w-full">
+            <select
+              aria-label={t("Exam paper")}
+              value={value.paper_id}
+              onChange={(event) => update("paper_id", event.target.value)}
+              disabled={!value.paper_library_id || papersLoading}
+              className={`${INPUT_CLS} w-full`}
+            >
+              <option value="">
+                {papersLoading ? t("Loading papers...") : t("Select a paper")}
+              </option>
+              {papers.map((paper) => (
+                <option key={paper.paper_id} value={paper.paper_id}>
+                  {paper.display_name} · {paper.question_count} {t("questions")}
+                </option>
+              ))}
+            </select>
+          </Field>
+          <p className="text-[11px] text-[var(--muted-foreground)]">
+            {papersError
+              ? t("Failed to load papers")
+              : t("Exam uses the selected paper in source order.")}
+          </p>
+        </div>
+      ) : value.mode === "custom" ? (
         <div className="space-y-2.5">
           <div className="flex items-end gap-x-2">
             <Field label={t("Count")} width="w-[60px]">

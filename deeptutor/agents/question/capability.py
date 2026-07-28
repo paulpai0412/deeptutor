@@ -10,6 +10,7 @@ Routes one user turn through the right quiz-generation path:
 
 from __future__ import annotations
 
+from dataclasses import replace
 import asyncio
 import base64
 import tempfile
@@ -23,6 +24,12 @@ from deeptutor.core.stream_bus import StreamBus
 from deeptutor.core.trace import merge_trace_metadata
 from deeptutor.i18n import StatusI18n
 from deeptutor.runtime.request_contracts import get_capability_request_schema
+
+
+_ORIGINAL_PAPER_STATUSES = frozenset({"ready", "ready_with_warnings", "partial"})
+_ORIGINAL_QUESTION_TYPES = frozenset(
+    {"choice", "concept", "fill_in_blank", "short_answer", "written", "coding"}
+)
 
 
 class DeepQuestionCapability(BaseCapability):
@@ -83,6 +90,14 @@ class DeepQuestionCapability(BaseCapability):
             return
 
         mode = str(overrides.get("mode", "custom") or "custom").strip().lower()
+        if mode == "original_paper":
+            await self._run_original_paper_mode(
+                context=context,
+                stream=stream,
+                overrides=overrides,
+            )
+            return
+
         topic = str(overrides.get("topic") or context.user_message or "").strip()
         num_questions = int(overrides.get("num_questions", 1) or 1)
         difficulty = str(overrides.get("difficulty", "") or "")
@@ -153,6 +168,286 @@ class DeepQuestionCapability(BaseCapability):
             history_context=history_context,
             num_questions=num_questions,
             i18n=i18n,
+        )
+
+    async def _run_original_paper_mode(
+        self,
+        *,
+        context: UnifiedContext,
+        stream: StreamBus,
+        overrides: dict[str, Any],
+    ) -> None:
+        """Render a user's extracted paper as a quiz without an LLM call.
+
+        Original Paper is intentionally a separate path from both custom and
+        mimic mode: the paper ID is resolved through the current user's
+        PaperLibraryService, and the persisted question list is copied into
+        the StreamBus envelope in its stored order. No file path, KB lookup,
+        prompt, or generation pipeline is involved.
+        """
+        from deeptutor.services.paper_library import PaperLibraryService
+
+        paper_id = str(overrides.get("paper_id") or "").strip()
+        if not paper_id:
+            await stream.error(
+                "Original Paper mode requires a paper_id.",
+                source=self.name,
+                stage="quizzing",
+            )
+            return
+
+        service = PaperLibraryService()
+        try:
+            paper = service.get_paper(paper_id)
+            questions = service.get_questions(paper_id)
+        except FileNotFoundError:
+            await stream.error(
+                "The selected paper was not found in your Paper Library.",
+                source=self.name,
+                stage="quizzing",
+            )
+            return
+        except Exception as exc:
+            await stream.error(
+                f"Unable to load the selected paper: {exc}",
+                source=self.name,
+                stage="quizzing",
+            )
+            return
+
+        if paper.status not in _ORIGINAL_PAPER_STATUSES:
+            await stream.error(
+                "Original Paper requires a ready, partially ready, or ready-with-warnings paper.",
+                source=self.name,
+                stage="quizzing",
+                metadata={"paper_id": paper.paper_id, "paper_status": paper.status},
+            )
+            return
+
+        library_name = ""
+        library_id = str(getattr(paper, "library_id", "") or "")
+        if library_id and library_id != "legacy":
+            try:
+                library_name = str(service.get_library(library_id).name)
+            except (AttributeError, FileNotFoundError):
+                library_name = ""
+        source_metadata = {
+            "source_type": "original_paper",
+            "paper_library_id": library_id,
+            "paper_library_name": library_name,
+            "paper_id": paper.paper_id,
+            "paper_display_name": paper.display_name,
+            "paper_original_filename": paper.original_filename,
+            "paper_source_hash": paper.source_hash,
+        }
+        pairs: list[dict[str, Any]] = []
+        invalid_questions: list[str] = []
+        for index, raw_question in enumerate(questions):
+            ordinal = index + 1
+            if not isinstance(raw_question, dict):
+                invalid_questions.append(f"#{ordinal}: record is not an object")
+                continue
+
+            question_id = raw_question.get("question_id")
+            question_number = raw_question.get("question_number")
+            question_text = raw_question.get("question_text")
+            raw_type = raw_question.get("question_type")
+            answer = raw_question.get("answer", "")
+            options = raw_question.get("options")
+            images = raw_question.get("images")
+            missing = [
+                name
+                for name, value in (
+                    ("question_id", question_id),
+                    ("question_number", question_number),
+                    ("question_text", question_text),
+                    ("question_type", raw_type),
+                )
+                if not isinstance(value, str) or not value.strip()
+            ]
+            if missing:
+                invalid_questions.append(f"#{ordinal}: missing {', '.join(missing)}")
+                continue
+            if str(raw_type).strip().lower() not in _ORIGINAL_QUESTION_TYPES:
+                invalid_questions.append(
+                    f"#{ordinal}: unsupported stored question_type {raw_type!r}"
+                )
+                continue
+            if not isinstance(options, dict) or any(
+                not isinstance(key, str) or not isinstance(value, str)
+                for key, value in options.items()
+            ):
+                invalid_questions.append(f"#{ordinal}: options are not a string map")
+                continue
+            if not isinstance(images, list) or any(not isinstance(image, str) for image in images):
+                invalid_questions.append(f"#{ordinal}: images are not a string list")
+                continue
+            if not isinstance(answer, str):
+                invalid_questions.append(f"#{ordinal}: answer is not text")
+                continue
+            difficulty = raw_question.get("difficulty")
+            if difficulty is not None and not isinstance(difficulty, str):
+                invalid_questions.append(f"#{ordinal}: difficulty is not text")
+                continue
+
+            question_number = question_number.strip()
+            question_id = question_id.strip()
+            question_text = question_text.strip()
+            question_type = raw_type.strip().lower()
+            images = list(images)
+            question_source = {
+                **source_metadata,
+                "question_number": question_number,
+                "page": raw_question.get("page"),
+                "images": images,
+                "source_question_id": raw_question.get("source_question_id"),
+            }
+            pairs.append(
+                {
+                    "question_id": question_id,
+                    "question": question_text,
+                    "question_type": question_type,
+                    "options": dict(options) or None,
+                    "correct_answer": answer.strip(),
+                    "explanation": "",
+                    "difficulty": (difficulty or "").strip(),
+                    "concentration": "",
+                    "source_type": "original_paper",
+                    "paper_library_id": library_id,
+                    "paper_library_name": library_name,
+                    "paper_id": paper.paper_id,
+                    "paper_display_name": paper.display_name,
+                    "source_question_number": question_number,
+                    "source_page": raw_question.get("page"),
+                    "source_images": images,
+                    "source": question_source,
+                }
+            )
+
+        if invalid_questions:
+            await stream.error(
+                "The selected paper contains invalid extracted question records; "
+                "the Original Paper quiz was not started.",
+                source=self.name,
+                stage="quizzing",
+                metadata={**source_metadata, "invalid_questions": invalid_questions},
+            )
+            return
+
+        if not pairs:
+            await stream.error(
+                "The selected paper has no successfully extracted questions.",
+                source=self.name,
+                stage="quizzing",
+                metadata=source_metadata,
+            )
+            return
+
+        from deeptutor.services.session.quiz_snapshot import (
+            QuizSnapshotError,
+            create_current_original_paper_snapshot,
+        )
+
+        try:
+            snapshot = await create_current_original_paper_snapshot(
+                paper_service=service,
+                paper=paper,
+                session_id=context.session_id,
+                turn_id=str(context.metadata.get("turn_id", "") or ""),
+                questions=questions,
+            )
+        except QuizSnapshotError as exc:
+            await stream.error(
+                f"Original Paper snapshot failed; the quiz was not started: {exc}",
+                source=self.name,
+                stage="quizzing",
+                metadata=source_metadata,
+            )
+            return
+        except Exception as exc:
+            await stream.error(
+                f"Original Paper snapshot failed; the quiz was not started: {exc}",
+                source=self.name,
+                stage="quizzing",
+                metadata=source_metadata,
+            )
+            return
+
+        snapshot_questions = snapshot["questions"]
+        for pair, snapshot_question in zip(pairs, snapshot_questions, strict=True):
+            image_records = snapshot_question["images"]
+            pair["snapshot_id"] = snapshot["snapshot_id"]
+            pair["is_multi_select"] = snapshot_question["is_multi_select"]
+            pair["source_images"] = [record["url"] for record in image_records]
+            pair["source_image_attachments"] = image_records
+            pair["source"]["images"] = image_records
+            pair["source"]["snapshot_id"] = snapshot["snapshot_id"]
+
+        source_metadata = {
+            **source_metadata,
+            "snapshot_id": snapshot["snapshot_id"],
+        }
+        async with stream.stage("quizzing", source=self.name, metadata=source_metadata):
+            for index, pair in enumerate(pairs):
+                await stream.content(
+                    "",
+                    source=self.name,
+                    stage="quizzing",
+                    metadata={
+                        "call_kind": "quiz_question_emitted",
+                        "trace_role": "quiz_question",
+                        "trace_group": "quiz",
+                        "question_index": index,
+                        "total_questions": len(pairs),
+                        "qa_pair": pair,
+                        **source_metadata,
+                    },
+                )
+
+        summary = {
+            "success": True,
+            "source": "original_paper",
+            "requested": len(pairs),
+            "template_count": len(pairs),
+            "completed": len(pairs),
+            "failed": 0,
+            "paper": source_metadata,
+            "templates": [
+                {
+                    "question_id": pair["question_id"],
+                    "topic": pair["question"],
+                    "question_type": pair["question_type"],
+                    "difficulty": pair["difficulty"],
+                    "source": "original_paper",
+                    "question_number": pair["source_question_number"],
+                }
+                for pair in pairs
+            ],
+            "results": [
+                {
+                    "qa_pair": pair,
+                    "metadata": {
+                        **source_metadata,
+                        "question_id": pair["question_id"],
+                        "question_number": pair["source_question_number"],
+                    },
+                }
+                for pair in pairs
+            ],
+            "analysis": "",
+        }
+        await emit_capability_result(
+            stream,
+            {
+                "response": f"Original Paper: {paper.display_name}",
+                "mode": "original_paper",
+                "source_type": "original_paper",
+                "paper_id": paper.paper_id,
+                "paper": source_metadata,
+                "summary": summary,
+                "metadata": source_metadata,
+            },
+            source=self.name,
         )
 
     async def _run_mimic_mode(
@@ -445,3 +740,23 @@ class DeepQuestionCapability(BaseCapability):
                 )
 
         return _trace_bridge
+
+
+class ExamCapability(DeepQuestionCapability):
+    """Exam facade that reuses Deep Question's Original Paper path."""
+
+    manifest = CapabilityManifest(
+        name="exam",
+        description="Run a selected Paper Library paper as an Exam.",
+        stages=["quizzing"],
+        tools_used=[],
+        cli_aliases=["exam"],
+        request_schema=get_capability_request_schema("exam"),
+    )
+
+    async def run(self, context: UnifiedContext, stream: StreamBus) -> None:
+        overrides = {**context.config_overrides, "mode": "original_paper"}
+        await super().run(
+            replace(context, config_overrides=overrides),
+            stream,
+        )

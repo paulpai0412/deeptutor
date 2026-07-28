@@ -210,8 +210,32 @@ class SQLiteSessionStore:
                     ai_judgment TEXT DEFAULT '',
                     created_at REAL NOT NULL,
                     updated_at REAL NOT NULL,
+                    source_type TEXT DEFAULT '',
+                    source_library_id TEXT DEFAULT '',
+                    source_library_name TEXT DEFAULT '',
+                    source_paper_id TEXT DEFAULT '',
+                    source_paper_display_name TEXT DEFAULT '',
+                    source_question_number TEXT DEFAULT '',
+                    source_snapshot_id TEXT DEFAULT '',
+                    grading_method TEXT DEFAULT '',
                     UNIQUE(session_id, turn_id, question_id)
                 );
+
+                CREATE TABLE IF NOT EXISTS quiz_snapshots (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+                    turn_id TEXT NOT NULL,
+                    source_type TEXT NOT NULL DEFAULT '',
+                    paper_id TEXT DEFAULT '',
+                    paper_display_name TEXT DEFAULT '',
+                    paper_source_hash TEXT DEFAULT '',
+                    snapshot_json TEXT NOT NULL,
+                    created_at REAL NOT NULL,
+                    UNIQUE(session_id, turn_id)
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_quiz_snapshots_session
+                    ON quiz_snapshots(session_id, created_at DESC);
 
                 CREATE INDEX IF NOT EXISTS idx_notebook_entries_session
                     ON notebook_entries(session_id, created_at DESC);
@@ -275,10 +299,33 @@ class SQLiteSessionStore:
                 "CREATE INDEX IF NOT EXISTS idx_messages_parent "
                 "ON messages(session_id, parent_message_id)"
             )
-            self._migrate_notebook_entries_add_turn_id(conn)
+            # Add columns before the turn-scope rebuild so legacy rows keep
+            # their image, judge, source, and grading data when the old UNIQUE
+            # (session_id, question_id) constraint is replaced.
             self._migrate_notebook_entries_add_user_answer_images(conn)
             self._migrate_notebook_entries_add_ai_judgment(conn)
+            self._migrate_notebook_entries_add_source_metadata(conn)
+            self._migrate_notebook_entries_add_turn_id(conn)
             conn.commit()
+
+    @staticmethod
+    def _migrate_notebook_entries_add_source_metadata(conn: sqlite3.Connection) -> None:
+        """Add nullable source/snapshot metadata to legacy Question Bank rows."""
+        cols = {row[1] for row in conn.execute("PRAGMA table_info(notebook_entries)").fetchall()}
+        if not cols:
+            return
+        for name in (
+            "source_type",
+            "source_library_id",
+            "source_library_name",
+            "source_paper_id",
+            "source_paper_display_name",
+            "source_question_number",
+            "source_snapshot_id",
+            "grading_method",
+        ):
+            if name not in cols:
+                conn.execute(f"ALTER TABLE notebook_entries ADD COLUMN {name} TEXT DEFAULT ''")
 
     @staticmethod
     def _migrate_notebook_entries_add_turn_id(conn: sqlite3.Connection) -> None:
@@ -328,9 +375,19 @@ class SQLiteSessionStore:
                 explanation TEXT DEFAULT '',
                 difficulty TEXT DEFAULT '',
                 user_answer TEXT DEFAULT '',
+                user_answer_images_json TEXT DEFAULT '[]',
                 is_correct INTEGER DEFAULT 0,
                 bookmarked INTEGER DEFAULT 0,
                 followup_session_id TEXT DEFAULT '',
+                ai_judgment TEXT DEFAULT '',
+                source_type TEXT DEFAULT '',
+                source_library_id TEXT DEFAULT '',
+                source_library_name TEXT DEFAULT '',
+                source_paper_id TEXT DEFAULT '',
+                source_paper_display_name TEXT DEFAULT '',
+                source_question_number TEXT DEFAULT '',
+                source_snapshot_id TEXT DEFAULT '',
+                grading_method TEXT DEFAULT '',
                 created_at REAL NOT NULL,
                 updated_at REAL NOT NULL,
                 UNIQUE(session_id, turn_id, question_id)
@@ -339,14 +396,22 @@ class SQLiteSessionStore:
             INSERT INTO notebook_entries_new (
                 id, session_id, turn_id, question_id, question, question_type,
                 options_json, correct_answer, explanation, difficulty,
-                user_answer, is_correct, bookmarked, followup_session_id,
-                created_at, updated_at
+                user_answer, user_answer_images_json, is_correct, bookmarked,
+                followup_session_id, ai_judgment, source_type, source_library_id,
+                source_library_name, source_paper_id, source_paper_display_name,
+                source_question_number, source_snapshot_id, grading_method, created_at,
+                updated_at
             )
             SELECT
                 id, session_id, COALESCE(turn_id, ''), question_id, question,
                 question_type, options_json, correct_answer, explanation,
-                difficulty, user_answer, is_correct, bookmarked,
-                followup_session_id, created_at, updated_at
+                difficulty, user_answer, COALESCE(user_answer_images_json, '[]'),
+                is_correct, bookmarked, followup_session_id, COALESCE(ai_judgment, ''),
+                COALESCE(source_type, ''), COALESCE(source_library_id, ''),
+                COALESCE(source_library_name, ''), COALESCE(source_paper_id, ''),
+                COALESCE(source_paper_display_name, ''), COALESCE(source_question_number, ''),
+                COALESCE(source_snapshot_id, ''), COALESCE(grading_method, ''),
+                created_at, updated_at
             FROM notebook_entries;
 
             DROP TABLE notebook_entries;
@@ -1484,7 +1549,101 @@ class SQLiteSessionStore:
         session["active_turns"] = await self.list_active_turns(session_id)
         return session
 
-    # ── Notebook entries ──────────────────────────────────────────────
+    # ── Quiz snapshots / Notebook entries ────────────────────────────
+
+    def _create_quiz_snapshot_sync(
+        self,
+        session_id: str,
+        turn_id: str,
+        payload: dict[str, Any],
+    ) -> dict[str, Any]:
+        session_id = str(session_id or "").strip()
+        turn_id = str(turn_id or "").strip()
+        if not session_id or not turn_id:
+            raise ValueError("Quiz snapshots require session_id and turn_id")
+        source = payload.get("source") if isinstance(payload.get("source"), dict) else {}
+        snapshot_json = _json_dumps(payload)
+        created_at = time.time()
+        with self._connect() as conn:
+            if conn.execute("SELECT id FROM sessions WHERE id = ?", (session_id,)).fetchone() is None:
+                raise ValueError(f"Session not found: {session_id}")
+            try:
+                cur = conn.execute(
+                    """
+                    INSERT INTO quiz_snapshots (
+                        session_id, turn_id, source_type, paper_id,
+                        paper_display_name, paper_source_hash, snapshot_json, created_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        session_id,
+                        turn_id,
+                        str(source.get("source_type") or payload.get("source_type") or ""),
+                        str(source.get("paper_id") or payload.get("paper_id") or ""),
+                        str(source.get("paper_display_name") or ""),
+                        str(source.get("paper_source_hash") or ""),
+                        snapshot_json,
+                        created_at,
+                    ),
+                )
+            except sqlite3.IntegrityError as exc:
+                raise ValueError(
+                    f"Quiz snapshot already exists for session {session_id!r} and turn {turn_id!r}"
+                ) from exc
+            conn.commit()
+            snapshot_id = str(cur.lastrowid)
+        return {
+            "snapshot_id": snapshot_id,
+            "session_id": session_id,
+            "turn_id": turn_id,
+            "created_at": created_at,
+            **payload,
+        }
+
+    async def create_quiz_snapshot(
+        self,
+        session_id: str,
+        turn_id: str,
+        payload: dict[str, Any],
+    ) -> dict[str, Any]:
+        return await self._run(self._create_quiz_snapshot_sync, session_id, turn_id, payload)
+
+    def _get_quiz_snapshot_sync(
+        self,
+        session_id: str,
+        turn_id: str,
+    ) -> dict[str, Any] | None:
+        with self._connect() as conn:
+            row = conn.execute(
+                """
+                SELECT id, session_id, turn_id, source_type, paper_id,
+                       paper_display_name, paper_source_hash, snapshot_json, created_at
+                FROM quiz_snapshots
+                WHERE session_id = ? AND turn_id = ?
+                """,
+                (session_id, turn_id),
+            ).fetchone()
+        if row is None:
+            return None
+        payload = _json_loads(row["snapshot_json"], {})
+        if not isinstance(payload, dict):
+            payload = {}
+        return {
+            "snapshot_id": str(row["id"]),
+            "session_id": row["session_id"],
+            "turn_id": row["turn_id"],
+            "source_type": row["source_type"] or "",
+            "paper_id": row["paper_id"] or "",
+            "paper_display_name": row["paper_display_name"] or "",
+            "paper_source_hash": row["paper_source_hash"] or "",
+            "created_at": float(row["created_at"]),
+            **payload,
+        }
+
+    async def get_quiz_snapshot(self, session_id: str, turn_id: str) -> dict[str, Any] | None:
+        return await self._run(self._get_quiz_snapshot_sync, session_id, turn_id)
+
+    # ── Question Bank entries ─────────────────────────────────────────
 
     def _upsert_notebook_entries_sync(self, session_id: str, items: list[dict[str, Any]]) -> int:
         if not items:
@@ -1503,76 +1662,78 @@ class SQLiteSessionStore:
                 if not question or not question_id:
                     continue
                 turn_id = (item.get("turn_id") or "").strip()
-                # ``user_answer_images`` is an optional list of records
-                # ``[{id, url, filename, mime_type}, …]``. We serialise it
-                # here so callers that only know about text don't need to
-                # know JSON. ``None`` keeps the existing column value on
-                # UPDATE (avoid clobbering stored images on a partial
-                # upsert that only changes ``is_correct``).
                 images_value = item.get("user_answer_images")
                 images_json = _json_dumps(images_value) if isinstance(images_value, list) else None
-                if images_json is None:
-                    conn.execute(
-                        """
-                        INSERT INTO notebook_entries (
-                            session_id, turn_id, question_id, question, question_type,
-                            options_json, correct_answer, explanation, difficulty,
-                            user_answer, user_answer_images_json, is_correct,
-                            bookmarked, followup_session_id, created_at, updated_at
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '[]', ?, 0, '', ?, ?)
-                        ON CONFLICT(session_id, turn_id, question_id) DO UPDATE SET
-                            user_answer = excluded.user_answer,
-                            is_correct = excluded.is_correct,
-                            updated_at = excluded.updated_at
-                        """,
-                        (
-                            session_id,
-                            turn_id,
-                            question_id,
-                            question,
-                            item.get("question_type") or "",
-                            _json_dumps(item.get("options") or {}),
-                            item.get("correct_answer") or "",
-                            item.get("explanation") or "",
-                            item.get("difficulty") or "",
-                            item.get("user_answer") or "",
-                            1 if item.get("is_correct") else 0,
-                            now,
-                            now,
-                        ),
+                source_type = str(item.get("source_type") or "").strip()
+                source_library_id = str(item.get("paper_library_id") or "").strip()
+                source_library_name = str(item.get("paper_library_name") or "").strip()
+                source_paper_id = str(item.get("paper_id") or "").strip()
+                source_paper_display_name = str(item.get("paper_display_name") or "").strip()
+                source_question_number = str(item.get("source_question_number") or "").strip()
+                source_snapshot_id = str(item.get("source_snapshot_id") or "").strip()
+                grading_method = str(item.get("grading_method") or "").strip()
+                is_correct = item.get("is_correct")
+                is_correct_value = None if is_correct is None else (1 if is_correct else 0)
+                image_sql = "'[]'" if images_json is None else "?"
+                values: list[Any] = [
+                    session_id,
+                    turn_id,
+                    question_id,
+                    question,
+                    item.get("question_type") or "",
+                    _json_dumps(item.get("options") or {}),
+                    item.get("correct_answer") or "",
+                    item.get("explanation") or "",
+                    item.get("difficulty") or "",
+                    item.get("user_answer") or "",
+                ]
+                if images_json is not None:
+                    values.append(images_json)
+                values.extend(
+                    [
+                        is_correct_value,
+                        source_type,
+                        source_library_id,
+                        source_library_name,
+                        source_paper_id,
+                        source_paper_display_name,
+                        source_question_number,
+                        source_snapshot_id,
+                        grading_method,
+                        now,
+                        now,
+                    ]
+                )
+                conn.execute(
+                    f"""
+                    INSERT INTO notebook_entries (
+                        session_id, turn_id, question_id, question, question_type,
+                        options_json, correct_answer, explanation, difficulty,
+                        user_answer, user_answer_images_json, is_correct,
+                        bookmarked, followup_session_id, source_type, source_library_id,
+                        source_library_name, source_paper_id, source_paper_display_name,
+                        source_question_number, source_snapshot_id, grading_method,
+                        created_at, updated_at
+                    ) VALUES (
+                        ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, {image_sql}, ?, 0, '',
+                        ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
                     )
-                else:
-                    conn.execute(
-                        """
-                        INSERT INTO notebook_entries (
-                            session_id, turn_id, question_id, question, question_type,
-                            options_json, correct_answer, explanation, difficulty,
-                            user_answer, user_answer_images_json, is_correct,
-                            bookmarked, followup_session_id, created_at, updated_at
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, '', ?, ?)
-                        ON CONFLICT(session_id, turn_id, question_id) DO UPDATE SET
-                            user_answer = excluded.user_answer,
-                            user_answer_images_json = excluded.user_answer_images_json,
-                            is_correct = excluded.is_correct,
-                            updated_at = excluded.updated_at
-                        """,
-                        (
-                            session_id,
-                            turn_id,
-                            question_id,
-                            question,
-                            item.get("question_type") or "",
-                            _json_dumps(item.get("options") or {}),
-                            item.get("correct_answer") or "",
-                            item.get("explanation") or "",
-                            item.get("difficulty") or "",
-                            item.get("user_answer") or "",
-                            images_json,
-                            1 if item.get("is_correct") else 0,
-                            now,
-                            now,
-                        ),
-                    )
+                    ON CONFLICT(session_id, turn_id, question_id) DO UPDATE SET
+                        user_answer = excluded.user_answer,
+                        {"user_answer_images_json = excluded.user_answer_images_json," if images_json is not None else ""}
+                        is_correct = excluded.is_correct,
+                        source_type = CASE WHEN excluded.source_type <> '' THEN excluded.source_type ELSE notebook_entries.source_type END,
+                        source_library_id = CASE WHEN excluded.source_library_id <> '' THEN excluded.source_library_id ELSE notebook_entries.source_library_id END,
+                        source_library_name = CASE WHEN excluded.source_library_name <> '' THEN excluded.source_library_name ELSE notebook_entries.source_library_name END,
+                        source_paper_id = CASE WHEN excluded.source_paper_id <> '' THEN excluded.source_paper_id ELSE notebook_entries.source_paper_id END,
+                        source_paper_display_name = CASE WHEN excluded.source_paper_display_name <> '' THEN excluded.source_paper_display_name ELSE notebook_entries.source_paper_display_name END,
+                        source_question_number = CASE WHEN excluded.source_question_number <> '' THEN excluded.source_question_number ELSE notebook_entries.source_question_number END,
+                        source_snapshot_id = CASE WHEN excluded.source_snapshot_id <> '' THEN excluded.source_snapshot_id ELSE notebook_entries.source_snapshot_id END,
+                        grading_method = CASE WHEN excluded.grading_method <> '' THEN excluded.grading_method ELSE notebook_entries.grading_method END,
+                        updated_at = excluded.updated_at
+                    """,
+                    tuple(values),
+                )
                 upserted += 1
             conn.commit()
         return upserted
@@ -1602,10 +1763,38 @@ class SQLiteSessionStore:
             "difficulty": row["difficulty"] or "",
             "user_answer": row["user_answer"] or "",
             "user_answer_images": images,
-            "is_correct": bool(row["is_correct"]),
             "bookmarked": bool(row["bookmarked"]),
             "followup_session_id": row["followup_session_id"] or "",
             "ai_judgment": (row["ai_judgment"] or "") if "ai_judgment" in keys else "",
+            "source_type": (row["source_type"] or "") if "source_type" in keys else "",
+            "paper_library_id": (
+                (row["source_library_id"] or "") if "source_library_id" in keys else ""
+            ),
+            "paper_library_name": (
+                (row["source_library_name"] or "") if "source_library_name" in keys else ""
+            ),
+            "paper_id": (row["source_paper_id"] or "") if "source_paper_id" in keys else "",
+            "paper_display_name": (
+                (row["source_paper_display_name"] or "")
+                if "source_paper_display_name" in keys
+                else ""
+            ),
+            "source_question_number": (
+                (row["source_question_number"] or "")
+                if "source_question_number" in keys
+                else ""
+            ),
+            "source_snapshot_id": (
+                (row["source_snapshot_id"] or "") if "source_snapshot_id" in keys else ""
+            ),
+            "grading_method": (
+                (row["grading_method"] or "") if "grading_method" in keys else ""
+            ),
+            "is_correct": (
+                None
+                if row["is_correct"] is None
+                else bool(row["is_correct"])
+            ),
             "created_at": float(row["created_at"]),
             "updated_at": float(row["updated_at"]),
         }
@@ -1625,7 +1814,11 @@ class SQLiteSessionStore:
                 n.turn_id, n.question_id, n.question, n.question_type, n.options_json,
                 n.correct_answer, n.explanation, n.difficulty,
                 n.user_answer, n.user_answer_images_json, n.is_correct, n.bookmarked,
-                n.followup_session_id, n.ai_judgment, n.created_at, n.updated_at
+                n.followup_session_id, n.ai_judgment, n.source_type,
+                n.source_library_id, n.source_library_name,
+                n.source_paper_id, n.source_paper_display_name,
+                n.source_question_number, n.source_snapshot_id, n.grading_method,
+                n.created_at, n.updated_at
             FROM notebook_entries n
             LEFT JOIN sessions s ON s.id = n.session_id
         """
@@ -1760,7 +1953,9 @@ class SQLiteSessionStore:
         if "bookmarked" in fields:
             fields["bookmarked"] = 1 if fields["bookmarked"] else 0
         if "is_correct" in fields:
-            fields["is_correct"] = 1 if fields["is_correct"] else 0
+            fields["is_correct"] = (
+                None if fields["is_correct"] is None else 1 if fields["is_correct"] else 0
+            )
         set_clause = ", ".join(f"{k} = ?" for k in fields)
         values = list(fields.values()) + [entry_id]
         with self._connect() as conn:

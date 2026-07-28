@@ -71,6 +71,7 @@ def test_builtin_capability_registry_covers_documented_capabilities() -> None:
         "chat",
         "deep_solve",
         "deep_question",
+        "exam",
         "deep_research",
         "math_animator",
         "visualize",

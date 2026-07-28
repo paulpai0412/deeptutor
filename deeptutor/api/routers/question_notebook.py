@@ -11,6 +11,7 @@ import uuid as _uuid
 from fastapi import APIRouter, HTTPException, Query, Response
 from pydantic import BaseModel, Field
 
+from deeptutor.services.quiz import deterministic_grade
 from deeptutor.services.session import get_sqlite_session_store
 from deeptutor.services.storage import get_attachment_store
 
@@ -49,10 +50,18 @@ class NotebookEntryItem(BaseModel):
     difficulty: str = ""
     user_answer: str = ""
     user_answer_images: list[AnswerImageItem] = []
-    is_correct: bool = False
+    is_correct: bool | None = None
     bookmarked: bool = False
     followup_session_id: str = ""
     ai_judgment: str = ""
+    source_type: str = ""
+    paper_library_id: str = ""
+    paper_library_name: str = ""
+    paper_id: str = ""
+    paper_display_name: str = ""
+    source_question_number: str = ""
+    source_snapshot_id: str = ""
+    grading_method: str = ""
     created_at: float
     updated_at: float
     categories: list[CategoryItem] | None = None
@@ -67,6 +76,7 @@ class EntryUpdateRequest(BaseModel):
     bookmarked: bool | None = None
     followup_session_id: str | None = None
     ai_judgment: str | None = None
+    is_correct: bool | None = None
 
 
 class CategoryItem(BaseModel):
@@ -115,11 +125,21 @@ class UpsertEntryRequest(BaseModel):
     explanation: str = ""
     difficulty: str = ""
     user_answer: str = ""
+    source_type: str = ""
+    paper_library_id: str = ""
+    paper_library_name: str = ""
+    paper_id: str = ""
+    paper_display_name: str = ""
+    source_question_number: str = ""
+    source_snapshot_id: str = ""
+    grading_method: str = ""
+    is_multi_select: bool = False
+    image_dependent: bool = False
     # Optional: list of images attached as part of the learner's answer.
     # ``None`` means "don't touch any previously-stored images on update";
     # an empty list explicitly clears them.
     user_answer_images: list[AnswerImageUpload] | None = None
-    is_correct: bool = False
+    is_correct: bool | None = None
 
 
 # ── Entry endpoints ──────────────────────────────────────────────
@@ -184,6 +204,20 @@ async def upsert_single_entry(payload: UpsertEntryRequest):
     store = get_sqlite_session_store()
     images_records = await _persist_answer_images(payload.session_id, payload.user_answer_images)
     item = payload.model_dump()
+    computed = deterministic_grade(
+        question_type=payload.question_type,
+        options=payload.options,
+        correct_answer=payload.correct_answer,
+        user_answer=payload.user_answer,
+        is_multi_select=payload.is_multi_select,
+        image_dependent=payload.image_dependent,
+    )
+    if computed is not None:
+        item["is_correct"] = computed
+        item["grading_method"] = "deterministic"
+    elif payload.is_multi_select or payload.image_dependent or payload.is_correct is None:
+        item["is_correct"] = None
+        item["grading_method"] = payload.grading_method or "manual"
     # The store expects ``user_answer_images`` as a plain list of dicts
     # (or absent to mean "leave the stored images alone"). Strip the
     # upload payload version and replace with the persisted records.
@@ -257,7 +291,7 @@ async def get_entry(entry_id: int) -> NotebookEntryItem:
 @router.patch("/entries/{entry_id}")
 async def update_entry(entry_id: int, payload: EntryUpdateRequest):
     store = get_sqlite_session_store()
-    updates = payload.model_dump(exclude_none=True)
+    updates = payload.model_dump(exclude_unset=True)
     if not updates:
         raise HTTPException(status_code=400, detail="No fields to update")
     updated = await store.update_notebook_entry(entry_id, updates)

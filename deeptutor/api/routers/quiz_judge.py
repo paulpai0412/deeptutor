@@ -14,7 +14,7 @@ from typing import Any
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
-from deeptutor.services.config import PROJECT_ROOT, load_config_with_main
+from deeptutor.services.config import PROJECT_ROOT, load_config_with_main, parse_language
 from deeptutor.services.llm import stream as llm_stream
 from deeptutor.services.settings.interface_settings import get_ui_language
 from deeptutor.utils.error_utils import format_exception_message
@@ -61,6 +61,7 @@ def _build_judge_user_prompt(
     user_answer: str,
     has_image: bool,
     image_count: int = 0,
+    question_image_count: int = 0,
 ) -> str:
     options_block = ""
     if options:
@@ -68,7 +69,7 @@ def _build_judge_user_prompt(
             options_block = "\n".join(f"  {k}. {v}" for k, v in options.items())
         except Exception:
             options_block = ""
-    if language == "zh":
+    if language.startswith("zh"):
         parts = [
             f"题目类型：{question_type or 'unknown'}",
             f"题干：\n{question}",
@@ -87,7 +88,11 @@ def _build_judge_user_prompt(
                 else "（仅提交了图片，无文字作答）"
             )
         )
-        if has_image:
+        if question_image_count:
+            parts.append(
+                f"题目还包含 {question_image_count} 张图片，请将题目图片作为题意的一部分。"
+            )
+        if image_count:
             count_text = (
                 f"学习者另附了 {image_count} 张图片作为作答内容"
                 if image_count > 1
@@ -114,7 +119,11 @@ def _build_judge_user_prompt(
                 else "(only an image was submitted, no typed answer)"
             )
         )
-        if has_image:
+        if question_image_count:
+            parts.append(
+                f"The question includes {question_image_count} image(s); treat them as part of its context."
+            )
+        if image_count:
             if image_count > 1:
                 parts.append(
                     f"The learner attached {image_count} images as part of the answer. "
@@ -216,9 +225,13 @@ async def websocket_quiz_judge(websocket: WebSocket):
                 {"base64": str, "url": str, "filename": str, "mime_type": str},
                 ...
             ] | null,
+            "question_images": [
+                {"url": str, "filename": str, "mime_type": str},
+                ...
+            ] | null,  # persisted images from the question snapshot
             "user_answer_image": str | null,  # legacy single-image form
             "image_filename": str | null,     # legacy filename for the above
-            "language": "zh" | "en",
+            "language": "zh" | "zh-TW" | "en",
         }
 
     Server → Client (streaming):
@@ -274,13 +287,15 @@ async def websocket_quiz_judge(websocket: WebSocket):
                 pass
         return
 
-    requested_language = (data.get("language") or "").strip().lower()
-    if requested_language not in ("zh", "en"):
+    requested_language = (data.get("language") or "").strip()
+    if requested_language:
+        requested_language = parse_language(requested_language)
+    else:
         requested_language = get_ui_language(
             default=_config.get("system", {}).get("language", "en")
         )
-        if requested_language not in ("zh", "en"):
-            requested_language = "en"
+    if requested_language not in ("zh", "zh-TW", "en"):
+        requested_language = "en"
 
     user_answer = data.get("user_answer") or ""
 
@@ -332,10 +347,52 @@ async def websocket_quiz_judge(websocket: WebSocket):
                 }
             )
 
-    has_image = bool(image_records)
+    question_image_records: list[dict[str, str]] = []
+    raw_question_images = data.get("question_images")
+    if isinstance(raw_question_images, list):
+        for entry in raw_question_images:
+            if isinstance(entry, str):
+                url = entry.strip()
+                if url:
+                    question_image_records.append(
+                        {
+                            "base64": "",
+                            "url": url,
+                            "filename": "question.png",
+                            "mime_type": "image/png",
+                        }
+                    )
+                continue
+            if not isinstance(entry, dict):
+                continue
+            url = str(entry.get("url") or "").strip()
+            b64 = str(entry.get("base64") or "")
+            if not b64 and not url:
+                continue
+            filename = str(entry.get("filename") or "question.png")
+            question_image_records.append(
+                {
+                    "base64": b64,
+                    "url": url,
+                    "filename": filename,
+                    "mime_type": str(entry.get("mime_type") or _guess_image_mime(filename)),
+                }
+            )
+
+    all_image_records = question_image_records + image_records
+    has_image = bool(all_image_records)
 
     options_value = data.get("options") if isinstance(data.get("options"), dict) else None
-    system_prompt = _JUDGE_SYSTEM_PROMPTS.get(requested_language, _JUDGE_SYSTEM_PROMPTS["en"])
+    system_prompt = _JUDGE_SYSTEM_PROMPTS.get(
+        "zh" if requested_language.startswith("zh") else "en",
+        _JUDGE_SYSTEM_PROMPTS["en"],
+    )
+    traditionalize = None
+    if requested_language == "zh-TW":
+        from deeptutor.i18n.zh_tw import to_traditional_chinese
+
+        traditionalize = to_traditional_chinese
+        system_prompt = traditionalize(system_prompt)
     user_prompt = _build_judge_user_prompt(
         language=requested_language,
         question=question_text,
@@ -346,13 +403,20 @@ async def websocket_quiz_judge(websocket: WebSocket):
         user_answer=user_answer,
         has_image=has_image,
         image_count=len(image_records),
+        question_image_count=len(question_image_records),
     )
+    if traditionalize is not None:
+        user_prompt = traditionalize(user_prompt)
 
-    if not (user_answer.strip() or has_image):
+    if not (user_answer.strip() or image_records):
         await safe_send(
             {
                 "type": "error",
-                "content": ("No answer to judge — submit a typed answer or attach an image."),
+                "content": (
+                    "沒有可供評判的答案——請先輸入答案或附加圖片。"
+                    if traditionalize is not None
+                    else "No answer to judge — submit a typed answer or attach an image."
+                ),
             }
         )
         try:
@@ -383,7 +447,7 @@ async def websocket_quiz_judge(websocket: WebSocket):
         if supports_vision(binding, model):
             user_content = await _build_multimodal_user_content(
                 text=user_prompt,
-                image_records=image_records,
+                image_records=all_image_records,
             )
             stream_kwargs["messages"] = [
                 {"role": "system", "content": system_prompt},
@@ -407,7 +471,8 @@ async def websocket_quiz_judge(websocket: WebSocket):
         ):
             if not chunk:
                 continue
-            if not await safe_send({"type": "text", "content": chunk}):
+            visible_chunk = traditionalize(chunk) if traditionalize is not None else chunk
+            if not await safe_send({"type": "text", "content": visible_chunk}):
                 break
         await safe_send({"type": "done"})
     except WebSocketDisconnect:
