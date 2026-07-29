@@ -152,16 +152,16 @@ function isMultipleChoice(question: QuizQuestion): boolean {
  * string match.
  */
 function isAutoGradable(question: QuizQuestion): boolean {
-  // Multi-select and image-dependent questions are deliberately manual: a
-  // single selected value cannot conservatively represent their grading.
+  // Multi-select questions remain manual because a single selected value
+  // cannot conservatively represent their grading. A source image does not
+  // prevent answer-key grading for single-choice questions.
+  const hasSourceImage = Boolean(
+    question.source_images?.length || question.source_image_attachments?.length,
+  );
   return (
     !question.is_multi_select &&
     !!question.correct_answer.trim() &&
-    !(question.source_images && question.source_images.length > 0) &&
-    !(
-      question.source_image_attachments &&
-      question.source_image_attachments.length > 0
-    ) &&
+    (!hasSourceImage || isMultipleChoice(question)) &&
     (isMultipleChoice(question) ||
       isConceptQuizQuestion(question.question_type) ||
       isFillInBlankQuizQuestion(question.question_type))

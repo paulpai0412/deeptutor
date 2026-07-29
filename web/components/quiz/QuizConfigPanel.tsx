@@ -40,6 +40,8 @@ interface QuizConfigPanelProps {
   onUploadPdf: (file: File | null) => void;
   /** Exam mode chooses a Paper Library before choosing a paper. */
   examMode?: boolean;
+  /** Latest display name for the selected Exam paper. */
+  onPaperNameChange?: (name: string) => void;
   /**
    * When provided, the panel is wrapped in a `CollapsibleConfigSection` (used
    * by /playground). Omit both to render the bare form — used inside the
@@ -112,6 +114,7 @@ export default memo(function QuizConfigPanel({
   uploadedPdf,
   onUploadPdf,
   examMode = false,
+  onPaperNameChange,
   collapsed,
   onToggleCollapsed,
 }: QuizConfigPanelProps) {
@@ -145,7 +148,10 @@ export default memo(function QuizConfigPanel({
   }, [examMode, value.paper_library_id]);
 
   useEffect(() => {
-    if (!examMode || !value.paper_library_id) return;
+    if (!examMode || !value.paper_library_id) {
+      onPaperNameChange?.("");
+      return;
+    }
     let cancelled = false;
     void listLibraryPapers(value.paper_library_id)
       .then((records) => {
@@ -169,7 +175,12 @@ export default memo(function QuizConfigPanel({
     return () => {
       cancelled = true;
     };
-  }, [examMode, value.paper_library_id]);
+  }, [examMode, onPaperNameChange, value.paper_library_id]);
+
+  useEffect(() => {
+    const selected = papers.find((paper) => paper.paper_id === value.paper_id);
+    onPaperNameChange?.(selected?.display_name ?? "");
+  }, [onPaperNameChange, papers, value.paper_id]);
 
   const update = <K extends keyof DeepQuestionFormConfig>(
     key: K,

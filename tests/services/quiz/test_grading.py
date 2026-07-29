@@ -57,8 +57,8 @@ def test_subjective_multiselect_and_missing_answers_require_manual_review() -> N
     ) is None
     assert deterministic_grade(
         question_type="choice",
-        options={"A": "A"},
+        options={"A": "A", "B": "B"},
         correct_answer="A",
         user_answer="A",
         image_dependent=True,
-    ) is None
+    ) is True

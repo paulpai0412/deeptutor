@@ -173,6 +173,9 @@ export default memo(function ChatComposer({
   isStreaming,
   isVisualizeMode,
   isExamMode = false,
+  paperLibraries = [],
+  selectedPaperLibraryId = "",
+  onSelectPaperLibrary,
   capabilityNeedsConfig,
   capabilityConfigConfirmed,
   onRequestConfigConfirm,
@@ -180,7 +183,6 @@ export default memo(function ChatComposer({
   onSetCapMenuOpen,
   onSetSpaceMenuOpen,
   onToggleKB,
-  onOpenPaperLibrary,
   onSelectLLM,
   onSelectNotebookPicker,
   onSelectBookPicker,
@@ -259,6 +261,13 @@ export default memo(function ChatComposer({
   isVisualizeMode: boolean;
   /** Exam replaces the knowledge-base scope chip with Paper Library. */
   isExamMode?: boolean;
+  paperLibraries?: Array<{
+    library_id: string;
+    name: string;
+    paper_count?: number;
+  }>;
+  selectedPaperLibraryId?: string;
+  onSelectPaperLibrary?: (libraryId: string) => void;
   /**
    * True when the active capability (e.g. Quiz / Visualize / Research)
    * requires explicit configuration before sending. When true, `canSend`
@@ -276,7 +285,6 @@ export default memo(function ChatComposer({
   onSetCapMenuOpen: (open: boolean | ((prev: boolean) => boolean)) => void;
   onSetSpaceMenuOpen: (open: boolean | ((prev: boolean) => boolean)) => void;
   onToggleKB: (name: string) => void;
-  onOpenPaperLibrary?: () => void;
   onSelectLLM: (selection: LLMSelection | null) => void;
   onSelectNotebookPicker: () => void;
   onSelectBookPicker: () => void;
@@ -958,7 +966,9 @@ export default memo(function ChatComposer({
                     selected={isExamMode ? [] : selectedKnowledgeBases}
                     onToggle={onToggleKB}
                     scope={isExamMode ? "paper" : "knowledge"}
-                    onPaperLibraryClick={onOpenPaperLibrary}
+                    paperLibraries={paperLibraries}
+                    selectedPaperLibraryId={selectedPaperLibraryId}
+                    onSelectPaperLibrary={onSelectPaperLibrary}
                   />
                 ) : null}
                 {onPersonaSelectionChange ? (

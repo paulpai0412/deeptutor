@@ -29,11 +29,15 @@ def deterministic_grade(
     """Return a verdict only where exact grading is conservative.
 
     ``None`` means manual/AI review is required. Multi-select, subjective,
-    image-dependent, and answer-less questions are never guessed here.
+    and answer-less questions are never guessed here. An image-dependent
+    single-choice question can still be graded from its answer key; the image
+    only changes how the learner reads the prompt.
     """
-    if is_multi_select or image_dependent:
+    if is_multi_select:
         return None
     qtype = str(question_type or "").strip().casefold()
+    if image_dependent and qtype != "choice":
+        return None
     correct = str(correct_answer or "").strip()
     answer = str(user_answer or "").strip()
     if not correct or not answer:

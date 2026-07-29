@@ -144,17 +144,36 @@ def test_upsert_computes_objective_grade_and_preserves_manual_source(store: SQLi
         assert objective.json()["paper_library_name"] == "History library"
         assert objective.json()["paper_display_name"] == "History paper"
 
-        manual = client.post(
+        image_objective = client.post(
             "/api/v1/question-notebook/entries/upsert",
             json={
                 "session_id": sid,
                 "turn_id": "turn-1",
                 "question_id": "paper-q2",
-                "question": "Explain the image",
+                "question": "Read the image and pick one",
                 "question_type": "choice",
                 "options": {"A": "Alpha", "B": "Beta"},
                 "correct_answer": "B",
                 "user_answer": "B",
+                "is_correct": True,
+                "image_dependent": True,
+                "source_type": "original_paper",
+            },
+        )
+        assert image_objective.status_code == 200
+        assert image_objective.json()["is_correct"] is True
+        assert image_objective.json()["grading_method"] == "deterministic"
+
+        manual = client.post(
+            "/api/v1/question-notebook/entries/upsert",
+            json={
+                "session_id": sid,
+                "turn_id": "turn-1",
+                "question_id": "paper-q3",
+                "question": "Explain the image",
+                "question_type": "written",
+                "correct_answer": "An explanation",
+                "user_answer": "An explanation",
                 "is_correct": True,
                 "image_dependent": True,
                 "source_type": "original_paper",

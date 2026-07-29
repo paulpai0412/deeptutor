@@ -148,9 +148,14 @@ test("ordinary Quiz exposes only Custom and Mimic Paper modes", async ({ page })
   await expect(page.getByText("Parsed Dir", { exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Quiz", exact: true }).click();
   await page.getByText("Exam", { exact: true }).last().click();
-  await expect(
-    page.getByRole("button", { name: "Paper Library", exact: true }),
-  ).toBeVisible();
+  const paperLibraryChip = page.getByRole("button", {
+    name: "Paper Library",
+    exact: true,
+  });
+  await expect(paperLibraryChip).toBeVisible();
+  await paperLibraryChip.click();
+  await expect(paperLibraryChip).toHaveAttribute("aria-expanded", "true");
+  await paperLibraryChip.click();
   await expect(
     page.getByRole("button", { name: "Select knowledge bases", exact: true }),
   ).toHaveCount(0);
@@ -421,9 +426,28 @@ test.describe("Knowledge Center → Paper Library → Exam :: real release flow"
     await expect(page.getByText("Type", { exact: true })).toHaveCount(0);
     await capture(page, "09-exam-library-to-paper-picker");
 
-    await expect(
-      page.getByRole("button", { name: "Paper Library", exact: true }),
-    ).toBeVisible();
+    const paperLibraryChip = page.getByRole("button", {
+      name: "Paper Library",
+      exact: true,
+    });
+    await expect(paperLibraryChip).toBeVisible();
+    await paperLibraryChip.click();
+    const archiveLibraryOption = page.getByRole("button", {
+      name: new RegExp(`^${archiveName} ·`),
+    });
+    await expect(archiveLibraryOption).toBeVisible();
+    const sourceLibraryOption = page.getByRole("button", {
+      name: new RegExp(`^${libraryName} ·`),
+    });
+    await expect(sourceLibraryOption).toBeVisible();
+    await sourceLibraryOption.click();
+    await expect(examLibrarySelect).toHaveValue(library.library_id);
+    await expect(examPaperSelect).toHaveValue("");
+    await archiveLibraryOption.click();
+    await expect(examLibrarySelect).toHaveValue(archive.library_id);
+    await expect(examPaperSelect).toBeEnabled();
+    await examPaperSelect.selectOption(paperId);
+    await expect(examPaperSelect).toHaveValue(paperId);
     await page.getByRole("button", { name: "Confirm", exact: true }).click();
     await expect(page).toHaveURL(/\/home\/[^?]+$/, { timeout: 60_000 });
     await expect(page.getByText(detail.questions[0].question_text)).toBeVisible({
@@ -519,6 +543,22 @@ test.describe("Knowledge Center → Paper Library → Exam :: real release flow"
     expect(snapshotImageSrc).toMatch(/\/api\/attachments\//);
     await capture(page, "14-exam-snapshot-image-before-delete");
 
+    const imageChoiceQuestion = detail.questions[imageQuestionIndex]!;
+    expect(imageChoiceQuestion.question_type).toBe("choice");
+    expect(imageChoiceQuestion.options).not.toEqual({});
+    expect(imageQuestionIndex).toBeLessThan(detail.questions.length - 1);
+    const imageAnswerKey = answerKey(imageChoiceQuestion);
+    await page
+      .locator("button")
+      .filter({ hasText: imageChoiceQuestion.options[imageAnswerKey] || imageAnswerKey })
+      .first()
+      .click({ force: true });
+    await page.getByRole("button", { name: "Check Answer", exact: true }).click();
+    await expect(page.getByText("Correct", { exact: true })).toBeVisible();
+    await expect(
+      page.getByText(detail.questions[imageQuestionIndex + 1].question_text),
+    ).toBeVisible({ timeout: 10_000 });
+
     const sessionUrl = page.url();
     await page.goto("/knowledge?tab=papers");
     await page.locator("aside button").filter({ hasText: archiveName }).click();
@@ -555,7 +595,9 @@ test.describe("Knowledge Center → Paper Library → Exam :: real release flow"
       timeout: 60_000,
     });
     await expect(
-      page.getByTitle("Click to rename session").getByText("Exam", { exact: true }),
+      page
+        .getByTitle("Click to rename session")
+        .getByText(renamedName, { exact: true }),
     ).toBeVisible();
     await expect(page.getByRole("button", { name: "AI Judgment", exact: true })).toBeVisible();
     await page

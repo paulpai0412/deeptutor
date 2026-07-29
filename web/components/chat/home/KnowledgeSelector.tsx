@@ -22,14 +22,22 @@ export default function KnowledgeSelector({
   onToggle,
   placement = "top",
   scope = "knowledge",
-  onPaperLibraryClick,
+  paperLibraries = [],
+  selectedPaperLibraryId = "",
+  onSelectPaperLibrary,
 }: {
   knowledgeBases: { name: string }[];
   selected: string[];
   onToggle: (name: string) => void;
   placement?: "top" | "bottom";
   scope?: "knowledge" | "paper";
-  onPaperLibraryClick?: () => void;
+  paperLibraries?: Array<{
+    library_id: string;
+    name: string;
+    paper_count?: number;
+  }>;
+  selectedPaperLibraryId?: string;
+  onSelectPaperLibrary?: (libraryId: string) => void;
 }) {
   const { t } = useTranslation();
   const isPaperLibrary = scope === "paper";
@@ -59,6 +67,19 @@ export default function KnowledgeSelector({
   }, [open]);
 
   const count = selected.length;
+  const paperLibraryOptions = paperLibraries.map((library) => ({
+    key: library.library_id,
+    name:
+      library.paper_count === undefined
+        ? library.name
+        : `${library.name} · ${library.paper_count} ${t("papers")}`,
+  }));
+  const knowledgeOptions = knowledgeBases.map((kb) => ({
+    key: kb.name,
+    name: kb.name,
+  }));
+  const options = isPaperLibrary ? paperLibraryOptions : knowledgeOptions;
+  const hasPaperLibrarySelection = Boolean(selectedPaperLibraryId);
   const label = isPaperLibrary
     ? t("Paper Library")
     : count === 0
@@ -71,28 +92,22 @@ export default function KnowledgeSelector({
 
   return (
     <div ref={rootRef} className="relative">
-      {/* Resting state is just the database icon; hovering (or opening
-          the menu) slides the scope label out and lingers ~1.2s after
+      {/* Resting state is just the scope icon; hovering (or opening the
+          menu) slides the scope label out and lingers ~1.2s after
           leave/selection before collapsing. A non-empty scope tints the
           icon primary. */}
       <button
         type="button"
-        onClick={() => {
-          if (isPaperLibrary) {
-            onPaperLibraryClick?.();
-            return;
-          }
-          setOpen(!open);
-        }}
+        onClick={() => setOpen(!open)}
         aria-label={
           isPaperLibrary ? t("Paper Library") : t("Select knowledge bases")
         }
-        aria-expanded={isPaperLibrary ? undefined : open}
+        aria-expanded={open}
         {...lingerProps}
         className={`inline-flex h-8 shrink-0 items-center rounded-lg px-2 text-[14px] font-medium transition-[background-color,color,transform] duration-150 active:scale-[0.97] ${
           open
             ? "bg-[var(--muted)] text-[var(--foreground)]"
-            : count > 0
+            : (isPaperLibrary ? hasPaperLibrarySelection : count > 0)
               ? "text-[var(--primary)] hover:bg-[var(--primary)]/[0.07]"
               : "text-[var(--muted-foreground)] hover:bg-[var(--muted)]/55 hover:text-[var(--foreground)]"
         }`}
@@ -113,23 +128,31 @@ export default function KnowledgeSelector({
         </span>
       </button>
 
-      {!isPaperLibrary && open && (
+      {open && (
         <div
           className={`dt-popup-up absolute right-0 z-50 ${menuPlacementClass} w-[min(280px,calc(100vw-32px))] overflow-hidden rounded-xl border border-[var(--border)] bg-[var(--popover)] shadow-lg backdrop-blur-md`}
         >
-          {knowledgeBases.length === 0 ? (
+          {options.length === 0 ? (
             <div className="px-3 py-4 text-center text-[12px] text-[var(--muted-foreground)]">
-              {t("No knowledge bases available")}
+              {isPaperLibrary
+                ? t("No Paper Libraries yet")
+                : t("No knowledge bases available")}
             </div>
           ) : (
             <div className="max-h-[280px] overflow-y-auto py-1">
-              {knowledgeBases.map((kb) => {
-                const active = selected.includes(kb.name);
+              {options.map((option) => {
+                const active = isPaperLibrary
+                  ? option.key === selectedPaperLibraryId
+                  : selected.includes(option.key);
                 return (
                   <button
-                    key={kb.name}
+                    key={option.key}
                     type="button"
-                    onClick={() => onToggle(kb.name)}
+                    onClick={() =>
+                      isPaperLibrary
+                        ? onSelectPaperLibrary?.(option.key)
+                        : onToggle(option.key)
+                    }
                     className={`flex w-full items-center gap-2.5 px-3 py-1.5 text-left transition-colors active:bg-[var(--muted)]/70 ${
                       active
                         ? "bg-[var(--primary)]/[0.06]"
@@ -146,7 +169,7 @@ export default function KnowledgeSelector({
                       }`}
                     />
                     <span className="min-w-0 flex-1 truncate text-[12.5px] font-medium text-[var(--foreground)]">
-                      {kb.name}
+                      {option.name}
                     </span>
                     {active && (
                       <Check
