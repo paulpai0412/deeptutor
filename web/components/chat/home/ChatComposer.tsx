@@ -172,6 +172,7 @@ export default memo(function ChatComposer({
   selectedKnowledgeBases,
   isStreaming,
   isVisualizeMode,
+  isExamMode = false,
   capabilityNeedsConfig,
   capabilityConfigConfirmed,
   onRequestConfigConfirm,
@@ -179,6 +180,7 @@ export default memo(function ChatComposer({
   onSetCapMenuOpen,
   onSetSpaceMenuOpen,
   onToggleKB,
+  onOpenPaperLibrary,
   onSelectLLM,
   onSelectNotebookPicker,
   onSelectBookPicker,
@@ -255,6 +257,8 @@ export default memo(function ChatComposer({
   selectedKnowledgeBases: string[];
   isStreaming: boolean;
   isVisualizeMode: boolean;
+  /** Exam replaces the knowledge-base scope chip with Paper Library. */
+  isExamMode?: boolean;
   /**
    * True when the active capability (e.g. Quiz / Visualize / Research)
    * requires explicit configuration before sending. When true, `canSend`
@@ -272,6 +276,7 @@ export default memo(function ChatComposer({
   onSetCapMenuOpen: (open: boolean | ((prev: boolean) => boolean)) => void;
   onSetSpaceMenuOpen: (open: boolean | ((prev: boolean) => boolean)) => void;
   onToggleKB: (name: string) => void;
+  onOpenPaperLibrary?: () => void;
   onSelectLLM: (selection: LLMSelection | null) => void;
   onSelectNotebookPicker: () => void;
   onSelectBookPicker: () => void;
@@ -757,6 +762,8 @@ export default memo(function ChatComposer({
               <div className="relative">
                 <button
                   ref={capBtnRef}
+                  type="button"
+                  aria-label={t(activeCap.label)}
                   onClick={() => onSetCapMenuOpen((v) => !v)}
                   className={`inline-flex h-8 shrink-0 items-center gap-1.5 rounded-lg px-2 text-[14px] font-medium transition-[background-color,color,transform] duration-150 active:scale-[0.97] ${
                     capMenuOpen
@@ -945,11 +952,13 @@ export default memo(function ChatComposer({
                     onBudgetChange={onSubagentBudgetChange}
                   />
                 ) : null}
-                {knowledgeBases.length > 0 ? (
+                {knowledgeBases.length > 0 || isExamMode ? (
                   <KnowledgeSelector
-                    knowledgeBases={knowledgeBases}
-                    selected={selectedKnowledgeBases}
+                    knowledgeBases={isExamMode ? [] : knowledgeBases}
+                    selected={isExamMode ? [] : selectedKnowledgeBases}
                     onToggle={onToggleKB}
+                    scope={isExamMode ? "paper" : "knowledge"}
+                    onPaperLibraryClick={onOpenPaperLibrary}
                   />
                 ) : null}
                 {onPersonaSelectionChange ? (

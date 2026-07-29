@@ -1,37 +1,39 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Check, ChevronDown, Database } from "lucide-react";
+import { BookOpen, Check, ChevronDown, Database } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { useLingerExpand } from "@/hooks/use-linger-expand";
 
 /**
- * Knowledge-base scope selector (composer toolbar).
+ * Persistent scope selector in the composer toolbar.
  *
- * Mirrors PersonaSelector's collapse-to-icon chip + dropdown, because a
- * KB selection is the same KIND of state: a SESSION-level retrieval
- * scope that persists across turns (stored in session.preferences),
- * NOT a one-shot reference like an attachment. Surfacing it as a
- * persistent toolbar chip — rather than burying it in the "+" menu —
- * makes that stickiness legible: the active scope sits in the toolbar
- * before every message and is one click away from being changed.
+ * Knowledge mode exposes the session-level KB dropdown. Exam mode reuses
+ * the same compact chip as a Paper Library affordance that opens the
+ * right-side Exam settings card.
  *
- * Multi-select: rows toggle without closing, so several bases can be
- * picked in one pass. A non-empty selection tints the icon primary so
- * the active scope stays visible even when the chip is collapsed.
+ * Multi-select: knowledge rows toggle without closing, so several bases can
+ * be picked in one pass. A non-empty selection tints the icon primary so the
+ * active scope stays visible even when the chip is collapsed.
  */
 export default function KnowledgeSelector({
   knowledgeBases,
   selected,
   onToggle,
   placement = "top",
+  scope = "knowledge",
+  onPaperLibraryClick,
 }: {
   knowledgeBases: { name: string }[];
   selected: string[];
   onToggle: (name: string) => void;
   placement?: "top" | "bottom";
+  scope?: "knowledge" | "paper";
+  onPaperLibraryClick?: () => void;
 }) {
   const { t } = useTranslation();
+  const isPaperLibrary = scope === "paper";
+  const ScopeIcon = isPaperLibrary ? BookOpen : Database;
   const [open, setOpenState] = useState(false);
   const { expanded, linger, triggerProps: lingerProps } = useLingerExpand(open);
   const setOpen = (next: boolean) => {
@@ -57,8 +59,9 @@ export default function KnowledgeSelector({
   }, [open]);
 
   const count = selected.length;
-  const label =
-    count === 0
+  const label = isPaperLibrary
+    ? t("Paper Library")
+    : count === 0
       ? t("Knowledge")
       : count === 1
         ? selected[0]
@@ -74,9 +77,17 @@ export default function KnowledgeSelector({
           icon primary. */}
       <button
         type="button"
-        onClick={() => setOpen(!open)}
-        aria-label={t("Select knowledge bases")}
-        aria-expanded={open}
+        onClick={() => {
+          if (isPaperLibrary) {
+            onPaperLibraryClick?.();
+            return;
+          }
+          setOpen(!open);
+        }}
+        aria-label={
+          isPaperLibrary ? t("Paper Library") : t("Select knowledge bases")
+        }
+        aria-expanded={isPaperLibrary ? undefined : open}
         {...lingerProps}
         className={`inline-flex h-8 shrink-0 items-center rounded-lg px-2 text-[14px] font-medium transition-[background-color,color,transform] duration-150 active:scale-[0.97] ${
           open
@@ -86,7 +97,7 @@ export default function KnowledgeSelector({
               : "text-[var(--muted-foreground)] hover:bg-[var(--muted)]/55 hover:text-[var(--foreground)]"
         }`}
       >
-        <Database size={16} strokeWidth={1.7} className="shrink-0" />
+        <ScopeIcon size={16} strokeWidth={1.7} className="shrink-0" />
         <span
           className={`flex min-w-0 items-center gap-1 overflow-hidden whitespace-nowrap transition-[max-width,opacity,margin-left] duration-300 ease-out ${
             expanded
@@ -102,7 +113,7 @@ export default function KnowledgeSelector({
         </span>
       </button>
 
-      {open && (
+      {!isPaperLibrary && open && (
         <div
           className={`dt-popup-up absolute right-0 z-50 ${menuPlacementClass} w-[min(280px,calc(100vw-32px))] overflow-hidden rounded-xl border border-[var(--border)] bg-[var(--popover)] shadow-lg backdrop-blur-md`}
         >
@@ -125,7 +136,7 @@ export default function KnowledgeSelector({
                         : "hover:bg-[var(--muted)]/45"
                     }`}
                   >
-                    <Database
+                    <ScopeIcon
                       size={15}
                       strokeWidth={1.7}
                       className={`shrink-0 ${

@@ -453,6 +453,7 @@ export default function ChatPage() {
   // adjusted settings. Capability switches also reset this flag.
   const [capabilityConfigConfirmed, setCapabilityConfigConfirmed] =
     useState(false);
+  const autoStartCapabilityRef = useRef<string | null>(null);
   // Per-session persistence of the capability-config form. The form lives
   // in local React state, so anything that remounts the page (browser
   // back/forward to /home/<id>, URL-driven session swap, etc.) would
@@ -624,7 +625,10 @@ export default function ChatPage() {
   );
   const handleConfirmCapabilityConfig = useCallback(() => {
     setCapabilityConfigConfirmed(true);
-  }, []);
+    if (isQuizMode || isExamMode) {
+      autoStartCapabilityRef.current = activeCap.value;
+    }
+  }, [activeCap.value, isExamMode, isQuizMode]);
 
   /**
    * Auto-open the right-side Activity panel when the user switches into a
@@ -692,8 +696,36 @@ export default function ChatPage() {
     [state.messages],
   );
   const persistedSessionTitle = state.sessionTitle.trim();
+  const isPlaceholderSessionTitle =
+    !persistedSessionTitle || /^new (chat|conversation)$/i.test(persistedSessionTitle);
   const displaySessionTitle =
-    persistedSessionTitle || firstUserTitle || t("New chat");
+    (!isPlaceholderSessionTitle && persistedSessionTitle) ||
+    firstUserTitle ||
+    t("New chat");
+  const autoTitleSessionRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (
+      !state.sessionId ||
+      (!isExamMode && !isQuizMode) ||
+      !isPlaceholderSessionTitle
+    ) {
+      return;
+    }
+    const title = t(isExamMode ? "Exam" : "Quiz");
+    const key = `${state.sessionId}:${title}`;
+    if (autoTitleSessionRef.current === key) return;
+    autoTitleSessionRef.current = key;
+    void renameSessionTitle(title).catch(() => {
+      if (autoTitleSessionRef.current === key) autoTitleSessionRef.current = null;
+    });
+  }, [
+    isExamMode,
+    isPlaceholderSessionTitle,
+    isQuizMode,
+    renameSessionTitle,
+    state.sessionId,
+    t,
+  ]);
   const canRenameSession = Boolean(state.sessionId);
   const titleInputRef = useRef<HTMLInputElement | null>(null);
   const skipTitleCommitRef = useRef(false);
@@ -1179,6 +1211,7 @@ export default function ChatPage() {
         storageKey,
         cap.allowedTools,
       );
+      autoStartCapabilityRef.current = null;
       if (cap.value === "deep_question" && quizConfig.mode === "original_paper") {
         setQuizConfig((previous) => ({
           ...previous,
@@ -1645,6 +1678,28 @@ export default function ChatPage() {
     ],
   );
 
+  // Quiz and Exam are configuration-first capabilities: once the user
+  // confirms a valid right-side form, start the turn immediately instead of
+  // leaving the workspace empty while waiting for a second Send click.
+  useEffect(() => {
+    const capability = autoStartCapabilityRef.current;
+    if (!capability || !capabilityConfigConfirmed || state.isStreaming) return;
+    if (activeCap.value !== capability) {
+      autoStartCapabilityRef.current = null;
+      return;
+    }
+    autoStartCapabilityRef.current = null;
+    void handleSend(
+      capability === "exam" ? t("Start Exam") : t("Generate Quiz"),
+    );
+  }, [
+    activeCap.value,
+    capabilityConfigConfirmed,
+    handleSend,
+    state.isStreaming,
+    t,
+  ]);
+
   const handleConfirmOutline = useCallback(
     (
       outline: OutlineItem[],
@@ -2065,6 +2120,7 @@ export default function ChatPage() {
               selectedKnowledgeBases={selectedKbOnly}
               isStreaming={state.isStreaming}
               isVisualizeMode={isVisualizeMode}
+              isExamMode={isExamMode}
               capabilityNeedsConfig={capabilityNeedsConfig}
               capabilityConfigConfirmed={capabilityConfigConfirmed}
               onRequestConfigConfirm={ensureActivityPanelOpen}
@@ -2072,6 +2128,7 @@ export default function ChatPage() {
               onSetCapMenuOpen={setCapMenuOpen}
               onSetSpaceMenuOpen={setSpaceMenuOpen}
               onToggleKB={handleToggleKB}
+              onOpenPaperLibrary={ensureActivityPanelOpen}
               onSelectLLM={setLLMSelection}
               onSelectNotebookPicker={handleSelectNotebookPicker}
               onSelectBookPicker={handleSelectBookPicker}

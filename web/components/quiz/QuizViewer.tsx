@@ -255,15 +255,33 @@ export default function QuizViewer({
     Record<number, boolean>
   >({});
   const judgeHandlesRef = useRef<Map<number, QuizJudgeHandle>>(new Map());
+  const autoAdvanceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
+    null,
+  );
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(
     () => () => {
       judgeHandlesRef.current.forEach((handle) => handle.close());
       judgeHandlesRef.current.clear();
+      if (autoAdvanceTimerRef.current !== null) {
+        clearTimeout(autoAdvanceTimerRef.current);
+        autoAdvanceTimerRef.current = null;
+      }
     },
     [],
   );
+
+  // Manual navigation cancels a pending automatic step. The timer also
+  // checks the index before advancing so a quick click cannot jump twice.
+  useEffect(() => {
+    return () => {
+      if (autoAdvanceTimerRef.current !== null) {
+        clearTimeout(autoAdvanceTimerRef.current);
+        autoAdvanceTimerRef.current = null;
+      }
+    };
+  }, [idx]);
 
   const q = questions[idx];
   const ans = answers[idx] ?? EMPTY_ANSWER;
@@ -602,9 +620,29 @@ export default function QuizViewer({
 
   const handleSubmit = () => {
     if (ans.submitted || !q) return;
-    const newAnswer = { ...(answers[idx] ?? EMPTY_ANSWER), submitted: true };
+    const questionIndex = idx;
+    const newAnswer = {
+      ...(answers[questionIndex] ?? EMPTY_ANSWER),
+      submitted: true,
+    };
     updateAnswer({ submitted: true });
-    void upsertSingleQuestion(q, newAnswer, idx);
+    void upsertSingleQuestion(q, newAnswer, questionIndex);
+
+    if (
+      questionIndex < total - 1 &&
+      isAutoGradable(q) &&
+      isAnswerCorrect(q, newAnswer)
+    ) {
+      if (autoAdvanceTimerRef.current !== null) {
+        clearTimeout(autoAdvanceTimerRef.current);
+      }
+      autoAdvanceTimerRef.current = setTimeout(() => {
+        autoAdvanceTimerRef.current = null;
+        setIdx((current) =>
+          current === questionIndex ? Math.min(total - 1, current + 1) : current,
+        );
+      }, 800);
+    }
   };
 
   const handleReset = () => {

@@ -107,6 +107,8 @@ async function waitForPaper(
 function answerKey(question: PaperQuestion): string {
   const answer = question.answer.trim();
   if (question.options[answer]) return answer;
+  const keyPrefix = answer.match(/^([A-Za-z])(?:\s|\(|$)/)?.[1];
+  if (keyPrefix && question.options[keyPrefix]) return keyPrefix;
   const match = Object.entries(question.options).find(
     ([, value]) => value.trim().toLocaleLowerCase() === answer.toLocaleLowerCase(),
   );
@@ -144,6 +146,14 @@ test("ordinary Quiz exposes only Custom and Mimic Paper modes", async ({ page })
   ).toHaveCount(0);
   await page.getByRole("button", { name: "Mimic Paper", exact: true }).click();
   await expect(page.getByText("Parsed Dir", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Quiz", exact: true }).click();
+  await page.getByText("Exam", { exact: true }).last().click();
+  await expect(
+    page.getByRole("button", { name: "Paper Library", exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Select knowledge bases", exact: true }),
+  ).toHaveCount(0);
 });
 
 test.describe("Knowledge Center → Paper Library → Exam :: real release flow", () => {
@@ -411,11 +421,10 @@ test.describe("Knowledge Center → Paper Library → Exam :: real release flow"
     await expect(page.getByText("Type", { exact: true })).toHaveCount(0);
     await capture(page, "09-exam-library-to-paper-picker");
 
+    await expect(
+      page.getByRole("button", { name: "Paper Library", exact: true }),
+    ).toBeVisible();
     await page.getByRole("button", { name: "Confirm", exact: true }).click();
-    await page
-      .getByPlaceholder("How can I help you today?")
-      .fill("Start the real Exam from this paper");
-    await page.getByRole("button", { name: "Send", exact: true }).click();
     await expect(page).toHaveURL(/\/home\/[^?]+$/, { timeout: 60_000 });
     await expect(page.getByText(detail.questions[0].question_text)).toBeVisible({
       timeout: 15 * 60 * 1000,
@@ -471,6 +480,11 @@ test.describe("Knowledge Center → Paper Library → Exam :: real release flow"
     expect(entry.paper_display_name).toBe(renamedName);
     expect(entry.source_question_number).toBe(firstQuestion.question_number);
     expect(entry.source_snapshot_id).not.toBe("");
+    await expect(page.getByText(detail.questions[1].question_text)).toBeVisible({
+      timeout: 10_000,
+    });
+    await page.getByRole("button", { name: "Previous", exact: true }).click();
+    await expect(page.getByText(firstQuestion.question_text)).toBeVisible();
     await capture(page, "12-exam-answer-saved-question-bank-provenance");
 
     const judgeButton = page.getByRole("button", { name: "AI Judge", exact: true });
@@ -540,7 +554,9 @@ test.describe("Knowledge Center → Paper Library → Exam :: real release flow"
     await expect(page.getByText(detail.questions[0].question_text)).toBeVisible({
       timeout: 60_000,
     });
-    await expect(page.getByText("Exam", { exact: true })).toBeVisible();
+    await expect(
+      page.getByTitle("Click to rename session").getByText("Exam", { exact: true }),
+    ).toBeVisible();
     await expect(page.getByRole("button", { name: "AI Judgment", exact: true })).toBeVisible();
     await page
       .getByRole("button", { name: String(imageQuestionIndex + 1), exact: true })
