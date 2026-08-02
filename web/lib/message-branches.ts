@@ -157,24 +157,3 @@ export function tipMessageId(visible: MessageItem[]): number | null {
   }
   return null;
 }
-
-/** Resolve optimistic UI and wire parents for a newly submitted turn. */
-export function resolveOutgoingParentIds(
-  tipId: number | null,
-  explicitParentId: number | null | undefined,
-  appendToLatest: boolean,
-): {
-  localParentId: number | null;
-  wireParentId: number | null | undefined;
-} {
-  const localParentId =
-    explicitParentId !== undefined ? explicitParentId : tipId;
-  const wireParentId = appendToLatest
-    ? undefined
-    : explicitParentId !== undefined
-      ? explicitParentId
-      : tipId !== null && tipId > 0
-        ? tipId
-        : undefined;
-  return { localParentId, wireParentId };
-}

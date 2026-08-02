@@ -1,7 +1,6 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import Image from "next/image";
 import {
   type KeyboardEvent,
   useCallback,
@@ -18,6 +17,7 @@ import {
   Clapperboard,
   Code2,
   Compass,
+  Database,
   FileSearch,
   Globe,
   GraduationCap,
@@ -58,7 +58,6 @@ import {
   useUnifiedChat,
   type MessageAttachment,
   type MessageRequestSnapshot,
-  type SendMessageOptions,
 } from "@/context/UnifiedChatContext";
 import { useAppShell } from "@/context/AppShellContext";
 import type { FilePreviewSource } from "@/components/chat/preview/previewerFor";
@@ -334,7 +333,7 @@ export default function ChatPage() {
   const originalPaperIdParam = searchParams.get("original_paper_id");
   const examPaperIdParam = searchParams.get("exam_paper_id");
   const examLibraryIdParam = searchParams.get("exam_library_id");
-  const { setActiveSessionId } = useAppShell();
+  const { setActiveSessionId, language: appLanguage } = useAppShell();
 
   const {
     state,
@@ -1645,11 +1644,7 @@ export default function ChatPage() {
   }, []);
 
   const handleSend = useCallback(
-    async (
-      content: string,
-      configOverride?: Record<string, unknown>,
-      options?: SendMessageOptions,
-    ) => {
+    async (content: string, configOverride?: Record<string, unknown>) => {
       if (
         (!content &&
           !attachments.length &&
@@ -1726,7 +1721,7 @@ export default function ChatPage() {
         config,
         notebookReferencesPayload,
         historyReferencesPayload,
-        { ...options, bookReferences: bookReferencesPayload },
+        { bookReferences: bookReferencesPayload },
         questionNotebookReferencesPayload,
         undefined,
         memoryPayload,
@@ -2131,9 +2126,9 @@ export default function ChatPage() {
             ) : !hasMessages ? (
               <div className="flex w-full flex-1 min-h-0 items-end justify-center pb-14 animate-fade-in px-6">
                 <div className="w-full max-w-[960px] flex items-center justify-center gap-4">
-                  <Image
+                  <img
                     src="/logo_black.png"
-                    alt=""
+                    alt="DeepTutor"
                     width={40}
                     height={40}
                     className="h-10 w-10 select-none"
