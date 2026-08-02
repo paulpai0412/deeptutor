@@ -344,13 +344,25 @@ export default function QuizViewer({
     [turnId]
   )
 
+  // Hydrate notebook entries once per (session, turn, question-set).
+  // ``questions`` gets a new array identity on every parent re-render
+  // (streaming content is re-parsed), and each mounted historical
+  // QuizViewer used to re-fire N lookups per render — 712 requests in
+  // one measured session (issue #33). The signature guard keeps the
+  // hydration O(questions) per actual question-set change.
+  const hydratedForRef = useRef('')
   useEffect(() => {
     if (!sessionId) return
+    const signature = `${sessionId}:${turnId ?? ''}:${questions
+      .map((question, i) => getQuestionKey(question, i))
+      .join('|')}`
+    if (hydratedForRef.current === signature) return
+    hydratedForRef.current = signature
     questions.forEach((question, i) => {
       const key = getQuestionKey(question, i)
       void refreshEntryId(key, sessionId, i)
     })
-  }, [sessionId, questions, refreshEntryId])
+  }, [sessionId, turnId, questions, refreshEntryId])
 
   const handleToggleBookmark = useCallback(async () => {
     if (!q || !sessionId) return
@@ -424,7 +436,6 @@ export default function QuizViewer({
   const isConcept = q ? isConceptQuizQuestion(q.question_type) : false
   const isFillBlank = q ? isFillInBlankQuizQuestion(q.question_type) : false
   const isGradable = q ? isAutoGradable(q) : false
-  const currentUserAnswer = q ? getUserAnswer(q, ans) : ''
 
   const isCorrect = useMemo(() => {
     if (!q || !ans.submitted || !isAutoGradable(q)) return null
