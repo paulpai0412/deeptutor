@@ -7,6 +7,7 @@ import {
   Check,
   Copy,
   Download,
+  ExternalLink,
   FileText,
   Loader2,
   Maximize2,
@@ -257,6 +258,16 @@ export default function KbFilePreview({
 
         {previewUrl && (
           <>
+            <a
+              href={previewUrl}
+              target="_blank"
+              rel="noreferrer"
+              title={t("Open")}
+              aria-label={t("Open")}
+              className="flex h-7 w-7 items-center justify-center rounded-md text-[var(--muted-foreground)] transition-colors hover:bg-[var(--muted)] hover:text-[var(--foreground)]"
+            >
+              <ExternalLink size={13} strokeWidth={1.7} />
+            </a>
             <a
               href={previewUrl}
               download={source.filename}

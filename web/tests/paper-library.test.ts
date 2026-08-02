@@ -5,9 +5,12 @@ import {
   deletePaper,
   getPaperLibraryPaper,
   listPaperLibrary,
+  listPaperLibraryContents,
+  movePaper,
   paperAssetPath,
   retryPaper,
   updatePaperQuestion,
+  uploadPaperLibraryToLibrary,
   type PaperLibraryRecord,
 } from "../lib/knowledge-api";
 
@@ -38,6 +41,67 @@ test("paper library list client returns server paper summaries", async () => {
   try {
     assert.deepEqual(await listPaperLibrary({ search: "Practice" }), [paper]);
     assert.equal(requestedUrl, "/api/v1/papers?search=Practice");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("library contents preserve flat folders and paper folder paths", async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () =>
+    new Response(
+      JSON.stringify({ papers: [{ ...paper, folder_path: "Mock/2026" }], folders: ["Mock", "Mock/2026"] }),
+      { status: 200 },
+    );
+
+  try {
+    assert.deepEqual(
+      await listPaperLibraryContents("library/1"),
+      {
+        papers: [{ ...paper, folder_path: "Mock/2026" }],
+        folders: ["Mock", "Mock/2026"],
+      },
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("paper upload client forwards relative folder paths", async () => {
+  const originalFetch = globalThis.fetch;
+  let form: FormData | null = null;
+  globalThis.fetch = async (_input, init) => {
+    form = init?.body as FormData;
+    return new Response(JSON.stringify({ papers: [], rejected: [], batch_id: "batch" }), {
+      status: 200,
+    });
+  };
+  const file = new File(["pdf"], "exam.pdf", { type: "application/pdf" });
+  Object.defineProperty(file, "webkitRelativePath", { value: "Mock/2026/exam.pdf" });
+
+  try {
+    await uploadPaperLibraryToLibrary("library/1", [file]);
+    const capturedForm = form as unknown as FormData;
+    assert.equal(capturedForm.getAll("rel_paths")[0], "Mock/2026/exam.pdf");
+    assert.equal((capturedForm.getAll("files")[0] as File).name, "exam.pdf");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("folder-aware move sends destination folder", async () => {
+  const originalFetch = globalThis.fetch;
+  let body = "";
+  globalThis.fetch = async (_input, init) => {
+    body = String(init?.body);
+    return new Response(JSON.stringify(paper), { status: 200 });
+  };
+  try {
+    await movePaper("library/1", "paper/1", "library/2", "Archive/2026");
+    assert.deepEqual(JSON.parse(body), {
+      target_library_id: "library/2",
+      target_folder_path: "Archive/2026",
+    });
   } finally {
     globalThis.fetch = originalFetch;
   }

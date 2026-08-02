@@ -1,20 +1,15 @@
-"use client";
+'use client'
 
-import { useCallback, useEffect, useState } from "react";
-import Link from "next/link";
-import { useTranslation } from "react-i18next";
-import { ArrowUpRight } from "lucide-react";
+import { useCallback, useEffect, useState } from 'react'
+import Link from 'next/link'
+import { useTranslation } from 'react-i18next'
+import { ArrowUpRight } from 'lucide-react'
 
-import { fetchAuthStatus } from "@/lib/auth";
-import {
-  serviceReadiness,
-  useSettings,
-} from "@/components/settings/SettingsContext";
-import {
-  SETTINGS_CATEGORIES,
-  type Lang,
-  type SettingsLeaf,
-} from "@/lib/settings-nav";
+import { useRealtimeVoiceProvider } from '@/hooks/useRealtimeVoiceProvider'
+import { fetchAuthStatus } from '@/lib/auth'
+import { serviceReadiness, useSettings } from '@/components/settings/SettingsContext'
+import { SETTINGS_CATEGORIES, type Lang, type SettingsLeaf } from '@/lib/settings-nav'
+import { toTaiwanChinese } from '@/lib/taiwan-zh'
 
 /**
  * Second-level grid for a sub-hub category (Models, Chat). Lists the
@@ -22,77 +17,80 @@ import {
  * services, and a blurb — the focused view the user reaches by clicking the
  * hub block.
  */
-export default function SettingsSectionGrid({
-  categoryKey,
-}: {
-  categoryKey: string;
-}) {
-  const { i18n } = useTranslation();
-  const zh = i18n.language?.toLowerCase().startsWith("zh");
-  const tr = useCallback((l: Lang) => (zh ? l.zh : l.en), [zh]);
+export default function SettingsSectionGrid({ categoryKey }: { categoryKey: string }) {
+  const { i18n } = useTranslation()
+  const zh = i18n.language?.toLowerCase().startsWith('zh')
+  const tr = useCallback((l: Lang) => (zh ? toTaiwanChinese(l.zh) : l.en), [zh])
 
-  const { catalog, catalogEditable, diagnosticsResults } = useSettings();
+  const { catalog, catalogEditable, diagnosticsResults } = useSettings()
+  const { status: realtimeVoiceStatus, loading: realtimeVoiceLoading } = useRealtimeVoiceProvider()
 
-  const category = SETTINGS_CATEGORIES.find((c) => c.key === categoryKey);
+  const category = SETTINGS_CATEGORIES.find(c => c.key === categoryKey)
 
-  const [hideAdminOnly, setHideAdminOnly] = useState(false);
+  const [hideAdminOnly, setHideAdminOnly] = useState(false)
   useEffect(() => {
-    let cancelled = false;
-    fetchAuthStatus().then((authStatus) => {
-      if (cancelled || !authStatus) return;
-      setHideAdminOnly(Boolean(authStatus.enabled) && !authStatus.is_admin);
-    });
+    let cancelled = false
+    fetchAuthStatus().then(authStatus => {
+      if (cancelled || !authStatus) return
+      setHideAdminOnly(Boolean(authStatus.enabled) && !authStatus.is_admin)
+    })
     return () => {
-      cancelled = true;
-    };
-  }, []);
+      cancelled = true
+    }
+  }, [])
 
   const chipFor = useCallback(
-    (
-      leaf: SettingsLeaf,
-    ): { label: Lang; tone: "ok" | "bad" | "neutral"; dot: boolean } | null => {
-      if (!leaf.service) return null;
-      if (catalogEditable !== true) return null;
-      const readiness = serviceReadiness(
-        catalog,
-        leaf.service,
-        diagnosticsResults,
-      );
-      if (readiness === "failed") {
-        return {
-          tone: "bad",
-          dot: true,
-          label: { zh: "测试失败", en: "Test failed" },
-        };
+    (leaf: SettingsLeaf): { label: Lang; tone: 'ok' | 'bad' | 'neutral'; dot: boolean } | null => {
+      if (leaf.key === 'realtime_voice') {
+        if (realtimeVoiceLoading) return null
+        return realtimeVoiceStatus.ready
+          ? {
+              tone: 'neutral',
+              dot: true,
+              label: { zh: '已配置', en: 'Configured' },
+            }
+          : {
+              tone: 'neutral',
+              dot: false,
+              label: { zh: '未配置', en: 'Not set' },
+            }
       }
-      if (readiness === "passed") {
+      if (!leaf.service) return null
+      if (catalogEditable !== true) return null
+      const readiness = serviceReadiness(catalog, leaf.service, diagnosticsResults)
+      if (readiness === 'failed') {
         return {
-          tone: "ok",
+          tone: 'bad',
           dot: true,
-          label: { zh: "测试通过", en: "Test passed" },
-        };
+          label: { zh: '测试失败', en: 'Test failed' },
+        }
       }
-      if (readiness === "untested") {
+      if (readiness === 'passed') {
         return {
-          tone: "neutral",
+          tone: 'ok',
           dot: true,
-          label: { zh: "已配置", en: "Configured" },
-        };
+          label: { zh: '测试通过', en: 'Test passed' },
+        }
+      }
+      if (readiness === 'untested') {
+        return {
+          tone: 'neutral',
+          dot: true,
+          label: { zh: '已配置', en: 'Configured' },
+        }
       }
       return {
-        tone: "neutral",
+        tone: 'neutral',
         dot: false,
-        label: { zh: "未配置", en: "Not set" },
-      };
+        label: { zh: '未配置', en: 'Not set' },
+      }
     },
-    [catalog, catalogEditable, diagnosticsResults],
-  );
+    [catalog, catalogEditable, diagnosticsResults, realtimeVoiceLoading, realtimeVoiceStatus.ready]
+  )
 
-  if (!category?.children) return null;
+  if (!category?.children) return null
 
-  const leaves = category.children.filter(
-    (leaf) => !(leaf.adminOnly && hideAdminOnly),
-  );
+  const leaves = category.children.filter(leaf => !(leaf.adminOnly && hideAdminOnly))
 
   return (
     <div>
@@ -106,12 +104,12 @@ export default function SettingsSectionGrid({
       </header>
 
       <div className="grid gap-3 sm:grid-cols-2">
-        {leaves.map((leaf) => (
+        {leaves.map(leaf => (
           <LeafCard key={leaf.key} leaf={leaf} chip={chipFor(leaf)} tr={tr} />
         ))}
       </div>
     </div>
-  );
+  )
 }
 
 function LeafCard({
@@ -119,12 +117,12 @@ function LeafCard({
   chip,
   tr,
 }: {
-  leaf: SettingsLeaf;
-  chip: { label: Lang; tone: "ok" | "bad" | "neutral"; dot: boolean } | null;
-  tr: (l: Lang) => string;
+  leaf: SettingsLeaf
+  chip: { label: Lang; tone: 'ok' | 'bad' | 'neutral'; dot: boolean } | null
+  tr: (l: Lang) => string
 }) {
-  const Icon = leaf.icon;
-  const tone = chip?.tone ?? "neutral";
+  const Icon = leaf.icon
+  const tone = chip?.tone ?? 'neutral'
   return (
     <Link
       href={leaf.href}
@@ -147,23 +145,23 @@ function LeafCard({
                 className={`inline-flex shrink-0 items-center gap-1 text-[10.5px] font-medium ${
                   chip.dot
                     ? `rounded-full px-1.5 py-0.5 ${
-                        tone === "bad"
-                          ? "bg-red-500/10 text-red-600 dark:text-red-400"
-                          : tone === "ok"
-                            ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
-                            : "bg-zinc-500/10 text-zinc-600 dark:text-zinc-300"
+                        tone === 'bad'
+                          ? 'bg-red-500/10 text-red-600 dark:text-red-400'
+                          : tone === 'ok'
+                            ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400'
+                            : 'bg-zinc-500/10 text-zinc-600 dark:text-zinc-300'
                       }`
-                    : "text-[var(--muted-foreground)]"
+                    : 'text-[var(--muted-foreground)]'
                 }`}
               >
                 {chip.dot && (
                   <span
                     className={`h-1.5 w-1.5 rounded-full ${
-                      tone === "bad"
-                        ? "bg-red-500"
-                        : tone === "ok"
-                          ? "bg-emerald-500"
-                          : "bg-zinc-400 dark:bg-zinc-500"
+                      tone === 'bad'
+                        ? 'bg-red-500'
+                        : tone === 'ok'
+                          ? 'bg-emerald-500'
+                          : 'bg-zinc-400 dark:bg-zinc-500'
                     }`}
                   />
                 )}
@@ -181,5 +179,5 @@ function LeafCard({
         {tr(leaf.blurb)}
       </p>
     </Link>
-  );
+  )
 }

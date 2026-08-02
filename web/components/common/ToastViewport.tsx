@@ -1,6 +1,7 @@
 "use client";
 
 import { X } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import { useEffect, useState } from "react";
 import { subscribeNotifications, type Notification } from "@/lib/notifications";
 
@@ -15,6 +16,7 @@ import { subscribeNotifications, type Notification } from "@/lib/notifications";
  * arrive, without barging in on whatever the user was reading.
  */
 export default function ToastViewport() {
+  const { t } = useTranslation();
   const [toasts, setToasts] = useState<Notification[]>([]);
 
   useEffect(() => {
@@ -56,7 +58,7 @@ export default function ToastViewport() {
             type="button"
             onClick={() => dismiss(toast.id)}
             className="rounded p-0.5 opacity-60 transition-opacity hover:opacity-100"
-            aria-label="Dismiss"
+            aria-label={t("common.dismiss")}
           >
             <X size={14} strokeWidth={1.8} />
           </button>

@@ -12,7 +12,7 @@ def register(app: typer.Typer) -> None:
     def provider_login(
         provider: str = typer.Argument(
             ...,
-            help="Provider: openai-codex (OAuth login) | github-copilot (validate existing Copilot auth)",
+            help="Provider: openai-codex (OAuth login) | github-copilot (OAuth device-flow login)",
         ),
     ) -> None:
         """Authenticate or validate provider access."""
@@ -55,27 +55,27 @@ def _login_openai_codex() -> None:
 
 
 async def _login_github_copilot() -> None:
-    """Validate an existing GitHub Copilot auth session via a lightweight request."""
+    """GitHub device-flow OAuth login (github.com/login/device), then validate."""
     try:
-        from openai import AsyncOpenAI
-    except ImportError:
-        typer.echo(
-            "openai is not installed. Install CLI deps from a local checkout: "
-            "python -m pip install -e ./packaging/deeptutor-cli"
+        from deeptutor.services.llm.provider_core.github_copilot_auth import (
+            login_device_flow,
+            save_github_token,
         )
-        raise typer.Exit(code=1)
+        from deeptutor.services.llm.provider_core.github_copilot_provider import (
+            GitHubCopilotProvider,
+        )
+    except ImportError as exc:
+        typer.echo(f"Missing dependency: {exc}")
+        raise typer.Exit(code=1) from exc
+
+    token = await login_device_flow(print_fn=typer.echo)
+    path = save_github_token(token)
+    typer.echo(f"GitHub token saved to {path}")
+
     try:
-        client = AsyncOpenAI(
-            api_key="copilot",
-            base_url="https://api.githubcopilot.com",
-            max_retries=0,
-        )
-        await client.chat.completions.create(
-            model="gpt-4o",
-            messages=[{"role": "user", "content": "ping"}],
-            max_tokens=1,
-        )
+        provider = GitHubCopilotProvider()
+        await provider.chat(messages=[{"role": "user", "content": "ping"}], max_tokens=1)
     except Exception as exc:
         typer.echo(f"GitHub Copilot auth validation failed: {exc}")
         raise typer.Exit(code=1) from exc
-    typer.echo("GitHub Copilot auth validation succeeded.")
+    typer.echo("GitHub Copilot OAuth login succeeded.")

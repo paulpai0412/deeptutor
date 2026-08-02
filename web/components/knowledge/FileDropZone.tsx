@@ -342,6 +342,11 @@ function SelectionSummary({
               <div className="truncate text-[12px] font-medium text-[var(--foreground)]">
                 {item.file.name}
               </div>
+              {item.file.webkitRelativePath && (
+                <div className="mt-0.5 truncate text-[10px] text-[var(--primary)]/80">
+                  {item.file.webkitRelativePath}
+                </div>
+              )}
               <div className="mt-1 flex flex-wrap items-center gap-2 text-[10px] uppercase tracking-[0.12em] text-[var(--muted-foreground)]">
                 <span>{item.extension}</span>
                 <span>{item.sizeLabel}</span>

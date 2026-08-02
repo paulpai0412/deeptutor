@@ -77,7 +77,7 @@ test.describe("Compliance :: Error Handling & UX Signals", () => {
   test("api error surfaces user-friendly feedback (alert or message)", async ({
     page,
   }) => {
-    await page.route("**/api/v1/notebook/list", (route) =>
+    await page.route("**/api/v1/question-notebook/entries**", (route) =>
       route.fulfill({
         status: 500,
         headers: { "content-type": "application/json" },
@@ -87,14 +87,6 @@ test.describe("Compliance :: Error Handling & UX Signals", () => {
 
     await page.goto(`${BASE_URL}/notebook`);
 
-    await expectAnyVisible(
-      [
-        page.locator('[role="alert"]'),
-        page.locator('[data-test="notebooks-empty"]'),
-        page.locator('[data-testid="notebooks-empty"]'),
-        page.locator("text=No notebooks"),
-      ],
-      "Expected error banner or empty state after simulated failure",
-    );
+    await expect(page.locator('[role="alert"]')).toBeVisible({ timeout: 5000 });
   });
 });

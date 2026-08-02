@@ -109,6 +109,7 @@ export interface PaperLibrarySummary {
   name: string;
   description?: string;
   settings?: Record<string, unknown>;
+  folders?: string[];
   created_at?: string;
   updated_at?: string;
   paper_count: number;
@@ -130,6 +131,7 @@ export interface PaperLibraryRecord {
   task_id?: string;
   parser_engine?: string;
   library_id?: string;
+  folder_path?: string;
   extraction_config?: Record<string, unknown>;
 }
 
@@ -155,6 +157,12 @@ export interface PaperLibraryDetail extends PaperLibraryRecord {
 
 export interface PaperPaperListResponse {
   papers: PaperLibraryRecord[];
+  folders?: string[];
+}
+
+export interface PaperLibraryContents {
+  papers: PaperLibraryRecord[];
+  folders: string[];
 }
 
 export interface PaperUploadResponse {
@@ -272,13 +280,16 @@ export async function deletePaperLibrary(libraryId: string): Promise<void> {
   invalidateClientCache(PAPER_LIBRARY_PREFIX);
 }
 
-export async function listLibraryPapers(
+export async function listPaperLibraryContents(
   libraryId: string,
-  options?: { search?: string; status?: string },
-): Promise<PaperLibraryRecord[]> {
+  options?: { search?: string; status?: string; folderPath?: string },
+): Promise<PaperLibraryContents> {
   const params = new URLSearchParams();
   if (options?.search?.trim()) params.set("search", options.search.trim());
   if (options?.status?.trim()) params.set("status", options.status.trim());
+  if (options?.folderPath !== undefined) {
+    params.set("folder_path", options.folderPath);
+  }
   const suffix = params.toString() ? `?${params.toString()}` : "";
   const response = await apiFetch(
     apiUrl(
@@ -290,7 +301,60 @@ export async function listLibraryPapers(
     throw new Error(await readErrorDetail(response, "Failed to list library papers"));
   }
   const data = (await response.json()) as PaperPaperListResponse;
-  return Array.isArray(data?.papers) ? data.papers : [];
+  return {
+    papers: Array.isArray(data?.papers) ? data.papers : [],
+    folders: Array.isArray(data?.folders) ? data.folders : [],
+  };
+}
+
+export async function listLibraryPapers(
+  libraryId: string,
+  options?: { search?: string; status?: string },
+): Promise<PaperLibraryRecord[]> {
+  const contents = await listPaperLibraryContents(libraryId, options);
+  return contents.papers;
+}
+
+export async function listPaperLibraryFolders(
+  libraryId: string,
+): Promise<string[]> {
+  const response = await apiFetch(
+    apiUrl(`${PAPER_LIBRARY_PATH}/libraries/${encodeURIComponent(libraryId)}/folders`),
+    { cache: "no-store" },
+  );
+  if (!response.ok) {
+    throw new Error(await readErrorDetail(response, "Failed to list Paper Folders"));
+  }
+  const data = (await response.json()) as { folders?: string[] };
+  return Array.isArray(data?.folders) ? data.folders : [];
+}
+
+export async function createPaperFolder(
+  libraryId: string,
+  name: string,
+  parentPath = "",
+): Promise<string> {
+  const response = await apiFetch(
+    apiUrl(`${PAPER_LIBRARY_PATH}/libraries/${encodeURIComponent(libraryId)}/folders`),
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name, parent_path: parentPath }),
+    },
+  );
+  if (!response.ok) {
+    throw new Error(await readErrorDetail(response, "Failed to create Paper Folder"));
+  }
+  invalidateClientCache(PAPER_LIBRARY_PREFIX);
+  const data = (await response.json()) as { path: string };
+  return data.path;
+}
+
+function appendPaperFilesWithPaths(form: FormData, files: File[]): void {
+  files.forEach((file) => {
+    form.append("files", file);
+    form.append("rel_paths", file.webkitRelativePath || "");
+  });
 }
 
 export async function uploadPaperLibraryToLibrary(
@@ -298,7 +362,7 @@ export async function uploadPaperLibraryToLibrary(
   files: File[],
 ): Promise<PaperUploadResponse> {
   const form = new FormData();
-  files.forEach((file) => form.append("files", file));
+  appendPaperFilesWithPaths(form, files);
   const response = await apiFetch(
     apiUrl(`${PAPER_LIBRARY_PATH}/libraries/${encodeURIComponent(libraryId)}/upload`),
     { method: "POST", body: form },
@@ -523,7 +587,7 @@ export async function uploadPaperLibrary(
   files: File[],
 ): Promise<PaperUploadResponse> {
   const form = new FormData();
-  files.forEach((file) => form.append("files", file));
+  appendPaperFilesWithPaths(form, files);
   const response = await apiFetch(
     apiUrl(`${PAPER_LIBRARY_PATH}/upload`),
     { method: "POST", body: form },
@@ -574,6 +638,7 @@ export async function movePaper(
   libraryId: string,
   paperId: string,
   targetLibraryId: string,
+  targetFolderPath = "",
 ): Promise<PaperLibraryRecord> {
   const response = await apiFetch(
     apiUrl(
@@ -582,7 +647,10 @@ export async function movePaper(
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ target_library_id: targetLibraryId }),
+      body: JSON.stringify({
+        target_library_id: targetLibraryId,
+        target_folder_path: targetFolderPath,
+      }),
     },
   );
   if (!response.ok) {

@@ -16,6 +16,10 @@ DEFAULT_UI_SETTINGS: dict[str, Any] = {
     # "snow" is the pure-white neutral theme, shown as "Default" in the UI.
     "theme": "snow",
     "language": "en",
+    "voice_input_mode": "dictation",
+    # Ambient companion pet. "disabled" hides it; any other value is a pet id
+    # from the frontend catalog (kept free-form so custom pets stay possible).
+    "pet": "disabled",
 }
 
 
@@ -27,23 +31,21 @@ def _interface_settings_file():
 
 
 def _normalize_language(language: Any, default: str = "en") -> str:
-    """
-    Normalize language codes:
-    - en/english -> en
-    - zh/chinese/cn -> zh
-    """
+    """Normalize UI language codes while preserving Traditional Chinese."""
     if language is None or language == "":
         language = default
 
     if isinstance(language, str):
-        s = language.lower().strip()
-        if s in {"en", "english"}:
+        s = language.lower().strip().replace("_", "-")
+        if s in {"en", "english"} or s.startswith("en-"):
             return "en"
-        if s in {"zh", "chinese", "cn"}:
+        if s in {"zh-tw", "zh-hant", "zh-hk", "tw", "traditional"}:
+            return "zh-TW"
+        if s in {"zh", "zh-cn", "zh-hans", "chinese", "cn"} or s.startswith("zh-"):
             return "zh"
 
     # Fall back to default
-    if isinstance(default, str):
+    if isinstance(default, str) and default != language:
         return _normalize_language(default, "en")
     return "en"
 
@@ -64,6 +66,13 @@ def get_ui_settings() -> dict[str, Any]:
             merged["language"] = _normalize_language(
                 merged.get("language"), DEFAULT_UI_SETTINGS["language"]
             )
+            if merged.get("voice_input_mode") not in {"dictation", "realtime"}:
+                merged["voice_input_mode"] = DEFAULT_UI_SETTINGS["voice_input_mode"]
+            pet = merged.get("pet")
+            if not isinstance(pet, str) or not pet.strip():
+                merged["pet"] = DEFAULT_UI_SETTINGS["pet"]
+            else:
+                merged["pet"] = pet.strip()
             return merged
         except Exception:
             # On any parse error, fall back to defaults (safe)

@@ -8,6 +8,7 @@ import { useSettings } from "@/components/settings/SettingsContext";
 import { SettingsPageHeader } from "@/components/settings/shared";
 import { apiFetch, apiUrl } from "@/lib/api";
 import { invalidateEnabledOptionalToolsCache } from "@/lib/tools-settings";
+import { toTaiwanChinese } from "@/lib/taiwan-zh";
 
 type ToolParameter = {
   name: string;
@@ -74,6 +75,12 @@ export default function ToolsSettingsPage() {
   const [enabled, setEnabled] = useState<Set<string>>(new Set());
   const [pending, setPending] = useState<Set<string>>(new Set());
   const [saveError, setSaveError] = useState<string | null>(null);
+  const zh = language.startsWith("zh");
+  const localizeZh = useCallback(
+    (value: string) =>
+      language === "zh-TW" ? toTaiwanChinese(value) : value,
+    [language],
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -140,7 +147,6 @@ export default function ToolsSettingsPage() {
 
   const sections = useMemo<ToolSection[] | null>(() => {
     if (!tools) return null;
-    const zh = language === "zh";
     // Buckets: toggleable (体验增强) first, then locked-on built-ins, then one
     // section per capability for its owned tools. Backend order is preserved
     // within each bucket (mirrors USER_TOGGLEABLE_TOOL_NAMES / the
@@ -164,9 +170,9 @@ export default function ToolsSettingsPage() {
     if (experience.length) {
       out.push({
         key: "experience",
-        label: zh ? "体验增强" : "Experience Enhancement",
+        label: zh ? localizeZh("體驗增強") : "Experience Enhancement",
         hint: zh
-          ? "用户可选；按需为 chat agent 开启或关闭。"
+          ? localizeZh("使用者可自行選擇；可依需求為 chat agent 開啟或關閉。")
           : "User-toggleable. Switch on or off to shape the chat agent's behavior.",
         tools: experience,
       });
@@ -174,9 +180,9 @@ export default function ToolsSettingsPage() {
     if (builtin.length) {
       out.push({
         key: "builtin",
-        label: zh ? "内置工具" : "Built-in Tools",
+        label: zh ? localizeZh("內建工具") : "Built-in Tools",
         hint: zh
-          ? "Chat agent 在需要时自动挂载，无需手动开关。"
+          ? localizeZh("Chat agent 會在需要時自動掛載，不需手動開關。")
           : "Mounted automatically by the chat agent when needed. Not user-toggleable.",
         tools: builtin,
       });
@@ -185,15 +191,17 @@ export default function ToolsSettingsPage() {
       const label = CAPABILITY_LABELS[cap]?.[zh ? "zh" : "en"] ?? cap;
       out.push({
         key: `cap:${cap}`,
-        label: zh ? `${label} · 能力工具` : `${label} · Capability Tools`,
+        label: zh
+          ? `${localizeZh(label)} · 能力工具`
+          : `${label} · Capability Tools`,
         hint: zh
-          ? "该能力的专属工具，仅在此能力运行时挂载。"
+          ? localizeZh("這項能力的專屬工具，只會在能力執行時掛載。")
           : "Tools specific to this capability; mounted only when it runs.",
         tools: list,
       });
     }
     return out;
-  }, [tools, language]);
+  }, [tools, language, localizeZh, zh]);
 
   const toggleExpanded = (name: string) => {
     setExpanded((prev) => {
@@ -255,7 +263,7 @@ export default function ToolsSettingsPage() {
                 <div className="overflow-hidden rounded-xl border border-[var(--border)]/60 bg-[var(--card)]/40">
                   {list.map((tool, idx) => {
                     const isOpen = expanded.has(tool.name);
-                    const hints = tool.hints[language];
+                    const hints = tool.hints[zh ? "zh" : "en"];
                     const isPending = pending.has(tool.name);
                     const isComingSoon = !!tool.coming_soon;
                     const isEnabled =
@@ -302,9 +310,7 @@ export default function ToolsSettingsPage() {
                                 )}
                                 {isComingSoon && (
                                   <span className="inline-flex items-center gap-1 rounded-full border border-[var(--border)] bg-[var(--muted)]/40 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-[var(--muted-foreground)]">
-                                    {language === "zh"
-                                      ? "敬请期待"
-                                      : "Coming soon"}
+                                    {zh ? localizeZh("敬請期待") : "Coming soon"}
                                   </span>
                                 )}
                               </div>
@@ -315,7 +321,9 @@ export default function ToolsSettingsPage() {
                                     : "text-[var(--muted-foreground)]"
                                 }`}
                               >
-                                {hints.short_description || tool.description}
+                                {zh
+                                  ? localizeZh(hints.short_description || tool.description)
+                                  : hints.short_description || tool.description}
                               </p>
                             </div>
                             <ChevronDown
@@ -332,9 +340,7 @@ export default function ToolsSettingsPage() {
                                 onChange={() => {
                                   /* locked */
                                 }}
-                                label={
-                                  language === "zh" ? "敬请期待" : "Coming soon"
-                                }
+                                label={zh ? localizeZh("敬請期待") : "Coming soon"}
                               />
                             ) : tool.toggleable ? (
                               <ToolToggle
@@ -361,24 +367,27 @@ export default function ToolsSettingsPage() {
                             {hints.when_to_use && (
                               <Field
                                 label={t("When to use")}
-                                body={hints.when_to_use}
+                                body={zh ? localizeZh(hints.when_to_use) : hints.when_to_use}
                               />
                             )}
                             {hints.input_format && (
                               <Field
                                 label={t("Input format")}
-                                body={hints.input_format}
+                                body={zh ? localizeZh(hints.input_format) : hints.input_format}
                                 mono
                               />
                             )}
                             {hints.guideline && (
                               <Field
                                 label={t("Guideline")}
-                                body={hints.guideline}
+                                body={zh ? localizeZh(hints.guideline) : hints.guideline}
                               />
                             )}
                             {hints.note && (
-                              <Field label={t("Note")} body={hints.note} />
+                              <Field
+                                label={t("Note")}
+                                body={zh ? localizeZh(hints.note) : hints.note}
+                              />
                             )}
                             {tool.parameters.length > 0 && (
                               <div>
@@ -402,7 +411,7 @@ export default function ToolsSettingsPage() {
                                       </span>
                                       {p.description && (
                                         <span className="text-[12px] text-[var(--muted-foreground)]">
-                                          — {p.description}
+                                          — {zh ? localizeZh(p.description) : p.description}
                                         </span>
                                       )}
                                     </li>

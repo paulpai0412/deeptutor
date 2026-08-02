@@ -6,6 +6,7 @@ from typing import Any
 
 from deeptutor.capabilities.protocol import PromptBlock
 from deeptutor.core.context import UnifiedContext
+from deeptutor.services.config import parse_language
 from deeptutor.services.prompt.language import append_language_directive
 
 
@@ -14,7 +15,7 @@ class ChatPromptAssembler:
 
     def __init__(self, *, prompts: dict[str, Any], language: str) -> None:
         self.prompts = prompts
-        self.language = "zh" if language.lower().startswith("zh") else "en"
+        self.language = parse_language(language)
 
     def system_prompt(
         self,
@@ -153,7 +154,7 @@ class ChatPromptAssembler:
         )
 
     def _fallback_empty_tool_list(self) -> str:
-        return "- 无" if self.language == "zh" else "- none"
+        return "- 無" if self.language.startswith("zh") else "- none"
 
     def _t(self, key: str, default: str = "") -> str:
         value: Any = self.prompts

@@ -29,6 +29,15 @@ class CaptureFollowupAgent(FollowupAgent):
         yield "已回答"
 
 
+def test_followup_prompt_reveals_reference_answer_only_when_explicitly_requested() -> None:
+    assert "Do not volunteer the reference answer" in FollowupAgent(
+        language="en"
+    ).get_prompt("system", "")
+    assert "只有学习者明确询问答案时才提供" in FollowupAgent(language="zh").get_prompt(
+        "system", ""
+    )
+
+
 @pytest.mark.asyncio
 async def test_followup_agent_appends_language_directive_to_system_prompt() -> None:
     agent = CaptureFollowupAgent(language="zh")

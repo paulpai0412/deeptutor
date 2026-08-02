@@ -40,7 +40,9 @@ _PHASE_ORDER = ["exploration", "expansion", "synthesis", "verification", "other"
 
 
 def _normalize_language(language: str) -> str:
-    normalized = language.lower()
+    normalized = (language or "").lower().replace("_", "-")
+    if normalized in {"zh-tw", "zh-hant", "zh-hk", "tw", "traditional"}:
+        return "zh-TW"
     if normalized.startswith("zh"):
         return "zh"
     if normalized.startswith("en"):
@@ -53,6 +55,8 @@ def load_prompt_hints(tool_name: str, language: str = "en") -> ToolPromptHints:
     normalized_language = _normalize_language(language)
     base_dir = Path(__file__).parent / "hints"
     candidates = [base_dir / normalized_language / f"{tool_name}.yaml"]
+    if normalized_language == "zh-TW":
+        candidates.append(base_dir / "zh" / f"{tool_name}.yaml")
     if normalized_language != "en":
         candidates.append(base_dir / "en" / f"{tool_name}.yaml")
 
@@ -61,6 +65,10 @@ def load_prompt_hints(tool_name: str, language: str = "en") -> ToolPromptHints:
             continue
         with open(path, encoding="utf-8") as file:
             data = yaml.safe_load(file) or {}
+        if normalized_language == "zh-TW":
+            from deeptutor.i18n.zh_tw import convert_nested
+
+            data = convert_nested(data)
         aliases = [
             ToolAlias(
                 name=str(item.get("name", "")).strip(),
@@ -106,8 +114,12 @@ class ToolPromptComposer:
         Tools without a ``short_description`` are skipped entirely so the
         block never carries empty bullets.
         """
-        when_label = "When to use" if self.language != "zh" else "适用场景"
-        input_label = "Input" if self.language != "zh" else "参数格式"
+        if self.language == "zh-TW":
+            when_label = "適用情境"
+            input_label = "輸入格式"
+        else:
+            when_label = "When to use" if self.language != "zh" else "适用场景"
+            input_label = "Input" if self.language != "zh" else "参数格式"
         blocks: list[str] = []
         for name, hint in hints:
             if not hint.short_description:

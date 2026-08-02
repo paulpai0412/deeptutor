@@ -6,7 +6,9 @@ from typing import Any
 
 
 def _parse_language(language: str | None) -> str:
-    raw = (language or "en").strip().lower()
+    raw = (language or "en").strip().lower().replace("_", "-")
+    if raw in {"zh-tw", "zh-hant", "zh-hk", "tw", "traditional"}:
+        return "zh-TW"
     if raw.startswith("zh") or raw in {"cn", "chinese"}:
         return "zh"
     return "en"
@@ -58,6 +60,29 @@ _MESSAGES: dict[str, dict[str, str]] = {
         "sandbox.command_blocked": "错误：命令被安全防护拦截（匹配危险模式）。",
         "sandbox.disabled_for_account": "你的账号已禁用代码执行。",
         "sandbox.no_backend": "没有可用的沙箱后端",
+    },
+    "zh-TW": {
+        "api.content_required": "content 不能為空",
+        "api.invalid_channels_config": "頻道設定無效",
+        "api.partner_already_exists": "夥伴「{name}」已存在",
+        "api.partner_not_found": "找不到夥伴",
+        "api.partner_not_found_or_not_running": "找不到夥伴，或夥伴尚未執行",
+        "api.partner_not_running": "夥伴尚未執行",
+        "api.partner_stopped_start_required": "夥伴已停止，請先啟動後再聊天。",
+        "api.persona_already_exists": "Persona 已存在：{name}",
+        "api.persona_name_required": "Persona 名稱不能為空",
+        "api.persona_not_found": "找不到 Persona：{name}",
+        "api.soul_already_exists": "Soul「{name}」已存在",
+        "api.soul_content_empty": "自訂 soul 內容不能為空",
+        "api.soul_library_not_found": "素材庫中找不到 soul「{name}」",
+        "api.soul_not_found": "找不到 soul",
+        "api.tool_not_found": "找不到工具「{name}」",
+        "mcp.configure_command_or_url": "伺服器 {name!r}：請設定 command（stdio）或 url。",
+        "mcp.configure_before_testing": "測試前請先設定 command（stdio）或 url。",
+        "mcp.server_error": "伺服器 {name!r}：{error}",
+        "sandbox.command_blocked": "錯誤：命令遭安全防護攔截（符合危險模式）。",
+        "sandbox.disabled_for_account": "你的帳號已停用程式碼執行。",
+        "sandbox.no_backend": "沒有可用的沙箱後端",
     },
 }
 

@@ -75,6 +75,7 @@ class PaperLibrary:
     name: str
     description: str = ""
     settings: dict[str, Any] = field(default_factory=dict)
+    folders: list[str] = field(default_factory=list)
     created_at: str = ""
     updated_at: str = ""
 
@@ -101,6 +102,7 @@ class PaperRecord:
     task_id: str = ""
     parser_engine: str = ""
     library_id: str = LEGACY_LIBRARY_ID
+    folder_path: str = ""
     extraction_config: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
@@ -128,7 +130,7 @@ class PaperLibraryService:
         description: str = "",
         settings: dict[str, Any] | None = None,
     ) -> PaperLibrary:
-        """Create one user-owned, flat Paper Library container."""
+        """Create one user-owned Paper Library container with an empty folder registry."""
         safe_name = _safe_library_name(name)
         safe_description = _safe_description(description)
         with self._lock:
@@ -218,28 +220,120 @@ class PaperLibraryService:
                 [item for item in libraries if item.library_id != str(library_id)]
             )
 
-    def move_paper(self, paper_id: str, target_library_id: str) -> PaperRecord:
-        """Move a paper between libraries without copying its source files."""
+    def list_folders(self, library_id: str) -> list[str]:
+        """Return explicit normalized folder paths, including empty folders."""
+        with self._lock:
+            library = self.get_library(library_id)
+            return sorted(library.folders, key=lambda path: (path.casefold(), path))
+
+    def create_folder(
+        self,
+        library_id: str,
+        name: str,
+        *,
+        parent_path: str = "",
+    ) -> str:
+        """Create one folder below an existing parent and return its path."""
+        safe_name = _normalize_folder_name(name)
+        safe_parent = normalize_folder_path(parent_path)
+        with self._lock:
+            library = self.get_library(library_id)
+            folders = list(library.folders)
+            if safe_parent:
+                canonical_parent = _canonical_folder_path(folders, safe_parent)
+                if canonical_parent is None:
+                    raise FileNotFoundError(f"Paper Folder not found: {safe_parent}")
+                safe_parent = canonical_parent
+            candidate = "/".join(filter(None, (safe_parent, safe_name)))
+            if any(
+                _same_folder_path(path, candidate)
+                or (
+                    _parent_folder(path) == _parent_folder(candidate)
+                    and _folder_name(path).casefold() == safe_name.casefold()
+                )
+                for path in folders
+            ):
+                raise PaperValidationError("Paper Folder name already exists in this folder.")
+            folders.append(candidate)
+            updated = replace(library, folders=_normalized_folder_paths(folders), updated_at=_utc_now())
+            self._write_libraries_locked(
+                [updated if item.library_id == library.library_id else item for item in self._read_libraries_locked()]
+            )
+            return candidate
+
+    def ensure_folder_path(self, library_id: str, folder_path: str) -> str:
+        """Create missing folder ancestors for a validated upload path."""
+        safe_path = normalize_folder_path(folder_path)
+        if not safe_path:
+            return ""
+        with self._lock:
+            library = self.get_library(library_id)
+            folders = list(library.folders)
+            current = ""
+            changed = False
+            for segment in safe_path.split("/"):
+                candidate = "/".join(filter(None, (current, segment)))
+                existing = _canonical_folder_path(folders, candidate)
+                if existing is not None:
+                    current = existing
+                    continue
+                folders.append(candidate)
+                current = candidate
+                changed = True
+            if changed:
+                updated = replace(
+                    library,
+                    folders=_normalized_folder_paths(folders),
+                    updated_at=_utc_now(),
+                )
+                self._write_libraries_locked(
+                    [
+                        updated if item.library_id == library.library_id else item
+                        for item in self._read_libraries_locked()
+                    ]
+                )
+            return current
+
+    def move_paper(
+        self,
+        paper_id: str,
+        target_library_id: str,
+        target_folder_path: str = "",
+    ) -> PaperRecord:
+        """Move a paper to a library folder without copying its source files."""
+        safe_folder = normalize_folder_path(target_folder_path)
         with self._lock:
             target = self.get_library(target_library_id)
+            if safe_folder:
+                canonical_folder = _canonical_folder_path(target.folders, safe_folder)
+                if canonical_folder is None:
+                    raise FileNotFoundError(f"Paper Folder not found: {safe_folder}")
+                safe_folder = canonical_folder
             record = self._read_record_for_id(paper_id)
             if record.status == PAPER_STATUS_PROCESSING:
                 raise PaperBusyError("Paper extraction is still processing.")
-            if record.library_id == target.library_id:
+            if record.library_id == target.library_id and record.folder_path == safe_folder:
                 return record
-            duplicate = next(
-                (
-                    item
-                    for item in self._iter_records(library_id=target.library_id)
-                    if item.source_hash == record.source_hash and item.paper_id != record.paper_id
-                ),
-                None,
-            )
-            if duplicate is not None:
-                raise PaperLibraryError(
-                    "The destination Paper Library already contains this PDF."
+            if record.library_id != target.library_id:
+                duplicate = next(
+                    (
+                        item
+                        for item in self._iter_records(library_id=target.library_id)
+                        if item.source_hash == record.source_hash
+                        and item.paper_id != record.paper_id
+                    ),
+                    None,
                 )
-            updated = replace(record, library_id=target.library_id, updated_at=_utc_now())
+                if duplicate is not None:
+                    raise PaperLibraryError(
+                        "The destination Paper Library already contains this PDF."
+                    )
+            updated = replace(
+                record,
+                library_id=target.library_id,
+                folder_path=safe_folder,
+                updated_at=_utc_now(),
+            )
             self._write_record(updated)
             return updated
 
@@ -249,18 +343,21 @@ class PaperLibraryService:
         content: bytes,
         *,
         library_id: str | None = None,
+        folder_path: str = "",
         extraction_config: dict[str, Any] | None = None,
     ) -> PaperRecord:
         """Store a validated PDF, deduplicated within one library."""
         safe_filename = self._validate_pdf(filename, content)
         digest = hashlib.sha256(content).hexdigest()
         scope = str(library_id or LEGACY_LIBRARY_ID).strip() or LEGACY_LIBRARY_ID
+        safe_folder = normalize_folder_path(folder_path)
 
         with self._lock:
             self._recover_staging_locked()
             self._recover_interrupted_processing_locked()
             if scope != LEGACY_LIBRARY_ID:
-                self.get_library(scope)
+                if safe_folder:
+                    safe_folder = self.ensure_folder_path(scope, safe_folder)
             for existing in self._iter_records(library_id=scope):
                 if existing.source_hash == digest:
                     return existing
@@ -283,6 +380,7 @@ class PaperLibraryService:
                     "total": 0,
                 },
                 library_id=scope,
+                folder_path=safe_folder,
                 extraction_config=dict(extraction_config or {}),
             )
             paper_dir = self._paper_dir(record.paper_id)
@@ -302,10 +400,12 @@ class PaperLibraryService:
         library_id: str | None = None,
         search: str | None = None,
         status: str | None = None,
+        folder_path: str | None = None,
     ) -> list[PaperRecord]:
         """List paper metadata, optionally filtered by metadata fields."""
         normalized_search = (search or "").strip().casefold()
         normalized_status = (status or "").strip()
+        normalized_folder = normalize_folder_path(folder_path) if folder_path is not None else None
         with self._lock:
             self._recover_staging_locked()
             self._recover_interrupted_processing_locked()
@@ -314,6 +414,8 @@ class PaperLibraryService:
                 self.get_library(str(library_id))
             for record in self._iter_records(library_id=library_id):
                 if normalized_status and record.status != normalized_status:
+                    continue
+                if normalized_folder is not None and record.folder_path != normalized_folder:
                     continue
                 if normalized_search:
                     searchable = " ".join(
@@ -856,12 +958,17 @@ class PaperLibraryService:
             if not library_id or not name:
                 continue
             settings = raw.get("settings", {})
+            raw_folders = raw.get("folders", [])
+            folders = _normalized_folder_paths(
+                raw_folders if isinstance(raw_folders, list) else []
+            )
             libraries.append(
                 PaperLibrary(
                     library_id=library_id,
                     name=name,
                     description=str(raw.get("description", "")),
                     settings=dict(settings) if isinstance(settings, dict) else {},
+                    folders=folders,
                     created_at=str(raw.get("created_at", "")),
                     updated_at=str(raw.get("updated_at", "")),
                 )
@@ -1051,6 +1158,7 @@ class PaperLibraryService:
             task_id=str(payload.get("task_id", "")),
             parser_engine=str(payload.get("parser_engine", "")),
             library_id=str(payload.get("library_id", LEGACY_LIBRARY_ID)),
+            folder_path=normalize_folder_path(payload.get("folder_path", "")),
             extraction_config=(
                 dict(payload.get("extraction_config", {}))
                 if isinstance(payload.get("extraction_config", {}), dict)
@@ -1088,6 +1196,69 @@ class PaperLibraryService:
         except Exception as exc:
             raise PaperValidationError("Uploaded file is not a readable PDF.") from exc
         return safe_filename
+
+
+def normalize_folder_path(value: str | None) -> str:
+    """Normalize a user-supplied relative Paper Folder path."""
+    raw = str(value or "").strip().replace("\\", "/")
+    if not raw:
+        return ""
+    if raw.startswith("/") or _CONTROL_CHARS_RE.search(raw):
+        raise PaperValidationError("Paper Folder path must be a safe relative path.")
+    parts: list[str] = []
+    for raw_part in raw.split("/"):
+        part = raw_part.strip()
+        if not part:
+            continue
+        if part in {".", ".."} or _CONTROL_CHARS_RE.search(part):
+            raise PaperValidationError("Paper Folder path contains an invalid segment.")
+        parts.append(part[:120])
+    return "/".join(parts)
+
+
+def _normalize_folder_name(value: str) -> str:
+    name = str(value or "").strip()
+    if (
+        not name
+        or name in {".", ".."}
+        or "/" in name
+        or "\\" in name
+        or _CONTROL_CHARS_RE.search(name)
+    ):
+        raise PaperValidationError("Paper Folder name is invalid.")
+    return name[:120]
+
+
+def _same_folder_path(left: str, right: str) -> bool:
+    return str(left).casefold() == str(right).casefold()
+
+
+def _folder_exists(folders: list[str], path: str) -> bool:
+    return any(_same_folder_path(folder, path) for folder in folders)
+
+
+def _canonical_folder_path(folders: list[str], path: str) -> str | None:
+    return next((folder for folder in folders if _same_folder_path(folder, path)), None)
+
+
+def _parent_folder(path: str) -> str:
+    return path.rsplit("/", 1)[0] if "/" in path else ""
+
+
+def _folder_name(path: str) -> str:
+    return path.rsplit("/", 1)[-1]
+
+
+def _normalized_folder_paths(values: list[Any]) -> list[str]:
+    result: list[str] = []
+    for value in values:
+        try:
+            path = normalize_folder_path(str(value))
+        except PaperValidationError:
+            continue
+        if path and not _folder_exists(result, path):
+            result.append(path)
+    return result
 
 
 def _sanitize_asset_references(value: Any) -> list[str]:

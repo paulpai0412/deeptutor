@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   CheckCircle2,
   ChevronDown,
@@ -16,6 +16,7 @@ import {
 import { useTranslation } from "react-i18next";
 
 import ProviderIcon from "@/components/common/ProviderIcon";
+import { apiFetch, apiUrl } from "@/lib/api";
 import {
   type CatalogModel,
   type CatalogProfile,
@@ -77,6 +78,8 @@ export function ServiceConfigEditor({ service }: { service: ServiceName }) {
 
   const activeProfile = getActiveProfile(draft, service);
   const activeModel = getActiveModel(draft, service);
+  const usesCodexOAuth =
+    service === "imagegen" && activeProfile?.binding === "openai_codex";
 
   const [showApiKey, setShowApiKey] = useState(false);
   const [diagnosticsOpen, setDiagnosticsOpen] = useState(false);
@@ -612,9 +615,13 @@ export function ServiceConfigEditor({ service }: { service: ServiceName }) {
                         </div>
                         <div>
                           <div className="mb-1.5 text-[12px] text-[var(--muted-foreground)]">
-                            {t("Quality / Style")}
+                            {usesCodexOAuth
+                              ? t("Quality")
+                              : t("Quality / Style")}
                           </div>
-                          <div className="grid grid-cols-2 gap-2">
+                          <div
+                            className={`grid gap-2 ${usesCodexOAuth ? "grid-cols-1" : "grid-cols-2"}`}
+                          >
                             <input
                               className={inputClass}
                               value={activeModel.quality || ""}
@@ -627,19 +634,28 @@ export function ServiceConfigEditor({ service }: { service: ServiceName }) {
                               }
                               placeholder={t("quality (e.g. hd)")}
                             />
-                            <input
-                              className={inputClass}
-                              value={activeModel.style || ""}
-                              onChange={(e) =>
-                                updateModelField(
-                                  service,
-                                  "style",
-                                  e.target.value,
-                                )
-                              }
-                              placeholder={t("style (e.g. vivid)")}
-                            />
+                            {!usesCodexOAuth && (
+                              <input
+                                className={inputClass}
+                                value={activeModel.style || ""}
+                                onChange={(e) =>
+                                  updateModelField(
+                                    service,
+                                    "style",
+                                    e.target.value,
+                                  )
+                                }
+                                placeholder={t("style (e.g. vivid)")}
+                              />
+                            )}
                           </div>
+                          {usesCodexOAuth && (
+                            <p className="mt-1.5 text-[11px] text-[var(--muted-foreground)]">
+                              {t(
+                                "Codex native image generation manages style through the prompt.",
+                              )}
+                            </p>
+                          )}
                         </div>
                       </>
                     )}
@@ -787,9 +803,9 @@ export function ServiceConfigEditor({ service }: { service: ServiceName }) {
   );
 }
 
-function defaultModelLabel(language: "en" | "zh", index: number): string {
+function defaultModelLabel(language: "en" | "zh" | "zh-TW", index: number): string {
   const safeIndex = index > 0 ? index : 1;
-  return language === "zh" ? `模型${safeIndex}` : `Model ${safeIndex}`;
+  return language.startsWith("zh") ? `模型${safeIndex}` : `Model ${safeIndex}`;
 }
 
 function formatCompactTokens(value: string | number | undefined): string {
@@ -940,16 +956,55 @@ function ProfileFields({
   isPerplexityMissingKey: boolean;
 }) {
   const { t } = useTranslation();
-  const { providers, updateProfileField, updateModelField } = useSettings();
+  const { providers, updateProfileField, updateModelField, reloadSettings } =
+    useSettings();
   const [extraOpen, setExtraOpen] = useState(false);
+  const [githubAuth, setGithubAuth] = useState<{
+    status: string;
+    user_code?: string;
+    verification_uri?: string;
+    error?: string;
+  } | null>(null);
+
+  // Poll the backend-driven device flow while waiting for the user to
+  // authorize on github.com/login/device.
+  useEffect(() => {
+    if (githubAuth?.status !== "pending") return;
+    const timer = setInterval(() => {
+      void (async () => {
+        const res = await apiFetch(
+          apiUrl("/api/v1/settings/llm/github-copilot/oauth/status"),
+        );
+        if (!res.ok) return;
+        const data = await res.json();
+        setGithubAuth(data);
+        if (data.status === "authorized") void reloadSettings();
+      })();
+    }, 3000);
+    return () => clearInterval(timer);
+  }, [githubAuth?.status, reloadSettings]);
+
+  const startGithubOAuth = async () => {
+    const res = await apiFetch(
+      apiUrl("/api/v1/settings/llm/github-copilot/oauth/start"),
+      { method: "POST" },
+    );
+    if (res.ok) setGithubAuth(await res.json());
+  };
 
   const providerValue =
     service === "search" ? profile.provider || "" : profile.binding || "";
+  const providerOption = (providers[service] || []).find(
+    (option) => option.value === providerValue,
+  );
+  const usesOAuth = providerOption?.auth_mode === "oauth";
+  const oauthReady = providerOption?.oauth_ready === true;
 
-  // Only the search service hides fields by provider. LLM/embedding always
-  // expose Base URL and API Key, so default both to shown for them.
-  const fields =
-    service === "search"
+  // OAuth providers manage their endpoint and credential outside the catalog.
+  // Other services keep the generic Base URL / API Key fields.
+  const fields = usesOAuth
+    ? { apiKey: false, baseUrl: false, baseUrlRequired: false }
+    : service === "search"
       ? searchProviderFields(profile.provider)
       : { apiKey: true, baseUrl: true, baseUrlRequired: false };
   const searxngMissingBaseUrl =
@@ -991,6 +1046,15 @@ function ProfileFields({
               }
               if (match?.base_url) {
                 updateProfileField(service, "base_url", match.base_url);
+              }
+              if (
+                (service === "imagegen" && val === "openai_codex") ||
+                (service === "llm" && val === "github_copilot")
+              ) {
+                updateProfileField(service, "base_url", "");
+                updateProfileField(service, "api_key", "");
+                updateProfileField(service, "api_version", "");
+                updateProfileField(service, "extra_headers", "{}");
               }
               if (service === "embedding" && match?.default_dim) {
                 updateModelField(service, "dimension", match.default_dim);
@@ -1048,6 +1112,69 @@ function ProfileFields({
                     "Unsupported provider. Use brave/tavily/jina/searxng/duckduckgo/perplexity.",
                   )}
           </p>
+        )}
+        {usesOAuth && (
+          <div className="mt-3 rounded-lg border border-[var(--border)]/60 bg-[var(--muted)]/20 px-3 py-2.5 text-[11.5px] leading-relaxed">
+            <div className="flex items-center gap-2 font-medium text-[var(--foreground)]">
+              <span
+                className={`h-2 w-2 rounded-full ${oauthReady ? "bg-emerald-500" : "bg-amber-500"}`}
+              />
+              {t("OAuth status")}: {oauthReady ? t("Connected") : t("Not connected")}
+            </div>
+            <p className="mt-1 text-[var(--muted-foreground)]">
+              {oauthReady
+                ? providerValue === "github_copilot"
+                  ? t("LLM requests use the server-level GitHub Copilot OAuth account.")
+                  : t("Images use the server-level Codex OAuth account and shared OpenAI quota.")
+                : providerValue === "github_copilot"
+                  ? t("Run `deeptutor provider login github-copilot` on the server, then reload this page.")
+                  : t("Run `deeptutor provider login openai-codex` on the server, then reload this page.")}
+            </p>
+            {service === "imagegen" && (
+              <p className="mt-1 text-[var(--muted-foreground)]/80">
+                {t("Run test sends one billable image request and does not save a user artifact.")}
+              </p>
+            )}
+            {providerValue === "github_copilot" && !oauthReady && (
+              <div className="mt-2">
+                {githubAuth?.status === "pending" ? (
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="text-[var(--muted-foreground)]">
+                      {t("Enter this code on GitHub:")}
+                    </span>
+                    <code className="rounded-md border border-[var(--border)] bg-[var(--background)] px-2 py-0.5 font-mono text-[13px] font-semibold tracking-wider">
+                      {githubAuth.user_code}
+                    </code>
+                    <a
+                      href={githubAuth.verification_uri}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="font-medium text-[var(--primary)] underline underline-offset-2"
+                    >
+                      {githubAuth.verification_uri}
+                    </a>
+                    <span className="inline-flex items-center gap-1.5 text-[var(--muted-foreground)]">
+                      <Loader2 size={12} className="animate-spin" />
+                      {t("Waiting for authorization…")}
+                    </span>
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => void startGithubOAuth()}
+                    className="inline-flex items-center gap-1.5 rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 py-1.5 text-[11.5px] font-medium text-[var(--foreground)] transition-colors hover:bg-[var(--muted)]/55"
+                  >
+                    {t("Connect with GitHub")}
+                  </button>
+                )}
+                {githubAuth?.status === "error" && (
+                  <p className="mt-1.5 text-red-500">
+                    {t("Authorization failed.")} {githubAuth.error}
+                  </p>
+                )}
+              </div>
+            )}
+          </div>
         )}
       </div>
       {fields.baseUrl && (
@@ -1116,76 +1243,78 @@ function ProfileFields({
           </div>
         </div>
       )}
-      <div className="sm:col-span-2 rounded-xl border border-[var(--border)]/60 bg-[var(--muted)]/20">
-        <button
-          type="button"
-          onClick={() => setExtraOpen((value) => !value)}
-          className="flex w-full items-center justify-between gap-3 px-3.5 py-3 text-left"
-          aria-expanded={extraOpen}
-        >
-          <span>
-            <span className="block text-[12px] font-medium text-[var(--foreground)]">
-              {t("Extra (optional)")}
+      {!usesOAuth && (
+        <div className="sm:col-span-2 rounded-xl border border-[var(--border)]/60 bg-[var(--muted)]/20">
+          <button
+            type="button"
+            onClick={() => setExtraOpen((value) => !value)}
+            className="flex w-full items-center justify-between gap-3 px-3.5 py-3 text-left"
+            aria-expanded={extraOpen}
+          >
+            <span>
+              <span className="block text-[12px] font-medium text-[var(--foreground)]">
+                {t("Extra (optional)")}
+              </span>
+              <span className="mt-0.5 block text-[11px] text-[var(--muted-foreground)]">
+                {service === "search"
+                  ? t("API version and proxy")
+                  : t("API version and extra request headers")}
+              </span>
             </span>
-            <span className="mt-0.5 block text-[11px] text-[var(--muted-foreground)]">
-              {service === "search"
-                ? t("API version and proxy")
-                : t("API version and extra request headers")}
-            </span>
-          </span>
-          <ChevronDown
-            className={`h-4 w-4 text-[var(--muted-foreground)] transition-transform ${
-              extraOpen ? "rotate-180" : ""
-            }`}
-          />
-        </button>
-        {extraOpen && (
-          <div className="grid gap-4 border-t border-[var(--border)]/60 px-3.5 py-4 sm:grid-cols-2">
-            <div>
-              <div className="mb-1.5 text-[12px] text-[var(--muted-foreground)]">
-                {t("API Version")}
-              </div>
-              <input
-                className={inputClass}
-                value={profile.api_version}
-                onChange={(e) =>
-                  updateProfileField(service, "api_version", e.target.value)
-                }
-                placeholder={t("Optional")}
-              />
-            </div>
-            {service === "search" ? (
+            <ChevronDown
+              className={`h-4 w-4 text-[var(--muted-foreground)] transition-transform ${
+                extraOpen ? "rotate-180" : ""
+              }`}
+            />
+          </button>
+          {extraOpen && (
+            <div className="grid gap-4 border-t border-[var(--border)]/60 px-3.5 py-4 sm:grid-cols-2">
               <div>
                 <div className="mb-1.5 text-[12px] text-[var(--muted-foreground)]">
-                  {t("Proxy")}
+                  {t("API Version")}
                 </div>
                 <input
                   className={inputClass}
-                  value={profile.proxy || ""}
+                  value={profile.api_version}
                   onChange={(e) =>
-                    updateProfileField(service, "proxy", e.target.value)
+                    updateProfileField(service, "api_version", e.target.value)
                   }
-                  placeholder={t("http://127.0.0.1:7890 (optional)")}
+                  placeholder={t("Optional")}
                 />
               </div>
-            ) : (
-              <div className="sm:col-span-2">
-                <div className="mb-1.5 text-[12px] text-[var(--muted-foreground)]">
-                  {t("Extra Headers (JSON)")}
+              {service === "search" ? (
+                <div>
+                  <div className="mb-1.5 text-[12px] text-[var(--muted-foreground)]">
+                    {t("Proxy")}
+                  </div>
+                  <input
+                    className={inputClass}
+                    value={profile.proxy || ""}
+                    onChange={(e) =>
+                      updateProfileField(service, "proxy", e.target.value)
+                    }
+                    placeholder={t("http://127.0.0.1:7890 (optional)")}
+                  />
                 </div>
-                <textarea
-                  className={`${inputClass} min-h-[84px] resize-y`}
-                  value={stringifyExtraHeaders(profile.extra_headers)}
-                  onChange={(e) =>
-                    updateProfileField(service, "extra_headers", e.target.value)
-                  }
-                  placeholder='{"APP-Code":"your-app-code"}'
-                />
-              </div>
-            )}
-          </div>
-        )}
-      </div>
+              ) : (
+                <div className="sm:col-span-2">
+                  <div className="mb-1.5 text-[12px] text-[var(--muted-foreground)]">
+                    {t("Extra Headers (JSON)")}
+                  </div>
+                  <textarea
+                    className={`${inputClass} min-h-[84px] resize-y`}
+                    value={stringifyExtraHeaders(profile.extra_headers)}
+                    onChange={(e) =>
+                      updateProfileField(service, "extra_headers", e.target.value)
+                    }
+                    placeholder='{"APP-Code":"your-app-code"}'
+                  />
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }

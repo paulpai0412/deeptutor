@@ -288,6 +288,9 @@ MODEL_OVERRIDES: dict[str, dict[str, object]] = {
     "gpt-5": {
         "forced_temperature": 1.0,
     },
+    # The current Codex OAuth GPT-5.5 route accepts Responses API image input.
+    "openai-codex/gpt-5.5": {"supports_vision": True},
+    "openai_codex/gpt-5.5": {"supports_vision": True},
     "o1": {
         "forced_temperature": 1.0,
     },

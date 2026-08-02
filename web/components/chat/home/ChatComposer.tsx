@@ -5,6 +5,7 @@ import {
   useCallback,
   useEffect,
   useLayoutEffect,
+  useMemo,
   useRef,
   useState,
   type RefObject,
@@ -42,6 +43,11 @@ import type { SelectedQuestionEntry } from "@/components/chat/QuestionBankPicker
 import type { SelectedRecord } from "@/lib/notebook-selection-types";
 import type { LLMSelection } from "@/lib/unified-ws";
 import type { LLMOption } from "@/lib/llm-options";
+import {
+  buildQuizFollowupConfig,
+  extractQuizQuestionsFromEvents,
+  findReferencedQuizQuestion,
+} from "@/lib/quiz-types";
 import ChatSpaceMenu from "@/components/chat/space/ChatSpaceMenu";
 import type { SpaceMemoryFile } from "@/lib/space-items";
 import type { SelectedBookReference } from "@/lib/book-references";
@@ -49,6 +55,7 @@ import AgentSelector from "./AgentSelector";
 import KnowledgeSelector from "./KnowledgeSelector";
 import ModelSelector from "./ModelSelector";
 import PersonaSelector from "./PersonaSelector";
+import RealtimeVoiceControl from "./RealtimeVoiceControl";
 
 type SpaceSelectionCounts = {
   attachments: number;
@@ -65,6 +72,11 @@ import ContextReferenceTree, {
   type ContextTreeItem,
 } from "./ContextReferenceTree";
 import { ComposerInput, type ComposerInputHandle } from "./ComposerInput";
+import { useUnifiedChat } from "@/context/UnifiedChatContext";
+import {
+  useRealtimeVoiceSession,
+  type RealtimeStartedTurn,
+} from "@/hooks/useRealtimeVoiceSession";
 import { useVoiceRecorder } from "@/hooks/useVoiceRecorder";
 
 interface PendingAttachment {
@@ -175,6 +187,7 @@ export default memo(function ChatComposer({
   isExamMode = false,
   paperLibraries = [],
   selectedPaperLibraryId = "",
+  selectedPaperId = "",
   onSelectPaperLibrary,
   capabilityNeedsConfig,
   capabilityConfigConfirmed,
@@ -267,6 +280,7 @@ export default memo(function ChatComposer({
     paper_count?: number;
   }>;
   selectedPaperLibraryId?: string;
+  selectedPaperId?: string;
   onSelectPaperLibrary?: (libraryId: string) => void;
   /**
    * True when the active capability (e.g. Quiz / Visualize / Research)
@@ -307,7 +321,10 @@ export default memo(function ChatComposer({
   /** Hide the My Agents reference entry (e.g. the quiz follow-up surface). */
   agentsAvailable?: boolean;
   onToggleMemoryFile: (file: SpaceMemoryFile) => void;
-  onSend: (content: string) => void;
+  onSend: (
+    content: string,
+    configOverride?: Record<string, unknown>,
+  ) => void | Promise<RealtimeStartedTurn | null | void>;
   onRemoveAttachment: (index: number) => void;
   onPreviewAttachment?: (index: number) => void;
   onRemoveHistory: (sessionId: string) => void;
@@ -365,6 +382,74 @@ export default memo(function ChatComposer({
     inputHandleRef.current?.setValue(next);
   }, []);
   const recorder = useVoiceRecorder(handleTranscript);
+  const { state: unifiedChatState, loadSession } = useUnifiedChat();
+  const quizQuestions = useMemo(() => {
+    if (!["exam", "deep_question"].includes(activeCap.value)) return [];
+    for (
+      let index = unifiedChatState.messages.length - 1;
+      index >= 0;
+      index -= 1
+    ) {
+      const message = unifiedChatState.messages[index];
+      if (
+        message.role !== "assistant" ||
+        !["exam", "deep_question"].includes(message.capability ?? "")
+      ) {
+        continue;
+      }
+      const questions = extractQuizQuestionsFromEvents(message.events ?? []);
+      if (questions?.length) return questions;
+    }
+    return [];
+  }, [activeCap.value, unifiedChatState.messages]);
+  const handleRealtimeTurn = useCallback(
+    (text: string) => {
+      const question = findReferencedQuizQuestion(text, quizQuestions);
+      return onSend(
+        text,
+        question
+          ? buildQuizFollowupConfig(
+              question,
+              "",
+              null,
+              unifiedChatState.sessionId,
+            )
+          : undefined,
+      );
+    },
+    [onSend, quizQuestions, unifiedChatState.sessionId],
+  );
+  const handleRealtimeSessionReady = useCallback(
+    async (sessionId: string) => {
+      if (unifiedChatState.sessionId !== sessionId) {
+        await loadSession(sessionId);
+      }
+    },
+    [loadSession, unifiedChatState.sessionId],
+  );
+  const realtimeVoice = useRealtimeVoiceSession(handleRealtimeTurn, {
+    sessionId: unifiedChatState.sessionId,
+    capability: activeCap.value || "chat",
+    knowledgeBases: selectedKnowledgeBases,
+    language: unifiedChatState.language,
+    paperLibraryId: isExamMode ? selectedPaperLibraryId : null,
+    paperId: isExamMode ? selectedPaperId : null,
+    examMode: isExamMode,
+    pageContext: "workspace chat",
+    questionContext: selectedQuestionEntries
+      .slice(0, 8)
+      .map((entry) => entry.question)
+      .join("\n"),
+    onSessionReady: handleRealtimeSessionReady,
+  });
+  const handleRealtimeInterrupt = useCallback(() => {
+    realtimeVoice.interrupt();
+    if (isStreaming) onCancelStreaming();
+  }, [isStreaming, onCancelStreaming, realtimeVoice]);
+  const handleCancelStreaming = useCallback(() => {
+    if (realtimeVoice.active) realtimeVoice.interrupt();
+    onCancelStreaming();
+  }, [onCancelStreaming, realtimeVoice]);
 
   // Composer-row compaction: when the available width drops below ~620 px
   // (e.g. the Viewer panel is open or the user is on a narrow viewport),
@@ -991,7 +1076,11 @@ export default memo(function ChatComposer({
                 <button
                   type="button"
                   onClick={recorder.toggle}
-                  disabled={recorder.state === "transcribing" || isStreaming}
+                  disabled={
+                    recorder.state === "transcribing" ||
+                    isStreaming ||
+                    realtimeVoice.active
+                  }
                   className={`group relative inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-[10px] transition-[background-color,color,transform] duration-150 active:scale-90 disabled:opacity-40 ${
                     recorder.state === "recording"
                       ? "bg-red-500/15 text-red-500"
@@ -1008,11 +1097,11 @@ export default memo(function ChatComposer({
                       ? t("Stop recording")
                       : t("Record voice"))
                   }
+                  data-testid="stt-voice-toggle"
                 >
-                  {recorder.state === "recording" && (
+                  {recorder.state === "recording" ? (
                     <span className="pointer-events-none absolute inset-0 rounded-[10px] border border-red-500/40 animate-pulse" />
-                  )}
-                  {recorder.state === "transcribing" ? (
+                  ) : recorder.state === "transcribing" ? (
                     <Loader2
                       size={16}
                       strokeWidth={1.9}
@@ -1023,10 +1112,24 @@ export default memo(function ChatComposer({
                   )}
                 </button>
 
+                <RealtimeVoiceControl
+                  state={realtimeVoice.state}
+                  transcript={realtimeVoice.partialTranscript}
+                  error={realtimeVoice.error}
+                  audioOutputReceived={realtimeVoice.audioOutputReceived}
+                  audioOutputCount={realtimeVoice.audioOutputCount}
+                  lastTurnMode={realtimeVoice.lastTurnMode}
+                  disabled={recorder.state !== "idle"}
+                  onToggle={realtimeVoice.toggle}
+                  onToggleMute={realtimeVoice.toggleMute}
+                  onInterrupt={handleRealtimeInterrupt}
+                  onEnd={realtimeVoice.end}
+                />
+
                 {isStreaming ? (
                   <button
                     type="button"
-                    onClick={onCancelStreaming}
+                    onClick={handleCancelStreaming}
                     className="group relative ml-1 inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-[10px] bg-[var(--primary)] text-[var(--primary-foreground)] transition-[background-color,transform] duration-150 hover:bg-[var(--primary)]/90 active:scale-95"
                     aria-label={t("Stop generating")}
                     title={t("Stop generating")}

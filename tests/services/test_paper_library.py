@@ -42,6 +42,7 @@ def test_upload_creates_pending_private_paper(paper_library: PaperLibraryService
     assert paper.original_filename == "practice.pdf"
     assert paper.source_hash
     assert paper.question_count == 0
+    assert paper.folder_path == ""
     assert paper_library.list_papers() == [paper]
     assert paper_library.read_source(paper.paper_id) == PDF_BYTES
 
@@ -300,6 +301,48 @@ def test_paper_can_move_between_libraries_and_conflicts_are_rejected(
         paper_library.move_paper(other.paper_id, second_library.library_id)
 
 
+def test_deleting_library_cascades_folders_questions_and_assets(
+    paper_library: PaperLibraryService, tmp_path: Path
+) -> None:
+    library = paper_library.create_library("Cascade")
+    folder = paper_library.create_folder(library.library_id, "Archive")
+    paper = paper_library.add_pdf(
+        "cascade.pdf", PDF_BYTES, library_id=library.library_id, folder_path=folder
+    )
+    paper_library.save_questions(
+        paper.paper_id,
+        [{"question_id": "q-1", "question_number": "1", "question_text": "Stored"}],
+        status="ready",
+    )
+    assets = tmp_path / "assets"
+    assets.mkdir()
+    (assets / "figure.png").write_bytes(b"figure")
+    paper_library.persist_assets(paper.paper_id, assets)
+    paper_dir = paper_library.root / paper.paper_id
+
+    paper_library.delete_library(library.library_id)
+
+    assert not paper_dir.exists()
+    with pytest.raises(FileNotFoundError):
+        paper_library.get_library(library.library_id)
+    assert paper_library.list_libraries() == []
+
+
+def test_processing_paper_blocks_library_deletion(
+    paper_library: PaperLibraryService,
+) -> None:
+    library = paper_library.create_library("Busy Library")
+    paper = paper_library.add_pdf("busy.pdf", PDF_BYTES, library_id=library.library_id)
+    task_id = TaskIDManager.get_instance().generate_task_id(
+        "paper_extract", f"library-busy:{paper_library.root}:{paper.paper_id}"
+    )
+    assert paper_library.claim_extraction(paper.paper_id, task_id) is not None
+
+    with pytest.raises(PaperBusyError):
+        paper_library.delete_library(library.library_id)
+    assert paper_library.get_library(library.library_id).library_id == library.library_id
+
+
 def test_deleting_library_removes_live_papers_but_not_other_library(
     paper_library: PaperLibraryService,
 ) -> None:
@@ -318,6 +361,115 @@ def test_deleting_library_removes_live_papers_but_not_other_library(
     assert paper_library.list_libraries() == [second_library]
 
 
+def test_hierarchical_folders_persist_validate_and_keep_empty_nodes(
+    paper_library: PaperLibraryService,
+) -> None:
+    library = paper_library.create_library("History")
+
+    root = paper_library.create_folder(library.library_id, "  Mock Exams  ")
+    child = paper_library.create_folder(
+        library.library_id,
+        "2026",
+        parent_path=root,
+    )
+    assert root == "Mock Exams"
+    assert child == "Mock Exams/2026"
+    assert paper_library.list_folders(library.library_id) == [root, child]
+
+    reloaded = PaperLibraryService(root=paper_library.root)
+    assert reloaded.list_folders(library.library_id) == [root, child]
+    with pytest.raises(PaperValidationError, match="already exists"):
+        reloaded.create_folder(library.library_id, " mock exams ")
+    with pytest.raises(PaperValidationError):
+        reloaded.create_folder(library.library_id, "../escape")
+    with pytest.raises(PaperValidationError):
+        reloaded.create_folder(library.library_id, "bad\nname")
+    with pytest.raises(FileNotFoundError):
+        reloaded.create_folder(library.library_id, "orphan", parent_path="missing")
+    other = reloaded.create_folder(library.library_id, "Other")
+    assert reloaded.create_folder(library.library_id, "2026", parent_path=other) == "Other/2026"
+
+
+def test_upload_path_auto_creates_normalized_folder_hierarchy(
+    paper_library: PaperLibraryService,
+) -> None:
+    library = paper_library.create_library("Uploads")
+    paper = paper_library.add_pdf(
+        "paper.pdf",
+        PDF_BYTES,
+        library_id=library.library_id,
+        folder_path=r"  Exams \ 2026 ",
+    )
+
+    assert paper.folder_path == "Exams/2026"
+    assert paper_library.list_folders(library.library_id) == ["Exams", "Exams/2026"]
+    with pytest.raises(PaperValidationError):
+        paper_library.add_pdf(
+            "unsafe.pdf",
+            PDF_BYTES,
+            library_id=library.library_id,
+            folder_path="../escape",
+        )
+
+
+def test_folder_moves_preserve_paper_identity_and_processing_lock(
+    paper_library: PaperLibraryService, tmp_path: Path
+) -> None:
+    library = paper_library.create_library("History")
+    source = paper_library.create_folder(library.library_id, "Source")
+    destination = paper_library.create_folder(library.library_id, "Reviewed")
+    paper = paper_library.add_pdf(
+        "paper.pdf", PDF_BYTES, library_id=library.library_id, folder_path=source
+    )
+    paper_library.save_questions(
+        paper.paper_id,
+        [{"question_id": "q-1", "question_number": "1", "question_text": "Keep"}],
+        status="ready",
+    )
+    assets = tmp_path / "assets"
+    assets.mkdir()
+    (assets / "figure.png").write_bytes(b"figure")
+    paper_library.persist_assets(paper.paper_id, assets)
+
+    moved = paper_library.move_paper(paper.paper_id, library.library_id, destination)
+    assert moved.paper_id == paper.paper_id
+    assert moved.folder_path == destination
+    assert paper_library.read_source(paper.paper_id) == PDF_BYTES
+    assert paper_library.get_questions(paper.paper_id)[0]["question_text"] == "Keep"
+    assert paper_library.asset_path(paper.paper_id, "figure.png").read_bytes() == b"figure"
+
+    paper_library.prepare_retry(paper.paper_id)
+    task_id = TaskIDManager.get_instance().generate_task_id(
+        "paper_extract", f"folder-busy:{paper_library.root}:{paper.paper_id}"
+    )
+    assert paper_library.claim_extraction(paper.paper_id, task_id) is not None
+    with pytest.raises(PaperBusyError):
+        paper_library.move_paper(paper.paper_id, library.library_id, "")
+
+
+def test_cross_library_folder_move_and_duplicate_conflict(
+    paper_library: PaperLibraryService,
+) -> None:
+    first = paper_library.create_library("First")
+    second = paper_library.create_library("Second")
+    destination = paper_library.create_folder(second.library_id, "Archive")
+    paper = paper_library.add_pdf("paper.pdf", PDF_BYTES, library_id=first.library_id)
+
+    moved = paper_library.move_paper(paper.paper_id, second.library_id, destination)
+    assert moved.paper_id == paper.paper_id
+    assert moved.library_id == second.library_id
+    assert moved.folder_path == destination
+
+    conflict_source = paper_library.add_pdf(
+        "other.pdf", _make_pdf(width=600), library_id=first.library_id
+    )
+    paper_library.add_pdf(
+        "copy.pdf", _make_pdf(width=600), library_id=second.library_id
+    )
+    with pytest.raises(PaperLibraryError, match="destination.*contains"):
+        paper_library.move_paper(conflict_source.paper_id, second.library_id, destination)
+
+
 def test_papers_are_scoped_to_the_current_user(tmp_path: Path) -> None:
     def user(user_id: str) -> CurrentUser:
         return CurrentUser(
@@ -330,6 +482,8 @@ def test_papers_are_scoped_to_the_current_user(tmp_path: Path) -> None:
     with user_context(user("alice")):
         alice_service = PaperLibraryService()
         alice_paper = alice_service.add_pdf("private.pdf", PDF_BYTES)
+        alice_library = alice_service.create_library("Alice Papers")
+        alice_folder = alice_service.create_folder(alice_library.library_id, "Private")
 
     with user_context(user("bob")):
         bob_service = PaperLibraryService()
@@ -338,3 +492,6 @@ def test_papers_are_scoped_to_the_current_user(tmp_path: Path) -> None:
             bob_service.read_source(alice_paper.paper_id)
         with pytest.raises(FileNotFoundError):
             bob_service.asset_path(alice_paper.paper_id, "figure.png")
+        with pytest.raises(FileNotFoundError):
+            bob_service.list_folders(alice_library.library_id)
+        assert alice_folder == "Private"

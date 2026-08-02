@@ -1643,6 +1643,87 @@ class SQLiteSessionStore:
     async def get_quiz_snapshot(self, session_id: str, turn_id: str) -> dict[str, Any] | None:
         return await self._run(self._get_quiz_snapshot_sync, session_id, turn_id)
 
+    def _get_latest_quiz_snapshot_sync(self, session_id: str) -> dict[str, Any] | None:
+        with self._connect() as conn:
+            row = conn.execute(
+                """
+                SELECT id, session_id, turn_id, source_type, paper_id,
+                       paper_display_name, paper_source_hash, snapshot_json, created_at
+                FROM quiz_snapshots
+                WHERE session_id = ?
+                ORDER BY created_at DESC, id DESC
+                LIMIT 1
+                """,
+                (session_id,),
+            ).fetchone()
+        if row is None:
+            return None
+        payload = _json_loads(row["snapshot_json"], {})
+        if not isinstance(payload, dict):
+            payload = {}
+        return {
+            "snapshot_id": str(row["id"]),
+            "session_id": row["session_id"],
+            "turn_id": row["turn_id"],
+            "source_type": row["source_type"] or "",
+            "paper_id": row["paper_id"] or "",
+            "paper_display_name": row["paper_display_name"] or "",
+            "paper_source_hash": row["paper_source_hash"] or "",
+            "created_at": float(row["created_at"]),
+            **payload,
+        }
+
+    async def get_latest_quiz_snapshot(self, session_id: str) -> dict[str, Any] | None:
+        """Most recent quiz snapshot for a session, or None."""
+        return await self._run(self._get_latest_quiz_snapshot_sync, session_id)
+
+    def _list_exam_judgments_sync(self, session_id: str) -> list[dict[str, Any]]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT te.turn_id, te.metadata_json
+                FROM turn_events te
+                JOIN turns t ON t.id = te.turn_id
+                WHERE t.session_id = ? AND te.type = 'progress'
+                ORDER BY te.rowid
+                """,
+                (session_id,),
+            ).fetchall()
+        judgments: list[dict[str, Any]] = []
+        for row in rows:
+            metadata = _json_loads(row["metadata_json"], {})
+            if not isinstance(metadata, dict):
+                continue
+            if metadata.get("call_kind") != "exam_judgment":
+                continue
+            judgments.append({"turn_id": row["turn_id"], **metadata})
+        return judgments
+
+    async def list_exam_judgments(self, session_id: str) -> list[dict[str, Any]]:
+        """Exam answer judgments (call_kind=exam_judgment) in recorded order."""
+        return await self._run(self._list_exam_judgments_sync, session_id)
+
+    def _get_latest_quiz_turn_id_sync(self, session_id: str) -> str | None:
+        with self._connect() as conn:
+            row = conn.execute(
+                """
+                SELECT te.turn_id AS turn_id, MAX(te.rowid) AS last_rowid
+                FROM turn_events te
+                JOIN turns t ON t.id = te.turn_id
+                WHERE t.session_id = ? AND te.type = 'content'
+                  AND json_extract(te.metadata_json, '$.call_kind') = 'quiz_question_emitted'
+                GROUP BY te.turn_id
+                ORDER BY last_rowid DESC
+                LIMIT 1
+                """,
+                (session_id,),
+            ).fetchone()
+        return str(row["turn_id"]) if row else None
+
+    async def get_latest_quiz_turn_id(self, session_id: str) -> str | None:
+        """Latest turn that emitted quiz questions (generated quiz fallback)."""
+        return await self._run(self._get_latest_quiz_turn_id_sync, session_id)
+
     # ── Question Bank entries ─────────────────────────────────────────
 
     def _upsert_notebook_entries_sync(self, session_id: str, items: list[dict[str, Any]]) -> int:

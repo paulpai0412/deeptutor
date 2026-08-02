@@ -1,6 +1,8 @@
 "use client";
 
-export type AppLanguage = "en" | "zh";
+import { DEFAULT_PET_ID, DISABLED_PET_ID, getPet } from "@/lib/pets";
+
+export type AppLanguage = "en" | "zh" | "zh-TW";
 
 export const ACTIVE_SESSION_STORAGE_KEY = "deeptutor.activeSessionId.tab";
 export const LANGUAGE_STORAGE_KEY = "deeptutor-language";
@@ -62,7 +64,10 @@ export const CODE_BLOCK_SETTINGS_EVENT = "deeptutor:code-block-settings";
 export function normalizeLanguage(
   value: string | null | undefined,
 ): AppLanguage {
-  return value === "zh" ? "zh" : "en";
+  const normalized = String(value || "").toLowerCase().replace("_", "-");
+  if (normalized === "zh" || normalized === "zh-cn" || normalized === "zh-hans") return "zh";
+  if (["zh-tw", "zh-hant", "zh-hk", "tw", "traditional"].includes(normalized)) return "zh-TW";
+  return "en";
 }
 
 export function readStoredLanguage(): AppLanguage {
@@ -248,6 +253,43 @@ export function writeStoredCodeBlockWrapLongLines(wrap: boolean): void {
     window.dispatchEvent(
       new CustomEvent(CODE_BLOCK_SETTINGS_EVENT, {
         detail: { codeBlockWrapLongLines: wrap },
+      }),
+    );
+  } catch {
+    // localStorage may be unavailable
+  }
+}
+
+// Ambient companion pet (ported from Codex CLI; catalog in lib/pets.ts).
+// Mirrored to localStorage so the workspace AmbientPet (a different provider
+// tree from Settings) can read the preference synchronously.
+export const PET_STORAGE_KEY = "deeptutor.pet";
+export const PET_EVENT = "deeptutor:pet";
+
+export function normalizePet(value: string | null | undefined): string {
+  const trimmed = (value ?? "").trim();
+  if (trimmed === DISABLED_PET_ID) return DISABLED_PET_ID;
+  if (trimmed && getPet(trimmed)) return trimmed;
+  return DEFAULT_PET_ID;
+}
+
+export function readStoredPet(): string {
+  if (typeof window === "undefined") return DEFAULT_PET_ID;
+  try {
+    return normalizePet(window.localStorage.getItem(PET_STORAGE_KEY));
+  } catch {
+    return DEFAULT_PET_ID;
+  }
+}
+
+export function writeStoredPet(pet: string): void {
+  if (typeof window === "undefined") return;
+  const normalized = normalizePet(pet);
+  try {
+    window.localStorage.setItem(PET_STORAGE_KEY, normalized);
+    window.dispatchEvent(
+      new CustomEvent(PET_EVENT, {
+        detail: { pet: normalized },
       }),
     );
   } catch {

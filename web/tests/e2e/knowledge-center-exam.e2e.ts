@@ -181,8 +181,7 @@ test.describe("Knowledge Center → Paper Library → Exam :: real release flow"
       });
     });
 
-    await page.goto("/space/questions");
-    await page.getByRole("tab", { name: "Paper Libraries" }).click();
+    await page.goto("/knowledge?tab=papers");
     await expect(page.getByRole("heading", { name: "Paper Libraries" })).toBeVisible();
     await capture(page, "01-knowledge-center-paper-libraries");
 
@@ -269,10 +268,11 @@ test.describe("Knowledge Center → Paper Library → Exam :: real release flow"
     await expect(initialRow).toBeVisible({ timeout: 30_000 });
     const firstReady = await waitForPaper(page, library.library_id, paperId);
     expect(firstReady.library_id).toBe(library.library_id);
-    await expect(initialRow).toContainText(/Paper ready|Paper partially ready/);
+    await expect(initialRow).toContainText(/File ready|File partially ready/);
     await capture(page, "05-paper-ready-after-llm-extraction");
 
     page.once("dialog", (dialog) => dialog.accept());
+    await initialRow.getByRole("button", { name: /File ready/ }).click();
     const [retryResponse] = await Promise.all([
       page.waitForResponse(
         (response) =>
@@ -280,7 +280,7 @@ test.describe("Knowledge Center → Paper Library → Exam :: real release flow"
           new URL(response.url()).pathname ===
             `/api/v1/papers/libraries/${library.library_id}/papers/${paperId}/retry`,
       ),
-      initialRow.getByRole("button", { name: "Retry", exact: true }).click(),
+      page.getByRole("button", { name: "Retry", exact: true }).click(),
     ]);
     expect(retryResponse.status()).toBe(200);
     await waitForPaper(page, library.library_id, paperId);
@@ -310,7 +310,7 @@ test.describe("Knowledge Center → Paper Library → Exam :: real release flow"
       detail.questions.map(() => ""),
     );
 
-    await initialRow.getByRole("button", { name: "Review", exact: true }).click();
+    await page.getByRole("button", { name: "Review questions", exact: true }).click();
     await expect(page.getByRole("button", { name: "Back to Paper Library" })).toBeVisible();
     const imageQuestion = detail.questions.find((question) => question.images.length > 0);
     expect(
@@ -390,7 +390,8 @@ test.describe("Knowledge Center → Paper Library → Exam :: real release flow"
     await page.locator("aside button").filter({ hasText: libraryName }).click();
     const paperRow = page.locator("li").filter({ hasText: renamedName }).first();
     await expect(paperRow).toBeVisible();
-    const moveSelect = paperRow.getByRole("combobox", { name: "Move paper" });
+    await paperRow.getByRole("button", { name: /File ready/ }).click();
+    await paperRow.getByRole("button", { name: "Move to…" }).click();
     const [moveResponse] = await Promise.all([
       page.waitForResponse(
         (response) =>
@@ -398,7 +399,12 @@ test.describe("Knowledge Center → Paper Library → Exam :: real release flow"
           new URL(response.url()).pathname ===
             `/api/v1/papers/libraries/${library.library_id}/papers/${paperId}/move`,
       ),
-      moveSelect.selectOption(archive.library_id),
+      page
+        .getByRole("button", {
+          name: `${archiveName} / Library root`,
+          exact: true,
+        })
+        .click(),
     ]);
     expect(moveResponse.status()).toBe(200);
     const moved = (await moveResponse.json()) as PaperRecord;
@@ -410,7 +416,8 @@ test.describe("Knowledge Center → Paper Library → Exam :: real release flow"
     await expect(movedRow).toBeVisible();
     await capture(page, "08-paper-moved-to-archive-library");
 
-    await movedRow.getByRole("button", { name: "Review", exact: true }).click();
+    await movedRow.getByRole("button", { name: /File ready/ }).click();
+    await page.getByRole("button", { name: "Review questions", exact: true }).click();
     await expect(page.getByRole("button", { name: "Start Exam", exact: true })).toBeVisible();
     await page.getByRole("button", { name: "Start Exam", exact: true }).click();
     await expect(page).toHaveURL(

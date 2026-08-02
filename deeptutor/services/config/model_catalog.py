@@ -118,6 +118,19 @@ class ModelCatalogService:
                 profile.setdefault("api_version", "")
                 profile.setdefault("base_url", "")
                 profile.setdefault("api_key", "")
+                if service_name == "imagegen" and profile.get("binding") == "openai_codex":
+                    # Codex OAuth owns credentials outside the catalog. Strip
+                    # any stale or client-supplied credential fields before a
+                    # catalog can be persisted or returned by the settings API.
+                    for field, empty in (
+                        ("base_url", ""),
+                        ("api_key", ""),
+                        ("api_version", ""),
+                        ("extra_headers", {}),
+                    ):
+                        if profile.get(field) != empty:
+                            profile[field] = empty
+                            changed = True
                 if service_name == "search":
                     profile.setdefault("provider", "brave")
                     profile.setdefault("proxy", "")

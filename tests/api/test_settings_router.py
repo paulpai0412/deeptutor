@@ -433,6 +433,25 @@ def test_embedding_provider_choices_use_full_endpoint_urls() -> None:
     assert "custom_openai_sdk" not in embedding
 
 
+def test_imagegen_provider_choices_include_codex_oauth(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "deeptutor.services.llm.provider_core.openai_codex_provider.has_codex_oauth_token",
+        lambda: True,
+    )
+    imagegen = {item["value"]: item for item in settings_router._provider_choices()["imagegen"]}
+
+    assert imagegen["openai_codex"] == {
+        "value": "openai_codex",
+        "label": "OpenAI Codex OAuth",
+        "base_url": "",
+        "default_model": "gpt-5.5",
+        "auth_mode": "oauth",
+        "oauth_ready": True,
+    }
+
+
 def test_llm_provider_choices_include_atlascloud() -> None:
     llm = {item["value"]: item for item in settings_router._provider_choices()["llm"]}
 
@@ -742,3 +761,253 @@ async def test_update_ui_settings_persists_explicit_theme_and_language_defaults(
     persisted = settings_router.load_ui_settings()
     assert persisted["theme"] == "snow"
     assert persisted["language"] == "en"
+
+
+@pytest.mark.asyncio
+async def test_voice_input_mode_defaults_to_dictation_and_persists(
+    monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    settings_file = tmp_path / "interface.json"
+    monkeypatch.setattr(settings_router, "_settings_file", lambda: settings_file)
+
+    assert settings_router.load_ui_settings()["voice_input_mode"] == "dictation"
+
+    response = await settings_router.update_voice_input_mode(
+        settings_router.VoiceInputModeUpdate(voice_input_mode="realtime")
+    )
+
+    assert response == {"voice_input_mode": "realtime"}
+    assert settings_router.load_ui_settings()["voice_input_mode"] == "realtime"
+
+
+@pytest.mark.asyncio
+async def test_pet_ui_setting_defaults_to_codex_and_persists(
+    monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    settings_file = tmp_path / "interface.json"
+    monkeypatch.setattr(settings_router, "_settings_file", lambda: settings_file)
+
+    # Given no saved file, the default pet is the Codex companion.
+    assert settings_router.load_ui_settings()["pet"] == "codex"
+    assert settings_router.UISettings().pet == "codex"
+
+    # When: the picker switches pet via the partial-update endpoint.
+    response = await settings_router.update_ui_settings(
+        settings_router.UISettingsUpdate(pet="dewey")
+    )
+
+    # Then: the choice persists and survives unrelated later patches.
+    assert response["pet"] == "dewey"
+    assert settings_router.load_ui_settings()["pet"] == "dewey"
+
+    await settings_router.update_ui_settings(
+        settings_router.UISettingsUpdate(code_block_theme="dracula")
+    )
+    assert settings_router.load_ui_settings()["pet"] == "dewey"
+
+    # And: the picker can also turn the pet off entirely.
+    await settings_router.update_ui_settings(
+        settings_router.UISettingsUpdate(pet="disabled")
+    )
+    assert settings_router.load_ui_settings()["pet"] == "disabled"
+
+
+@pytest.mark.asyncio
+async def test_ui_settings_partial_update_accepts_voice_input_mode(
+    monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    settings_file = tmp_path / "interface.json"
+    monkeypatch.setattr(settings_router, "_settings_file", lambda: settings_file)
+
+    response = await settings_router.update_ui_settings(
+        settings_router.UISettingsUpdate(voice_input_mode="realtime")
+    )
+
+    assert response["voice_input_mode"] == "realtime"
+    assert settings_router.load_ui_settings()["voice_input_mode"] == "realtime"
+
+
+@pytest.mark.asyncio
+async def test_realtime_voice_settings_roundtrip_is_credential_free(
+    monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    from deeptutor.services.voice import realtime
+
+    service = RuntimeSettingsService(tmp_path / "settings", process_env={})
+    monkeypatch.setattr(settings_router, "get_runtime_settings_service", lambda: service)
+    monkeypatch.setattr(settings_router, "_require_settings_admin", lambda: None)
+    monkeypatch.setattr(
+        realtime,
+        "realtime_voice_status",
+        lambda: realtime.RealtimeVoiceProviderStatus(
+            provider="openai_codex",
+            ready=True,
+            message="Connected.",
+        ),
+    )
+
+    initial = await settings_router.get_realtime_voice_settings()
+    assert initial["provider"] == "openai_codex"
+    assert initial["model"] == "gpt-live-1-boulder-alpha"
+    assert initial["voice"] == "cove"
+    assert initial["models"] == ["gpt-live-1-boulder-alpha"]
+    assert "juniper" in initial["voices"]
+    assert initial["status"]["ready"] is True
+    assert "access_token" not in str(initial).lower()
+    assert "authorization" not in str(initial).lower()
+
+    updated = await settings_router.update_realtime_voice_settings(
+        settings_router.RealtimeVoiceSettingsUpdate(
+            provider="openai_codex",
+            model="gpt-live-1-boulder-alpha",
+            voice="juniper",
+        )
+    )
+
+    assert updated["voice"] == "juniper"
+    assert service.load_realtime_voice(include_process_overrides=False)["voice"] == "juniper"
+    assert "access_token" not in str(updated).lower()
+    assert "authorization" not in str(updated).lower()
+
+
+@pytest.mark.asyncio
+async def test_realtime_voice_authorization_runs_server_side_oauth(
+    monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    from deeptutor.services.llm.provider_core import openai_codex_provider
+    from deeptutor.services.voice import realtime
+
+    service = RuntimeSettingsService(tmp_path / "settings", process_env={})
+    authorized = False
+
+    def authorize() -> None:
+        nonlocal authorized
+        authorized = True
+
+    monkeypatch.setattr(settings_router, "get_runtime_settings_service", lambda: service)
+    monkeypatch.setattr(settings_router, "_require_settings_admin", lambda: None)
+    monkeypatch.setattr(openai_codex_provider, "authorize_codex_oauth", authorize)
+    monkeypatch.setattr(
+        realtime,
+        "realtime_voice_status",
+        lambda: realtime.RealtimeVoiceProviderStatus(
+            provider="openai_codex",
+            ready=True,
+            message="Connected.",
+        ),
+    )
+
+    response = await settings_router.authorize_realtime_voice()
+
+    assert authorized is True
+    assert response["status"]["ready"] is True
+    assert "access_token" not in str(response).lower()
+    assert "authorization" not in str(response).lower()
+
+
+@pytest.mark.asyncio
+async def test_realtime_voice_authorization_redacts_oauth_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from fastapi import HTTPException
+
+    from deeptutor.services.llm.provider_core import openai_codex_provider
+
+    def fail_authorization() -> None:
+        raise RuntimeError("Bearer server-secret")
+
+    monkeypatch.setattr(settings_router, "_require_settings_admin", lambda: None)
+    monkeypatch.setattr(
+        openai_codex_provider,
+        "authorize_codex_oauth",
+        fail_authorization,
+    )
+
+    with pytest.raises(HTTPException) as caught:
+        await settings_router.authorize_realtime_voice()
+
+    assert caught.value.status_code == 502
+    assert "server-secret" not in str(caught.value.detail)
+    assert "deeptutor provider login openai-codex" in str(caught.value.detail)
+
+
+@pytest.mark.asyncio
+async def test_realtime_voice_connection_test_creates_and_closes_v3_session(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from deeptutor.services.voice import realtime
+
+    calls: dict[str, object] = {}
+
+    class _Sideband:
+        async def close(self) -> None:
+            calls["closed"] = True
+
+    class _Provider:
+        async def create_call(self, offer_sdp: str, *, session_id: str):
+            calls["offer_sdp"] = offer_sdp
+            calls["session_id"] = session_id
+            return object()
+
+        async def connect_sideband(self, call: object) -> _Sideband:
+            calls["call"] = call
+            return _Sideband()
+
+    monkeypatch.setattr(settings_router, "_require_settings_admin", lambda: None)
+    monkeypatch.setattr(realtime, "CodexOAuthRealtimeProvider", _Provider)
+    monkeypatch.setattr(
+        realtime,
+        "realtime_voice_status",
+        lambda: realtime.RealtimeVoiceProviderStatus(
+            provider="openai_codex",
+            ready=True,
+            message="Connected.",
+        ),
+    )
+    offer = (
+        "v=0\r\n"
+        "m=audio 9 UDP/TLS/RTP/SAVPF 111\r\n"
+        "m=application 9 UDP/DTLS/SCTP webrtc-datachannel\r\n"
+    )
+
+    response = await settings_router.test_realtime_voice_connection(
+        settings_router.RealtimeVoiceConnectionTest(sdp=offer)
+    )
+
+    assert response["ok"] is True
+    assert calls["offer_sdp"] == offer
+    assert str(calls["session_id"]).startswith("deeptutor-settings-test-")
+    assert calls["closed"] is True
+    assert "call_id" not in response
+    assert "authorization" not in str(response).lower()
+
+
+@pytest.mark.asyncio
+async def test_realtime_voice_connection_test_reports_live_provider_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from fastapi import HTTPException
+
+    from deeptutor.services.voice import realtime
+
+    class _Provider:
+        async def create_call(self, offer_sdp: str, *, session_id: str):
+            del offer_sdp, session_id
+            raise realtime.RealtimeVoiceProviderError("GPT-Live network unavailable.")
+
+    monkeypatch.setattr(settings_router, "_require_settings_admin", lambda: None)
+    monkeypatch.setattr(realtime, "CodexOAuthRealtimeProvider", _Provider)
+
+    with pytest.raises(HTTPException) as caught:
+        await settings_router.test_realtime_voice_connection(
+            settings_router.RealtimeVoiceConnectionTest(
+                sdp=(
+                    "v=0\r\n"
+                    "m=audio 9 UDP/TLS/RTP/SAVPF 111\r\n"
+                    "m=application 9 UDP/DTLS/SCTP webrtc-datachannel\r\n"
+                )
+            )
+        )
+
+    assert caught.value.status_code == 502
+    assert caught.value.detail == "GPT-Live network unavailable."

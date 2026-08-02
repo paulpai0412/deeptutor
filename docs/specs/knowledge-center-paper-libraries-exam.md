@@ -27,12 +27,12 @@ Paper Review 允許修正題號、答案，以及解除錯誤的題目圖片配�
 
 1. As a learner, I want to open Paper Libraries from Knowledge Center, so that source papers live beside Knowledge Bases instead of inside Question Bank management.
 2. As a learner, I want to switch between Knowledge Bases and Paper Libraries at the same level, so that the two resource types have clear and predictable ownership.
-3. As a learner, I want `/space/questions` to redirect to Knowledge Center, so that the old entry point does not become a second Paper Library surface.
+3. As a learner, I want `/space/questions` to remain the original Question Bank, while `/knowledge?tab=papers` is the canonical Paper Library entry, so that the two domains remain separate.
 4. As a learner, I want 收藏題目 to remain separate from Paper Libraries, so that saved quiz records are not confused with source PDFs.
 5. As a learner, I want my Paper Libraries to remain private to my current user/workspace, so that another user cannot see my source papers, answers, or extracted images.
 6. As a learner, I want to create a Paper Library with a name and optional description, so that I can group related exams.
 7. As a learner, I want Paper Library names to be unique within my user/workspace regardless of case or surrounding whitespace, so that two containers cannot be confused.
-8. As a learner, I want the first release to use one-level classification, so that organizing papers stays simple and does not introduce nested folders.
+8. As a learner, I want to organize papers in nested folders inside a Paper Library, while libraries remain top-level resources, so that the paper tree matches the Knowledge Base file-management pattern.
 9. As a learner, I want no default Paper Library to be created automatically, so that an uploaded paper is never silently assigned to the wrong category.
 10. As a learner, I want to rename or delete a Paper Library, so that obsolete categories can be maintained.
 11. As a learner, I want deleting a Paper Library to delete its live paper resources, so that the container deletion is complete.
@@ -124,7 +124,7 @@ Paper Review 允許修正題號、答案，以及解除錯誤的題目圖片配�
 - Paper Library is a first-class resource alongside Knowledge Base, not a Knowledge Base subtype and not a Question Bank category.
 - Question Bank remains the store for saved questions, answers, bookmarks, categories, and AI Judge history. It does not become the Paper Library storage layer.
 - Paper Libraries are private per user/workspace. There is no sharing, public library, cross-user import, or Knowledge Base permission inheritance.
-- A Paper Library is a flat container. Nested folders, tags, subject metadata, and grade metadata are not part of this release.
+- A Paper Library is a top-level container. It may contain papers at its root and nested Paper Folders. Folder renaming and deletion, tags, subject metadata, and grade metadata are not part of this release.
 - A paper belongs to exactly one Paper Library. The same PDF may exist once per library but may exist in multiple libraries.
 
 ### Storage, compatibility, and deletion
@@ -190,10 +190,10 @@ Paper Review 允許修正題號、答案，以及解除錯誤的題目圖片配�
 
 - Knowledge Center has two same-level tabs: `Knowledge Bases` and `Paper Libraries`. The existing Knowledge Base views remain available without behavioral changes.
 - Paper Library view provides create-library, library selection, library settings, search/filter, upload, processing status, Review, retry, rename, move, delete, and Start Exam actions.
-- Library management is one-level; no nested folder tree is rendered.
+- Paper Library management renders a nested folder tree with root and child-folder creation, expand/collapse, paper drag-and-drop, and Move-to actions.
 - Create/edit settings show available LLM and parser options and the statement that structured extraction requires LLM. No option disables LLM.
 - Existing PaperLibraryPanel behavior is moved/reused in Knowledge Center rather than maintained as a second Learning Space panel.
-- `/space/questions` redirects to Knowledge Center's Paper Libraries view. The old Paper Library URL is not a second source of truth.
+- `/space/questions` renders the original Question Bank. `/knowledge?tab=papers` is the canonical Paper Library view; the two domains are not combined.
 - Review keeps source order, displays extraction warnings, shows source page when available, allows question number/answer correction, and provides per-image unlink actions.
 - Review starts Exam with the selected paper ID and library context, not a path.
 
@@ -228,7 +228,7 @@ Paper Review 允許修正題號、答案，以及解除錯誤的題目圖片配�
 ## Testing Decisions
 
 - Tests assert observable contracts: response status and payload shape, durable metadata/questions, file ownership boundaries, lifecycle transitions, emitted StreamBus events, snapshot contents, Question Bank source metadata, and visible UI state. They do not assert private helper call order or exact LLM prose.
-- Service tests cover library name uniqueness, flat-container behavior, same-library SHA-256 deduplication, cross-library duplicate allowance, move conflicts, cascade deletion without snapshot deletion, settings persistence, config snapshots, image unlink cleanup, retry behavior, status recovery, and user isolation.
+- Service tests cover library name uniqueness, folder hierarchy behavior, same-library SHA-256 deduplication, cross-library duplicate allowance, move conflicts, cascade deletion without snapshot deletion, settings persistence, config snapshots, image unlink cleanup, retry behavior, status recovery, and user isolation.
 - API tests cover canonical nested endpoints, legacy compatibility endpoints, parser/LLM option responses, upload scoping, duplicate conflicts, source/asset authorization, question image removal, and error mapping for busy or missing resources.
 - Extraction tests use real text-layer PDF fixtures and injected deterministic parser/LLM seams to verify schema normalization, source order, question/image association, warning/partial/failed state, selected parser/LLM snapshot, and no-fallback behavior.
 - Real LLM/network tests are opt-in through `PAPER_REAL_E2E=1`. They use real PDF fixtures, the running backend, the running frontend, the real WebSocket, and a configured real LLM; they do not use mock, fake, synthetic, or fallback evidence.
@@ -242,7 +242,7 @@ Paper Review 允許修正題號、答案，以及解除錯誤的題目圖片配�
 - Automatic score completion or a distinction between an incomplete and scored Exam.
 - Knowledge Base `metadata.type` classification, RAG indexing, vector search, Knowledge Base file links, or Knowledge Base permission inheritance.
 - Shared/public Paper Libraries, collaboration, cross-user import, cloud object storage, or workspace sharing.
-- Nested folders, tags, subjects, grade metadata, paper/full-text question search, or advanced classification.
+- Folder renaming/deletion, tags, subjects, grade metadata, paper/full-text question search, or advanced classification.
 - OCR, scanned/image-only PDF support, automatic translation, source rewriting, or answer inference.
 - Multiple PDFs as one logical paper, separate answer-key uploads, or external answer files.
 - Automatic re-extraction after settings changes and automatic retry after failures.

@@ -25,6 +25,7 @@ import {
   type HubSkillDetail,
   type HubSkillListing,
 } from "@/lib/skills-api";
+import { toTaiwanChinese } from "@/lib/taiwan-zh";
 
 // Where the EduHub site lives, for "view on EduHub" links. The catalog
 // response carries the authoritative origin; this only backstops a failed load.
@@ -60,7 +61,10 @@ export default function EduHubImportModal({
 }) {
   const { i18n } = useTranslation();
   const zh = i18n.language?.toLowerCase().startsWith("zh");
-  const tr = useCallback((cn: string, en: string) => (zh ? cn : en), [zh]);
+  const tr = useCallback(
+    (cn: string, en: string) => (zh ? toTaiwanChinese(cn) : en),
+    [zh],
+  );
 
   const [skills, setSkills] = useState<HubSkillListing[] | null>(null);
   const [webUrl, setWebUrl] = useState<string>(EDUHUB_FALLBACK);

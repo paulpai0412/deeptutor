@@ -240,6 +240,8 @@ def _pick_language(language: str | None) -> str:
     if not language:
         return "en"
     code = str(language).lower().strip()
+    if code in {"zh-tw", "zh-hant", "zh-hk", "tw", "traditional"}:
+        return "zh"
     if code in {"zh", "zh-cn", "zh-hans", "chinese", "cn"}:
         return "zh"
     return "en"

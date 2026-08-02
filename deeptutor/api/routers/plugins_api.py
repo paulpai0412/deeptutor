@@ -20,6 +20,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from deeptutor.core.i18n import t
 from deeptutor.i18n.metadata_i18n import tool_description_i18n
+from deeptutor.i18n.stream import localize_stream_event
 from deeptutor.logging import (
     ProcessLogEvent,
     bind_log_context,
@@ -383,7 +384,10 @@ async def _execute_capability_stream(
                             if event.type.value == "result":
                                 final_result = dict(event.metadata)
                                 continue
-                            await event_queue.put({"kind": "stream", "payload": event.to_dict()})
+                            localized_event = localize_stream_event(event, body.language)
+                            await event_queue.put(
+                                {"kind": "stream", "payload": localized_event.to_dict()}
+                            )
         except Exception as exc:
             error_holder["detail"] = str(exc)
         finally:

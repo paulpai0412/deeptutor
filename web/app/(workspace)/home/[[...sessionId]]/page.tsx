@@ -78,7 +78,10 @@ import {
 import {
   DEFAULT_QUIZ_CONFIG,
   buildQuizWSConfig,
+  extractQuizQuestionsFromEvents,
   normalizeQuizConfig,
+  resolveExamWSConfig,
+  resolveQuizWSConfig,
   type DeepQuestionFormConfig,
 } from "@/lib/quiz-types";
 import {
@@ -600,6 +603,37 @@ export default function ChatPage() {
 
   const isQuizMode = activeCap.value === "deep_question";
   const isExamMode = activeCap.value === "exam";
+  // An exam is "active" when this session already contains emitted exam
+  // questions — further sends are interactive proctor turns, not restarts.
+  const examHasQuestions = useMemo(() => {
+    if (!isExamMode) return false;
+    for (let index = state.messages.length - 1; index >= 0; index -= 1) {
+      const message = state.messages[index];
+      if (message.role !== "assistant" || message.capability !== "exam") {
+        continue;
+      }
+      const questions = extractQuizQuestionsFromEvents(message.events ?? []);
+      if (questions?.length) return true;
+    }
+    return false;
+  }, [isExamMode, state.messages]);
+  // Same for generated quizzes: a completed quiz turns later sends into
+  // proctor turns instead of re-running the whole generation pipeline.
+  const quizHasQuestions = useMemo(() => {
+    if (!isQuizMode) return false;
+    for (let index = state.messages.length - 1; index >= 0; index -= 1) {
+      const message = state.messages[index];
+      if (
+        message.role !== "assistant" ||
+        message.capability !== "deep_question"
+      ) {
+        continue;
+      }
+      const questions = extractQuizQuestionsFromEvents(message.events ?? []);
+      if (questions?.length) return true;
+    }
+    return false;
+  }, [isQuizMode, state.messages]);
   const isVisualizeMode = activeCap.value === "visualize";
   const isResearchMode = activeCap.value === "deep_research";
   const capabilityNeedsConfig =
@@ -652,7 +686,10 @@ export default function ChatPage() {
    * panel toggles — the open-state flip should be one-shot per cap
    * transition.
    */
-  const lastCapabilityNeedsConfigRef = useRef(capabilityNeedsConfig);
+  // Initialized false so landing directly on a config-needing capability
+  // (restored exam/quiz session) counts as a transition too — otherwise the
+  // panel never auto-opens there and the user can't reach the config card.
+  const lastCapabilityNeedsConfigRef = useRef(false);
   useEffect(() => {
     const prev = lastCapabilityNeedsConfigRef.current;
     lastCapabilityNeedsConfigRef.current = capabilityNeedsConfig;
@@ -1276,9 +1313,21 @@ export default function ChatPage() {
       // the new capability has its own form that needs explicit confirm.
       setCapabilityConfigConfirmed(false);
       setCapMenuOpen(false);
+      // Explicit selection of a config-needing capability always pops the
+      // right-side config card — even when already in that capability (the
+      // transition-based auto-open can't fire then).
+      if (
+        cap.value === "exam" ||
+        cap.value === "deep_question" ||
+        cap.value === "visualize" ||
+        cap.value === "deep_research"
+      ) {
+        ensureActivityPanelOpen();
+      }
     },
     [
       capabilityConfigs,
+      ensureActivityPanelOpen,
       quizConfig.mode,
       setCapability,
       setKBs,
@@ -1595,7 +1644,7 @@ export default function ChatPage() {
   }, []);
 
   const handleSend = useCallback(
-    async (content: string) => {
+    async (content: string, configOverride?: Record<string, unknown>) => {
       if (
         (!content &&
           !attachments.length &&
@@ -1617,11 +1666,9 @@ export default function ChatPage() {
       let config: Record<string, unknown> | undefined;
 
       if (isQuizMode || isExamMode) {
-        config = buildQuizWSConfig(
-          isExamMode
-            ? { ...quizConfig, mode: "original_paper" }
-            : quizConfig,
-        );
+        config = isExamMode
+          ? resolveExamWSConfig({ examActive: examHasQuestions, quizConfig })
+          : resolveQuizWSConfig({ quizActive: quizHasQuestions, quizConfig });
         if (quizConfig.mode === "mimic" && quizPdf) {
           const b64 = extractBase64FromDataUrl(
             await readFileAsDataUrl(quizPdf),
@@ -1641,6 +1688,9 @@ export default function ChatPage() {
       if (isResearchMode) {
         if (!researchValidation.valid) return;
         config = buildResearchWSConfig(researchConfig);
+      }
+      if (configOverride) {
+        config = { ...(config ?? {}), ...configOverride };
       }
       // When a connected agent is selected, carry the per-turn consult budget
       // (how many times DeepTutor may ask it) so the subagent capability uses it.
@@ -1665,7 +1715,7 @@ export default function ChatPage() {
       // Persona is NOT passed per-call here: it is a session-level
       // preference (state.personaSelection) that sendMessage resolves and
       // sends with every turn.
-      sendMessage(
+      const startedTurn = sendMessage(
         messageContent,
         extraAttachments,
         config,
@@ -1684,6 +1734,7 @@ export default function ChatPage() {
       setSelectedAgentSessions([]);
       setSelectedQuestionEntries([]);
       setSelectedMemoryFiles([]);
+      return startedTurn;
     },
     [
       attachments,
@@ -1691,6 +1742,8 @@ export default function ChatPage() {
       historyReferencesPayload,
       isQuizMode,
       isExamMode,
+      examHasQuestions,
+      quizHasQuestions,
       isResearchMode,
       isVisualizeMode,
       memoryReferencesPayload,
@@ -1727,13 +1780,19 @@ export default function ChatPage() {
       return;
     }
     autoStartCapabilityRef.current = null;
+    // Explicit start/restart: override the proctor routing for this turn so
+    // Confirm always (re)runs the selected paper / generates fresh questions.
     void handleSend(
       capability === "exam" ? t("Start Exam") : t("Generate Quiz"),
+      capability === "exam"
+        ? { mode: "original_paper", paper_id: quizConfig.paper_id }
+        : buildQuizWSConfig(quizConfig),
     );
   }, [
     activeCap.value,
     capabilityConfigConfirmed,
     handleSend,
+    quizConfig,
     state.isStreaming,
     t,
   ]);
@@ -2175,6 +2234,7 @@ export default function ChatPage() {
               selectedPaperLibraryId={
                 isExamMode ? quizConfig.paper_library_id : ""
               }
+              selectedPaperId={isExamMode ? quizConfig.paper_id : ""}
               onSelectPaperLibrary={handleSelectPaperLibrary}
               capabilityNeedsConfig={capabilityNeedsConfig}
               capabilityConfigConfirmed={capabilityConfigConfirmed}

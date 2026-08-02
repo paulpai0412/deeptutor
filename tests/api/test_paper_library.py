@@ -89,6 +89,56 @@ def test_library_names_are_unique_and_papers_are_private_to_library(client: Test
     assert missing.status_code == 404
 
 
+def test_library_settings_validate_and_save_without_reextracting_papers(
+    client: TestClient,
+) -> None:
+    library = client.post(
+        "/api/v1/papers/libraries",
+        json={"name": "Settings", "settings": {"failure_policy": "keep_partial"}},
+    ).json()
+    library_id = library["library_id"]
+    service = paper_library.get_paper_library_service()
+    before = service.add_pdf("paper.pdf", PDF_BYTES, library_id=library_id)
+
+    saved = client.patch(
+        f"/api/v1/papers/libraries/{library_id}",
+        json={
+            "name": "Settings Updated",
+            "description": "Deliberate changes",
+            "settings": {"parser_engine": "text_only", "failure_policy": "keep_partial"},
+        },
+    )
+    assert saved.status_code == 200
+    assert saved.json()["name"] == "Settings Updated"
+    after = service.get_paper(before.paper_id)
+    assert after.paper_id == before.paper_id
+    assert after.status == before.status == "pending"
+    assert after.extraction_config == before.extraction_config
+
+    no_llm = client.patch(
+        f"/api/v1/papers/libraries/{library_id}",
+        json={"settings": {"llm_enabled": False}},
+    )
+    assert no_llm.status_code == 409
+    unavailable_parser = client.patch(
+        f"/api/v1/papers/libraries/{library_id}",
+        json={"settings": {"parser_engine": "not-an-engine"}},
+    )
+    assert unavailable_parser.status_code == 409
+
+
+def test_processing_paper_blocks_library_delete_api(client: TestClient) -> None:
+    library = client.post("/api/v1/papers/libraries", json={"name": "Busy"}).json()
+    library_id = library["library_id"]
+    service = paper_library.get_paper_library_service()
+    paper = service.add_pdf("busy.pdf", PDF_BYTES, library_id=library_id)
+    assert service.claim_extraction(paper.paper_id, "busy-task") is not None
+
+    deleted = client.delete(f"/api/v1/papers/libraries/{library_id}")
+    assert deleted.status_code == 409
+    assert client.get(f"/api/v1/papers/libraries/{library_id}").status_code == 200
+
+
 def test_upload_list_rename_and_read_source(client: TestClient) -> None:
     response = client.post(
         "/api/v1/papers/upload",
@@ -343,6 +393,134 @@ def test_paper_asset_endpoint_is_scoped_and_path_safe(client: TestClient) -> Non
     assert traversal.status_code in {404, 307}
     missing = client.get(f"/api/v1/papers/{uploaded['paper_id']}/assets/missing.png")
     assert missing.status_code == 404
+
+
+def test_folder_api_returns_flat_empty_folders_and_moves_papers(client: TestClient) -> None:
+    first = client.post("/api/v1/papers/libraries", json={"name": "First"}).json()
+    second = client.post("/api/v1/papers/libraries", json={"name": "Second"}).json()
+    first_id = first["library_id"]
+    second_id = second["library_id"]
+
+    root_folder = client.post(
+        f"/api/v1/papers/libraries/{first_id}/folders",
+        json={"name": "Mock Exams"},
+    )
+    assert root_folder.status_code == 201
+    root_path = root_folder.json()["path"]
+    child_folder = client.post(
+        f"/api/v1/papers/libraries/{first_id}/folders",
+        json={"name": "2026", "parent_path": root_path},
+    )
+    assert child_folder.status_code == 201
+    child_path = child_folder.json()["path"]
+
+    folders = client.get(f"/api/v1/papers/libraries/{first_id}/folders")
+    assert folders.status_code == 200
+    assert folders.json()["folders"] == ["Mock Exams", "Mock Exams/2026"]
+
+    empty_listing = client.get(f"/api/v1/papers/libraries/{first_id}/papers")
+    assert empty_listing.status_code == 200
+    assert empty_listing.json()["papers"] == []
+    assert empty_listing.json()["folders"] == ["Mock Exams", "Mock Exams/2026"]
+
+    uploaded = client.post(
+        f"/api/v1/papers/libraries/{first_id}/upload",
+        files={"files": ("paper.pdf", BytesIO(PDF_BYTES), "application/pdf")},
+    ).json()["papers"][0]
+    paper_id = uploaded["paper_id"]
+    moved = client.post(
+        f"/api/v1/papers/libraries/{first_id}/papers/{paper_id}/move",
+        json={"target_library_id": first_id, "target_folder_path": child_path},
+    )
+    assert moved.status_code == 200
+    assert moved.json()["paper_id"] == paper_id
+    assert moved.json()["folder_path"] == child_path
+
+    listed = client.get(f"/api/v1/papers/libraries/{first_id}/papers").json()
+    assert listed["papers"][0]["folder_path"] == child_path
+    missing_parent = client.post(
+        f"/api/v1/papers/libraries/{first_id}/folders",
+        json={"name": "Nope", "parent_path": "missing"},
+    )
+    assert missing_parent.status_code == 404
+    duplicate_name = client.post(
+        f"/api/v1/papers/libraries/{first_id}/folders",
+        json={"name": " mock exams "},
+    )
+    assert duplicate_name.status_code == 400
+
+    other = client.post(
+        f"/api/v1/papers/libraries/{second_id}/folders",
+        json={"name": "Archive"},
+    ).json()["path"]
+    cross_move = client.post(
+        f"/api/v1/papers/libraries/{first_id}/papers/{paper_id}/move",
+        json={"target_library_id": second_id, "target_folder_path": other},
+    )
+    assert cross_move.status_code == 200
+    assert cross_move.json()["library_id"] == second_id
+    assert cross_move.json()["folder_path"] == other
+
+
+def test_directory_upload_preserves_relative_folders_and_rejects_unsafe_paths(
+    client: TestClient,
+) -> None:
+    library = client.post("/api/v1/papers/libraries", json={"name": "Directory"}).json()
+    library_id = library["library_id"]
+    response = client.post(
+        f"/api/v1/papers/libraries/{library_id}/upload",
+        files=[
+            ("rel_paths", (None, "Mock Exams/first.pdf")),
+            ("rel_paths", (None, "Mock Exams/2026/second.pdf")),
+            ("rel_paths", (None, "../escape.pdf")),
+            ("files", ("first.pdf", BytesIO(PDF_BYTES), "application/pdf")),
+            ("files", ("second.pdf", BytesIO(_make_pdf(width=600)), "application/pdf")),
+            ("files", ("escape.pdf", BytesIO(_make_pdf(width=580)), "application/pdf")),
+        ],
+    )
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert [paper["folder_path"] for paper in payload["papers"]] == [
+        "Mock Exams",
+        "Mock Exams/2026",
+    ]
+    assert payload["rejected"] == [
+        {
+            "filename": "escape.pdf",
+            "error": "Upload relative path must stay inside the Paper Library.",
+        }
+    ]
+    listed = client.get(f"/api/v1/papers/libraries/{library_id}/papers").json()
+    assert listed["folders"] == ["Mock Exams", "Mock Exams/2026"]
+
+
+def test_folder_api_rejects_path_control_and_cross_library_duplicate(
+    client: TestClient,
+) -> None:
+    first = client.post("/api/v1/papers/libraries", json={"name": "First"}).json()
+    second = client.post("/api/v1/papers/libraries", json={"name": "Second"}).json()
+    first_id = first["library_id"]
+    second_id = second["library_id"]
+    invalid = client.post(
+        f"/api/v1/papers/libraries/{first_id}/folders",
+        json={"name": "../escape"},
+    )
+    assert invalid.status_code == 400
+
+    first_paper = client.post(
+        f"/api/v1/papers/libraries/{first_id}/upload",
+        files={"files": ("first.pdf", BytesIO(PDF_BYTES), "application/pdf")},
+    ).json()["papers"][0]
+    client.post(
+        f"/api/v1/papers/libraries/{second_id}/upload",
+        files={"files": ("copy.pdf", BytesIO(PDF_BYTES), "application/pdf")},
+    )
+    conflict = client.post(
+        f"/api/v1/papers/libraries/{first_id}/papers/{first_paper['paper_id']}/move",
+        json={"target_library_id": second_id},
+    )
+    assert conflict.status_code == 409
+    assert client.get(f"/api/v1/papers/{first_paper['paper_id']}").json()["library_id"] == first_id
 
 
 def test_unknown_paper_source_returns_not_found(client: TestClient) -> None:

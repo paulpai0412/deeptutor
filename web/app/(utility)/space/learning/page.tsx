@@ -23,6 +23,7 @@ import {
   type MasteryMapResult,
   type ObjectiveStatus,
 } from "@/lib/learning-api";
+import { toTaiwanChinese } from "@/lib/taiwan-zh";
 
 /**
  * Mastery Path dashboard — the persistent "screen" of the mastery experience.
@@ -37,7 +38,10 @@ import {
 export default function MasteryPathPage() {
   const { i18n } = useTranslation();
   const zh = i18n.language?.toLowerCase().startsWith("zh");
-  const tr = useCallback((cn: string, en: string) => (zh ? cn : en), [zh]);
+  const tr = useCallback(
+    (cn: string, en: string) => (zh ? toTaiwanChinese(cn) : en),
+    [zh],
+  );
   const router = useRouter();
 
   const [paths, setPaths] = useState<ProgressSummary[]>([]);

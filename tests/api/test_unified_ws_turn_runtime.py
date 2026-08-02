@@ -726,6 +726,9 @@ async def test_turn_runtime_bootstraps_question_followup_context_once(
     assert [message["role"] for message in detail["messages"]] == ["system", "user", "assistant"]
     assert "Question Follow-up Context" in detail["messages"][0]["content"]
     assert "Which criterion best describes density?" in detail["messages"][0]["content"]
+    assert "Options:" in detail["messages"][0]["content"]
+    assert "A. Coverage" in detail["messages"][0]["content"]
+    assert "D. Credibility" in detail["messages"][0]["content"]
     assert "User answer: B" in detail["messages"][0]["content"]
     assert captured["conversation_history"][0]["role"] == "system"
     assert "followup_question_context" not in captured["config_overrides"]

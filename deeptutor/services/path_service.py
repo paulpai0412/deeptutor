@@ -13,6 +13,7 @@ data/user/
     ├── notebook/
     ├── co-writer/
     ├── book/
+    ├── question_bank/
     └── chat/
         ├── chat/
         ├── deep_solve/
@@ -53,6 +54,7 @@ WorkspaceFeature = Literal[
     "co-writer",
     "chat",
     "book",
+    "question_bank",
 ]
 
 
@@ -226,7 +228,7 @@ class PathService:
             "_detached_code_execution",
         }:
             return self.get_chat_feature_dir(cast(ChatWorkspaceFeature, feature))
-        if feature in {"memory", "notebook", "co-writer", "book"}:
+        if feature in {"memory", "notebook", "co-writer", "book", "question_bank"}:
             return self.get_workspace_feature_dir(cast(WorkspaceFeature, feature))
         raise ValueError(f"Unknown workspace feature: {feature}")
 
@@ -254,6 +256,14 @@ class PathService:
 
     def get_notebook_index_file(self) -> Path:
         return self.get_notebook_dir() / "notebooks_index.json"
+
+    def get_question_bank_dir(self) -> Path:
+        """Root for persistent Question Bank source resources."""
+        return self.get_workspace_feature_dir("question_bank")
+
+    def get_paper_library_dir(self) -> Path:
+        """Root for user-owned Paper Library resources."""
+        return self.get_question_bank_dir() / "papers"
 
     def get_memory_dir(self) -> Path:
         new_dir = self.workspace_root / "memory"
@@ -402,7 +412,9 @@ class PathService:
         self.ensure_memory_dir()
         self.ensure_notebook_dir()
         self.get_logs_dir().mkdir(parents=True, exist_ok=True)
-        for workspace_feature in cast(tuple[WorkspaceFeature, ...], ("co-writer", "book")):
+        for workspace_feature in cast(
+            tuple[WorkspaceFeature, ...], ("co-writer", "book", "question_bank")
+        ):
             self.get_workspace_feature_dir(workspace_feature).mkdir(parents=True, exist_ok=True)
         for chat_feature in cast(
             tuple[ChatWorkspaceFeature, ...],

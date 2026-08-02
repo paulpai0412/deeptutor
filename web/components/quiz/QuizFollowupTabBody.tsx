@@ -37,6 +37,7 @@ import {
   useQuizFollowupController,
 } from "@/context/QuizFollowupContext";
 import { apiUrl } from "@/lib/api";
+import { getQuizQuestionOptions } from "@/lib/quiz-types";
 import { getSession } from "@/lib/session-api";
 
 /** Resolve a possibly-relative AttachmentStore URL to an absolute one. */
@@ -124,6 +125,7 @@ export default function QuizFollowupTabBody({
 
   const visibleMessages = thread.messages.filter((m) => m.role !== "system");
   const isCoding = context.question.question_type === "coding";
+  const questionOptions = getQuizQuestionOptions(context.question);
 
   return (
     <div className="flex h-full flex-col bg-[var(--card)]">
@@ -169,7 +171,37 @@ export default function QuizFollowupTabBody({
               <MarkdownRenderer
                 content={context.question.question}
                 variant="compact"
+                enableMath
               />
+              {questionOptions.length > 0 && (
+                <div
+                  aria-label={t("Answer choices")}
+                  className="mt-3 border-t border-[var(--border)]/50 pt-2"
+                >
+                  <div className="mb-1.5 text-[10px] font-semibold uppercase tracking-wider text-[var(--muted-foreground)]">
+                    {t("Answer choices")}
+                  </div>
+                  <div className="space-y-1.5">
+                    {questionOptions.map(([key, value]) => (
+                      <div
+                        key={key}
+                        className="flex items-start gap-2 rounded-md border border-[var(--border)]/50 bg-[var(--card)]/70 px-2 py-1.5"
+                      >
+                        <span className="shrink-0 text-[12px] font-semibold text-[var(--muted-foreground)]">
+                          {key}.
+                        </span>
+                        <div className="min-w-0 text-[12.5px] leading-relaxed text-[var(--foreground)]">
+                          <MarkdownRenderer
+                            content={value}
+                            variant="compact"
+                            enableMath
+                          />
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
           </div>
 

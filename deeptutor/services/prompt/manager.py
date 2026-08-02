@@ -21,6 +21,7 @@ class PromptManager:
 
     # Language fallback chain: if primary language not found, try alternatives
     LANGUAGE_FALLBACKS = {
+        "zh-TW": ["zh-TW", "zh", "cn", "en"],
         "zh": ["zh", "cn", "en"],
         "en": ["en", "zh", "cn"],
     }
@@ -108,7 +109,12 @@ class PromptManager:
                 if prompt_file and prompt_file.exists():
                     try:
                         with open(prompt_file, encoding="utf-8") as f:
-                            return yaml.safe_load(f) or {}
+                            loaded = yaml.safe_load(f) or {}
+                        if lang_code == "zh-TW":
+                            from deeptutor.i18n.zh_tw import convert_nested
+
+                            return convert_nested(loaded)
+                        return loaded
                     except Exception as e:
                         print(f"Warning: Failed to load {prompt_file}: {e}")
                         continue

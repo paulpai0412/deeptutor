@@ -8,17 +8,43 @@ may call it; it is not gated by per-user LLM grants.
 
 from __future__ import annotations
 
+import asyncio
 import io
 import logging
+from uuid import uuid4
 import wave
 
-from fastapi import APIRouter, File, Form, HTTPException, Response, UploadFile, status
+from fastapi import (
+    APIRouter,
+    File,
+    Form,
+    HTTPException,
+    Response,
+    UploadFile,
+    WebSocket,
+    WebSocketDisconnect,
+    status,
+)
 from pydantic import BaseModel, Field
 
+from deeptutor.services.session import get_session_store
 from deeptutor.services.voice import (
     VoiceProviderError,
     synthesize_speech,
     transcribe_audio,
+)
+from deeptutor.services.voice.context_snapshot import (
+    RealtimeContextError,
+    RealtimeContextRequest,
+    RealtimeContextSnapshot,
+    build_realtime_context_snapshot,
+)
+from deeptutor.services.voice.realtime import (
+    CodexOAuthRealtimeProvider,
+    CodexRealtimeSideband,
+    RealtimeVoiceProviderError,
+    normalize_codex_event,
+    realtime_voice_status,
 )
 
 logger = logging.getLogger(__name__)
@@ -128,3 +154,679 @@ async def speech_to_text(
         logger.warning("STT provider error: %s", exc)
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
     return {"text": text}
+
+
+@router.get("/realtime/status")
+async def realtime_voice_provider_status() -> dict[str, object]:
+    """Return credential-free readiness for the independent Realtime provider."""
+    return realtime_voice_status().public_dict()
+
+
+async def _serve_codex_realtime(ws: WebSocket) -> None:
+    """Bridge WebRTC, Codex handoffs, and the normal DeepTutor turn runtime."""
+    closed = False
+    session: CodexRealtimeSideband | None = None
+    pending_handoffs: set[str] = set()
+    seen_handoffs: set[str] = set()
+    active_turns: dict[str, str] = {}
+    cancelled_handoffs: set[str] = set()
+    turn_tasks: set[asyncio.Task[None]] = set()
+    provider_turn: dict[str, object] = {
+        "route": "idle",
+        "provider_output_done": False,
+    }
+    seen_provider_user_turns: set[str] = set()
+    seen_provider_assistant_turns: set[str] = set()
+    cancellation_lock = asyncio.Lock()
+    context_snapshot: RealtimeContextSnapshot | None = None
+    session_store = get_session_store()
+    # Provider media stays muted until canonical DeepTutor speech is appended
+    # to a native delegation. GPT-Live never owns a playable response.
+    suppress_provider_output = True
+
+    async def send(payload: dict[str, object]) -> None:
+        nonlocal closed
+        if closed:
+            return
+        try:
+            await ws.send_json(payload)
+        except RuntimeError as exc:
+            if 'Cannot call "send" once a close message has been sent.' not in str(exc):
+                raise
+            closed = True
+
+    async def close_socket(code: int) -> None:
+        nonlocal closed
+        closed = True
+        try:
+            await ws.close(code=code)
+        except RuntimeError as exc:
+            if 'Cannot call "send" once a close message has been sent.' not in str(exc):
+                raise
+
+    def _validate_provider_id(value: object, *, label: str) -> str:
+        candidate = str(value or "").strip()
+        allowed = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._:-"
+        if not candidate or len(candidate) > 160 or any(char not in allowed for char in candidate):
+            raise RealtimeVoiceProviderError(f"Realtime Voice Session returned an invalid {label}.")
+        return candidate
+
+    def _validate_provider_text(value: object) -> str:
+        text = str(value or "").strip()
+        if not text or len(text) > 12_000:
+            raise RealtimeVoiceProviderError(
+                "Realtime Voice Session returned an invalid finalized transcript."
+            )
+        return text
+
+    def reset_provider_turn(
+        *,
+        text: str = "",
+        provisional: bool = True,
+        provider_event_id: str = "",
+    ) -> None:
+        provider_turn.clear()
+        provider_turn.update(
+            {
+                "route": "pending",
+                "text": text,
+                "provisional": provisional,
+                "finalized": not provisional,
+                "provider_user_event_id": provider_event_id,
+                "provider_output_done": False,
+            }
+        )
+
+    async def suppress_playback() -> None:
+        """Mute provider-owned output locally; Codex has no authorization ack."""
+        nonlocal suppress_provider_output
+        if suppress_provider_output:
+            return
+        suppress_provider_output = True
+        await send({"type": "playback_suppressed"})
+
+    async def reject_undelegated_response() -> None:
+        """Reject provider-owned output unless GPT-Live delegates natively."""
+        if (
+            provider_turn.get("route") != "pending"
+            or provider_turn.get("finalized") is not True
+            or not provider_turn.get("pending_assistant_text")
+        ):
+            return
+        text = str(provider_turn.get("text") or "").strip()
+        provider_turn.clear()
+        provider_turn.update(
+            {
+                "route": "rejected",
+                "provider_output_done": True,
+            }
+        )
+        await suppress_playback()
+        logger.warning(
+            "Realtime Voice turn rejected: GPT-Live answered without native delegation; utterance=%r",
+            text[:200],
+        )
+        await send(
+            {
+                "type": "turn_rejected",
+                "code": "delegation_required",
+                "message": "GPT-Live did not delegate this turn. Please ask again.",
+            }
+        )
+        await send({"type": "state", "state": "listening"})
+
+    async def register_provider_user_turn(
+        provider_turn_id: object,
+        raw_text: object,
+        *,
+        provisional: bool = False,
+    ) -> None:
+        provider_id = str(provider_turn_id or "").strip()
+        if provider_id:
+            provider_id = _validate_provider_id(provider_id, label="provider turn id")
+        text = _validate_provider_text(raw_text)
+        if not provisional and provider_id:
+            if provider_id in seen_provider_user_turns:
+                return
+            seen_provider_user_turns.add(provider_id)
+
+        route = str(provider_turn.get("route") or "idle")
+        if route == "delegated" and provider_turn.get("handoff_response_sent") is not True:
+            # Native delegation is normally followed by its duplicate user
+            # turn.done event. Once response speech has started, however, a
+            # new transcript is a barge-in and must become the next turn.
+            return
+        if route in {"idle", "rejected", "delegated", "delegated_completed", "cancelled"}:
+            reset_provider_turn(
+                text=text,
+                provisional=provisional,
+                provider_event_id=provider_id,
+            )
+        elif provisional:
+            provider_turn["text"] = f"{provider_turn.get('text') or ''}{text}"
+        else:
+            provider_turn["text"] = text
+            provider_turn["provisional"] = False
+            provider_turn["finalized"] = True
+            provider_turn["provider_user_event_id"] = provider_id
+
+        await suppress_playback()
+        if not provisional:
+            await reject_undelegated_response()
+
+    async def announce_delegation(handoff_id: object, raw_text: object) -> None:
+        """Commit one native client delegation into DeepTutor's turn path."""
+        delegation_id = _validate_provider_id(handoff_id, label="handoff id")
+        text = _validate_provider_text(raw_text)
+        async with cancellation_lock:
+            if delegation_id in seen_handoffs:
+                return
+            seen_handoffs.add(delegation_id)
+            has_previous_turn = bool(pending_handoffs or active_turns)
+        if has_previous_turn:
+            await send({"type": "state", "state": "interrupted"})
+            await cancel_active_turns()
+        async with cancellation_lock:
+            provider_turn.clear()
+            provider_turn.update(
+                {
+                    "route": "delegated",
+                    "text": text,
+                    "finalized": True,
+                    "delegation_id": delegation_id,
+                    "handoff_response_sent": False,
+                }
+            )
+            pending_handoffs.add(delegation_id)
+        await suppress_playback()
+        logger.info("Realtime Voice route committed: delegated")
+        await send({"type": "handoff", "handoff_id": delegation_id, "text": text})
+        await send(
+            {
+                "type": "transcript",
+                "phase": "final",
+                "mode": "delegated",
+                "handoff_id": delegation_id,
+                "text": text,
+            }
+        )
+
+    async def register_provider_assistant_turn(
+        provider_turn_id: object,
+        raw_text: object,
+    ) -> None:
+        provider_id = str(provider_turn_id or "").strip()
+        if provider_id:
+            provider_id = _validate_provider_id(provider_id, label="assistant turn id")
+            if provider_id in seen_provider_assistant_turns:
+                return
+            seen_provider_assistant_turns.add(provider_id)
+        text = _validate_provider_text(raw_text)
+        provider_turn["provider_output_done"] = True
+        route = str(provider_turn.get("route") or "idle")
+        if route in {"delegated", "delegated_completed", "rejected", "cancelled"}:
+            return
+        if route == "idle":
+            reset_provider_turn()
+        pending_text = provider_turn.get("pending_assistant_text")
+        if pending_text is not None and pending_text != text:
+            raise RealtimeVoiceProviderError(
+                "Codex Realtime returned duplicate assistant content for one turn."
+            )
+        provider_turn["pending_assistant_text"] = text
+        provider_turn["provider_assistant_event_id"] = provider_id
+        await reject_undelegated_response()
+
+    async def cancel_active_turns() -> bool:
+        """Establish the cancellation boundary before awaiting runtime cleanup."""
+        nonlocal suppress_provider_output
+        from deeptutor.services.session import get_turn_runtime_manager
+
+        runtime = get_turn_runtime_manager()
+        async with cancellation_lock:
+            provider_active = (
+                provider_turn.get("route")
+                in {
+                    "pending",
+                    "delegated",
+                    "delegated_completed",
+                }
+                and provider_turn.get("provider_output_done") is not True
+            )
+            interrupted = bool(pending_handoffs or active_turns or provider_active)
+            cancelled_handoffs.update(pending_handoffs)
+            cancelled_handoffs.update(active_turns)
+            pending_handoffs.clear()
+            turn_ids = list(active_turns.values())
+            if provider_active:
+                provider_turn["route"] = "cancelled"
+            suppress_provider_output = True
+        if interrupted:
+            await send({"type": "playback_suppressed"})
+        # GPT-Live V3 has no per-response cancellation event. Barge-in remains
+        # local while DeepTutor-owned turns are cooperatively cancelled below.
+        for turn_id in turn_ids:
+            try:
+                await runtime.cancel_turn(turn_id)
+            except Exception:
+                logger.debug("Failed to cancel Realtime-backed turn %s", turn_id, exc_info=True)
+        return interrupted
+
+    async def deliver_speech(handoff_id: str, text: str) -> bool:
+        """Append canonical speech only after checking the cancellation boundary."""
+        nonlocal suppress_provider_output
+        assert session is not None
+        async with cancellation_lock:
+            if handoff_id in cancelled_handoffs:
+                return False
+            if provider_turn.get("delegation_id") == handoff_id:
+                provider_turn["handoff_response_sent"] = True
+                provider_turn["provider_output_done"] = False
+            if suppress_provider_output:
+                suppress_provider_output = False
+                await send({"type": "playback_authorized"})
+            await session.send_handoff_speech(handoff_id, text)
+        return True
+
+    async def forward_turn(handoff_id: str, turn_id: str, session_id: str) -> None:
+        from deeptutor.services.session import get_turn_runtime_manager
+
+        runtime = get_turn_runtime_manager()
+        turn = await runtime.store.get_turn(turn_id)
+        if not turn or str(turn.get("session_id") or "") != session_id:
+            await send(
+                {
+                    "type": "error",
+                    "code": "invalid_turn_binding",
+                    "message": "Realtime Voice turn binding is invalid.",
+                }
+            )
+            return
+        async with cancellation_lock:
+            if handoff_id in cancelled_handoffs:
+                return
+            active_turns[handoff_id] = turn_id
+        speech_buffer: list[str] = []
+        last_speech_flush = asyncio.get_running_loop().time()
+
+        async def flush_speech(*, force: bool = False) -> bool:
+            nonlocal last_speech_flush
+            if not speech_buffer:
+                return True
+            now = asyncio.get_running_loop().time()
+            if not force and now - last_speech_flush < 0.2:
+                return True
+            text = "".join(speech_buffer)
+            speech_buffer.clear()
+            last_speech_flush = now
+            return await deliver_speech(handoff_id, text)
+
+        try:
+            async for event in runtime.subscribe_turn(turn_id):
+                if handoff_id in cancelled_handoffs:
+                    return
+                event_type = str(event.get("type") or "")
+                metadata = event.get("metadata")
+                metadata = metadata if isinstance(metadata, dict) else {}
+                if event_type == "content":
+                    text = str(event.get("content") or "")
+                    call_id = str(metadata.get("call_id") or "")
+                    call_kind = str(metadata.get("call_kind") or "")
+                    if not text or (
+                        call_id and call_kind not in {"agent_loop_round", "llm_final_response"}
+                    ):
+                        continue
+                    # ponytail: spoken output follows the live UI and may include a
+                    # provisional narration round; add BEM-style phase tags if
+                    # narration must remain silent before its late role marker.
+                    speech_buffer.append(text)
+                    if not await flush_speech():
+                        return
+                elif event_type == "progress" and metadata.get("call_state") == "complete":
+                    if not await flush_speech(force=True):
+                        return
+                elif event_type == "done":
+                    await flush_speech(force=True)
+                    return
+        except asyncio.CancelledError:
+            raise
+        except RealtimeVoiceProviderError as exc:
+            if not closed:
+                await send(
+                    {
+                        "type": "error",
+                        "code": "realtime_handoff_error",
+                        "message": str(exc),
+                    }
+                )
+        finally:
+            async with cancellation_lock:
+                active_turns.pop(handoff_id, None)
+                cancelled_handoffs.discard(handoff_id)
+                if (
+                    provider_turn.get("route") == "delegated"
+                    and provider_turn.get("delegation_id") == handoff_id
+                ):
+                    provider_turn["route"] = "delegated_completed"
+
+    start_message = await ws.receive_json()
+    prepared_context = False
+    if isinstance(start_message, dict) and start_message.get("type") == "prepare":
+        try:
+            requested_session_id = start_message.get("session_id")
+            context_request = RealtimeContextRequest.from_payload(
+                start_message.get("context"),
+                session_id=(
+                    str(requested_session_id).strip() if requested_session_id is not None else None
+                ),
+            )
+            context_snapshot = await build_realtime_context_snapshot(
+                session_store,
+                context_request,
+            )
+        except RealtimeContextError as exc:
+            await send(
+                {
+                    "type": "error",
+                    "code": "realtime_context_unavailable",
+                    "message": str(exc),
+                }
+            )
+            await close_socket(1011)
+            return
+        await send(
+            {
+                "type": "context_ready",
+                "session_id": context_snapshot.session_id,
+                **context_snapshot.public_metadata(),
+            }
+        )
+        prepared_context = True
+        start_message = await ws.receive_json()
+
+    if not isinstance(start_message, dict) or start_message.get("type") != "start":
+        await send(
+            {
+                "type": "error",
+                "code": "invalid_session_start",
+                "message": "Realtime Voice Session must start with a WebRTC offer.",
+            }
+        )
+        await close_socket(1008)
+        return
+    offer_sdp = start_message.get("sdp")
+    if not isinstance(offer_sdp, str) or not offer_sdp.strip():
+        await send(
+            {
+                "type": "error",
+                "code": "invalid_webrtc_offer",
+                "message": "Realtime Voice Session WebRTC offer is empty or invalid.",
+            }
+        )
+        await close_socket(1008)
+        return
+
+    try:
+        if not prepared_context:
+            requested_session_id = start_message.get("session_id")
+            context_request = RealtimeContextRequest.from_payload(
+                start_message.get("context"),
+                session_id=(
+                    str(requested_session_id).strip() if requested_session_id is not None else None
+                ),
+            )
+            context_snapshot = await build_realtime_context_snapshot(
+                session_store,
+                context_request,
+            )
+        provider = CodexOAuthRealtimeProvider()
+        call = await provider.create_call(
+            offer_sdp,
+            # Provider correlation is intentionally independent from the
+            # browser/DeepTutor session id used to bind committed turns.
+            session_id=f"deeptutor-{uuid4().hex}",
+            instructions=context_snapshot.instructions,
+            initial_items=context_snapshot.initial_items,
+        )
+        session = await provider.connect_sideband(call)
+        # The SDP answer and content-free session metadata are public to the
+        # browser. OAuth, the call id, and the full context snapshot stay server-side.
+        await send(
+            {
+                "type": "session_ready",
+                "session_id": context_snapshot.session_id,
+                **context_snapshot.public_metadata(),
+            }
+        )
+        await send({"type": "webrtc_answer", "sdp": call.answer_sdp})
+        await send({"type": "state", "state": "connected"})
+        await send({"type": "state", "state": "listening"})
+    except RealtimeContextError as exc:
+        await send(
+            {
+                "type": "error",
+                "code": "realtime_context_unavailable",
+                "message": str(exc),
+            }
+        )
+        await close_socket(1011)
+        return
+    except RealtimeVoiceProviderError as exc:
+        await send(
+            {
+                "type": "error",
+                "code": "realtime_provider_unavailable",
+                "message": str(exc),
+            }
+        )
+        await close_socket(1011)
+        return
+
+    async def forward_provider_events() -> None:
+        nonlocal closed, suppress_provider_output
+        assert session is not None
+        muted_output_logged = False
+        try:
+            async for provider_event in session.events():
+                if provider_event.get("type") == "error":
+                    error = provider_event.get("error")
+                    error_message = provider_event.get("message")
+                    if not isinstance(error_message, str) and isinstance(error, dict):
+                        error_message = error.get("message")
+                    if isinstance(error_message, str):
+                        error_message = " ".join(error_message.split())[:300]
+                        if any(
+                            marker in error_message.casefold()
+                            for marker in (
+                                "authorization",
+                                "bearer ",
+                                "access_token",
+                                "refresh_token",
+                            )
+                        ):
+                            error_message = "[redacted credential-bearing provider error]"
+                    else:
+                        error_message = None
+                    logger.warning(
+                        "Realtime Voice provider error: type=%s code=%s param=%s message=%r",
+                        error.get("type") if isinstance(error, dict) else None,
+                        error.get("code") if isinstance(error, dict) else None,
+                        error.get("param") if isinstance(error, dict) else None,
+                        error_message,
+                    )
+                for normalized in normalize_codex_event(provider_event):
+                    event_type = normalized.get("type")
+                    if event_type == "handoff":
+                        await announce_delegation(
+                            normalized.get("handoff_id"),
+                            normalized.get("text"),
+                        )
+                        continue
+                    if event_type == "provider_user_turn":
+                        await register_provider_user_turn(
+                            normalized.get("provider_turn_id"),
+                            normalized.get("text"),
+                        )
+                        continue
+                    if event_type == "transcript" and normalized.get("phase") == "partial":
+                        await register_provider_user_turn(
+                            normalized.get("provider_turn_id"),
+                            normalized.get("text"),
+                            provisional=True,
+                        )
+                    if event_type == "provider_assistant_turn":
+                        await register_provider_assistant_turn(
+                            normalized.get("provider_turn_id"),
+                            normalized.get("text"),
+                        )
+                        continue
+                    if (
+                        event_type == "assistant_transcript"
+                        and normalized.get("phase") == "partial"
+                    ):
+                        provider_turn["assistant_started"] = True
+                    # Delegation announcements already emit the canonical final
+                    # transcript. Never forward the provider's internal copy.
+                    if event_type == "transcript" and normalized.get("phase") == "final":
+                        continue
+                    guarded_output = event_type in {"assistant_transcript", "audio_output"} or (
+                        event_type == "state" and normalized.get("state") == "speaking"
+                    )
+                    if guarded_output:
+                        provider_turn["provider_output_done"] = False
+                        async with cancellation_lock:
+                            unauthorized = suppress_provider_output
+                        if unauthorized:
+                            # Frameless Bidi may emit muted commentary around a native
+                            # delegation. Only terminal assistant turns classify the
+                            # route; streaming deltas never cancel ChatOrchestrator.
+                            if not muted_output_logged:
+                                logger.info(
+                                    "Realtime Voice muted pre-commit provider output: %s",
+                                    event_type,
+                                )
+                                muted_output_logged = True
+                            continue
+                    await send(normalized)
+        except RealtimeVoiceProviderError as exc:
+            logger.warning("Realtime Voice provider policy error: %s", exc)
+            if not closed:
+                await send(
+                    {
+                        "type": "error",
+                        "code": "realtime_provider_error",
+                        "message": str(exc),
+                    }
+                )
+        finally:
+            if not closed:
+                await close_socket(1011)
+
+    event_task = asyncio.create_task(forward_provider_events())
+    try:
+        while not closed:
+            message = await ws.receive_json()
+            if closed:
+                break
+            message_type = message.get("type") if isinstance(message, dict) else None
+            if message_type == "turn_started":
+                handoff_id = str(message.get("handoff_id") or "").strip()
+                turn_id = str(message.get("turn_id") or "").strip()
+                bound_session_id = str(message.get("session_id") or "").strip()
+                if handoff_id in cancelled_handoffs:
+                    continue
+                if (
+                    not handoff_id
+                    or not turn_id
+                    or not bound_session_id
+                    or handoff_id not in pending_handoffs
+                ):
+                    await send(
+                        {
+                            "type": "error",
+                            "code": "invalid_turn_binding",
+                            "message": "Realtime Voice turn binding is invalid.",
+                        }
+                    )
+                    await close_socket(1008)
+                    continue
+                pending_handoffs.discard(handoff_id)
+                task = asyncio.create_task(forward_turn(handoff_id, turn_id, bound_session_id))
+                turn_tasks.add(task)
+                task.add_done_callback(turn_tasks.discard)
+                continue
+            if message_type == "cancel_output":
+                await send({"type": "state", "state": "interrupted"})
+                await cancel_active_turns()
+                await send({"type": "state", "state": "listening"})
+                continue
+            if message_type == "stop":
+                await cancel_active_turns()
+                await session.close()
+                await send({"type": "state", "state": "ended"})
+                await close_socket(1000)
+                continue
+            if message_type == "ping":
+                await send({"type": "pong"})
+                continue
+            await send(
+                {
+                    "type": "error",
+                    "code": "unknown_message",
+                    "message": f"Unknown Realtime Voice Session message: {message_type}",
+                }
+            )
+    except WebSocketDisconnect:
+        closed = True
+    except RealtimeVoiceProviderError as exc:
+        if not closed:
+            await send({"type": "error", "code": "realtime_provider_error", "message": str(exc)})
+            await close_socket(1011)
+    finally:
+        closed = True
+        await cancel_active_turns()
+        event_task.cancel()
+        for task in list(turn_tasks):
+            task.cancel()
+        await asyncio.gather(event_task, *turn_tasks, return_exceptions=True)
+        if session is not None:
+            await session.close()
+
+
+@router.websocket("/realtime")
+async def realtime_voice_session(ws: WebSocket) -> None:
+    """Serve the normalized server-side Codex Realtime Voice boundary."""
+    from deeptutor.api.routers.auth import ws_auth_failed, ws_require_auth
+    from deeptutor.multi_user.context import reset_current_user
+
+    user_token = await ws_require_auth(ws)
+    if user_token is ws_auth_failed:
+        return
+
+    await ws.accept()
+    closed = False
+
+    async def send(payload: dict[str, object]) -> None:
+        if not closed:
+            await ws.send_json(payload)
+
+    try:
+        await _serve_codex_realtime(ws)
+    except WebSocketDisconnect:
+        logger.debug("Realtime Voice Session client disconnected")
+    except Exception as exc:  # noqa: BLE001 — close the session fail-closed
+        logger.warning("Realtime Voice Session failed: %s", exc)
+        if not closed:
+            try:
+                await send(
+                    {
+                        "type": "error",
+                        "code": "realtime_session_error",
+                        "message": "Realtime Voice Session failed.",
+                    }
+                )
+                await ws.close(code=1011)
+            except Exception:
+                pass
+    finally:
+        reset_current_user(user_token)

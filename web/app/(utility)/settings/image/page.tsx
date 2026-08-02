@@ -12,7 +12,7 @@ export default function ImageGenSettingsPage() {
       <SettingsPageHeader
         title={t("Image Generation")}
         description={t(
-          "Text-to-image model used by the chat 'imagegen' tool. Works with any OpenAI-compatible /images/generations API — OpenAI, Volcengine Seedream, or compatible gateways.",
+          "Text-to-image model used by the chat 'imagegen' tool. Supports OpenAI-compatible /images/generations providers and native Codex OAuth image generation.",
         )}
       />
       <ServiceConfigEditor service="imagegen" />

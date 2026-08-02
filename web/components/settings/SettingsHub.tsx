@@ -17,6 +17,7 @@ import {
   type Lang,
   type SettingsCategory,
 } from "@/lib/settings-nav";
+import { toTaiwanChinese } from "@/lib/taiwan-zh";
 
 /**
  * Settings hub — the landing page of `/settings`.
@@ -35,7 +36,10 @@ type NetworkPreview = {
 export default function SettingsHub() {
   const { i18n } = useTranslation();
   const zh = i18n.language?.toLowerCase().startsWith("zh");
-  const tr = useCallback((l: Lang) => (zh ? l.zh : l.en), [zh]);
+  const tr = useCallback(
+    (l: Lang) => (zh ? toTaiwanChinese(l.zh) : l.en),
+    [zh],
+  );
 
   const { catalog, catalogEditable, diagnosticsResults, startTour } =
     useSettings();

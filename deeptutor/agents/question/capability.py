@@ -90,6 +90,14 @@ class DeepQuestionCapability(BaseCapability):
             return
 
         mode = str(overrides.get("mode", "custom") or "custom").strip().lower()
+        if mode == "proctor":
+            await self._run_proctor_mode(
+                context=context,
+                stream=stream,
+                i18n=i18n,
+            )
+            return
+
         if mode == "original_paper":
             await self._run_original_paper_mode(
                 context=context,
@@ -169,6 +177,148 @@ class DeepQuestionCapability(BaseCapability):
             num_questions=num_questions,
             i18n=i18n,
         )
+
+    async def _run_proctor_mode(
+        self,
+        *,
+        context: UnifiedContext,
+        stream: StreamBus,
+        i18n: StatusI18n,
+    ) -> None:
+        """Interactive exam turn: judge the utterance against the derived
+        current question and reply. Progress is never stored as a counter —
+        it derives from the session's latest snapshot plus the judgment
+        events this path records."""
+        from deeptutor.agents.question.agents.proctor_agent import ProctorAgent
+        from deeptutor.agents.question.exam_progress import (
+            derive_exam_state,
+            resolve_latest_question_set,
+        )
+        from deeptutor.services.session import get_sqlite_session_store
+
+        session_id = str(context.session_id or "").strip()
+        store = get_sqlite_session_store() if session_id else None
+        question_set = await resolve_latest_question_set(store, session_id) if store else None
+        if question_set is None:
+            await stream.error(
+                "No exam or quiz is in progress for this session. Start one first.",
+                source=self.name,
+                stage="quizzing",
+            )
+            return
+
+        judgments = await store.list_exam_judgments(session_id)
+        state = derive_exam_state(
+            question_set.questions,
+            judgments,
+            question_set_id=question_set.set_id,
+        )
+
+        from deeptutor.services.llm.config import get_llm_config
+
+        llm_config = get_llm_config()
+        usage = UsageTracker(model=getattr(llm_config, "model", None))
+        source_metadata = {
+            "source_type": question_set.source,
+            "question_set_id": question_set.set_id,
+            "paper_id": question_set.paper_id,
+            "paper_display_name": question_set.paper_display_name,
+        }
+
+        async with stream.stage("quizzing", source=self.name, metadata=source_metadata):
+            if state.complete:
+                content = (
+                    f"考試完成，{state.total} 題全部作答完畢。"
+                    if str(context.language or "").startswith("zh")
+                    else f"Exam complete — all {state.total} questions handled."
+                )
+                await stream.content(
+                    content,
+                    source=self.name,
+                    stage="quizzing",
+                    metadata={
+                        "call_kind": "exam_proctor_reply",
+                        "exam_complete": True,
+                        "total_questions": state.total,
+                        **source_metadata,
+                    },
+                )
+                await emit_capability_result(
+                    stream,
+                    {
+                        "response": content,
+                        "mode": "proctor",
+                        "exam_complete": True,
+                        **source_metadata,
+                    },
+                    source=self.name,
+                    usage=usage,
+                )
+                return
+
+            assert state.current_question is not None and state.current_index is not None
+            agent = ProctorAgent(
+                language=context.language,
+                api_key=llm_config.api_key,
+                base_url=llm_config.base_url,
+                api_version=llm_config.api_version,
+                token_tracker=usage,
+            )
+            agent.set_trace_callback(self._build_trace_bridge(stream, i18n=i18n))
+            verdict, reply = await agent.process(
+                user_message=context.user_message,
+                current_question=state.current_question,
+                next_question=state.next_question,
+                progress_context=(
+                    f"Question {state.current_index + 1} of {state.total}; "
+                    f"{state.answered} already handled."
+                ),
+                history_context=str(
+                    context.metadata.get("conversation_context_text", "") or ""
+                ).strip(),
+            )
+            question_id = str(state.current_question.get("question_id") or "")
+            if verdict in {"correct", "wrong", "skip"}:
+                await stream.progress(
+                    "",
+                    source=self.name,
+                    stage="quizzing",
+                    metadata={
+                        "call_kind": "exam_judgment",
+                        "question_id": question_id,
+                        "verdict": verdict,
+                        "utterance": str(context.user_message or "")[:200],
+                        **source_metadata,
+                    },
+                )
+            await stream.content(
+                reply,
+                source=self.name,
+                stage="quizzing",
+                metadata={
+                    "call_kind": "exam_proctor_reply",
+                    "question_id": question_id,
+                    "verdict": verdict,
+                    "question_index": state.current_index,
+                    "total_questions": state.total,
+                    **source_metadata,
+                },
+            )
+            await emit_capability_result(
+                stream,
+                {
+                    "response": reply,
+                    "mode": "proctor",
+                    "verdict": verdict,
+                    "question_id": question_id,
+                    "question_index": state.current_index,
+                    "total_questions": state.total,
+                    "exam_complete": False,
+                    **source_metadata,
+                },
+                source=self.name,
+                usage=usage,
+            )
 
     async def _run_original_paper_mode(
         self,
@@ -755,7 +905,14 @@ class ExamCapability(DeepQuestionCapability):
     )
 
     async def run(self, context: UnifiedContext, stream: StreamBus) -> None:
-        overrides = {**context.config_overrides, "mode": "original_paper"}
+        # The exam facade only runs paper exams: start a paper run unless the
+        # caller explicitly asks for the interactive proctor path — anything
+        # else (custom/mimic/absent) collapses to original_paper as before.
+        mode = context.config_overrides.get("mode")
+        overrides = {
+            **context.config_overrides,
+            "mode": "proctor" if mode == "proctor" else "original_paper",
+        }
         await super().run(
             replace(context, config_overrides=overrides),
             stream,

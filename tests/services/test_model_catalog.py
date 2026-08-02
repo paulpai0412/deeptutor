@@ -98,6 +98,43 @@ def test_load_does_not_sync_existing_active_profiles_from_dotenv(tmp_path: Path)
     assert emb_model["dimension"] == "3072"
 
 
+def test_imagegen_codex_profile_strips_catalog_credentials(tmp_path: Path):
+    catalog_path = tmp_path / "model_catalog.json"
+    service = ModelCatalogService(path=catalog_path)
+
+    catalog = service.save(
+        {
+            "version": 1,
+            "services": {
+                "imagegen": {
+                    "active_profile_id": "p",
+                    "active_model_id": "m",
+                    "profiles": [
+                        {
+                            "id": "p",
+                            "binding": "openai_codex",
+                            "base_url": "https://should-not-persist.example",
+                            "api_key": "oauth-access-token-must-not-persist",
+                            "api_version": "secret-version",
+                            "extra_headers": {"Authorization": "Bearer secret"},
+                            "models": [{"id": "m", "model": "gpt-5.5"}],
+                        }
+                    ],
+                }
+            },
+        }
+    )
+
+    profile = catalog["services"]["imagegen"]["profiles"][0]
+    assert profile["base_url"] == ""
+    assert profile["api_key"] == ""
+    assert profile["api_version"] == ""
+    assert profile["extra_headers"] == {}
+    saved = catalog_path.read_text(encoding="utf-8")
+    assert "oauth-access-token-must-not-persist" not in saved
+    assert "Authorization" not in saved
+
+
 def test_load_recovers_invalid_catalog_with_defaults(tmp_path: Path):
     catalog_path = tmp_path / "model_catalog.json"
     catalog_path.write_text("{not-json", encoding="utf-8")

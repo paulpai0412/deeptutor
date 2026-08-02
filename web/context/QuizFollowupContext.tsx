@@ -420,7 +420,11 @@ export function QuizFollowupProvider({ children }: ProviderProps) {
         type: "start_turn",
         content,
         tools: [],
-        capability: "chat",
+        // Route quiz follow-ups through DeepQuestionCapability so its
+        // dedicated FollowupAgent receives the full question context,
+        // including answer choices and the learner's result. The right-side
+        // surface remains a chat UI; this is only the backend capability.
+        capability: "deep_question",
         knowledge_bases: input.knowledgeBases ?? [],
         session_id: current.sessionId,
         attachments: input.attachments,

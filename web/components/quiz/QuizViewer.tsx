@@ -1,13 +1,6 @@
-"use client";
+'use client'
 
-import {
-  type ChangeEvent,
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-} from "react";
+import { type ChangeEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   Bookmark,
   Check,
@@ -23,26 +16,19 @@ import {
   RotateCcw,
   Sparkles,
   X,
-} from "lucide-react";
-import { useTranslation } from "react-i18next";
-import MarkdownRenderer from "@/components/common/MarkdownRenderer";
-import {
-  useAllFollowupThreads,
-  useQuizFollowupController,
-} from "@/context/QuizFollowupContext";
+} from 'lucide-react'
+import { useTranslation } from 'react-i18next'
+import MarkdownRenderer from '@/components/common/MarkdownRenderer'
+import { useAllFollowupThreads, useQuizFollowupController } from '@/context/QuizFollowupContext'
 import {
   isChoiceQuizQuestion,
   isConceptQuizQuestion,
   isFillInBlankQuizQuestion,
   resolveChoiceAnswerKey,
   resolveConceptAnswer,
-} from "@/lib/quiz-question-type";
-import {
-  readFileAsBase64,
-  startQuizJudge,
-  type QuizJudgeHandle,
-} from "@/lib/quiz-judge";
-import { type QuizQuestion } from "@/lib/quiz-types";
+} from '@/lib/quiz-question-type'
+import { readFileAsBase64, startQuizJudge, type QuizJudgeHandle } from '@/lib/quiz-judge'
+import { type QuizQuestion } from '@/lib/quiz-types'
 import {
   addEntryToCategory,
   createCategory,
@@ -51,21 +37,22 @@ import {
   updateNotebookEntry,
   upsertNotebookEntry,
   type NotebookCategory,
-} from "@/lib/notebook-api";
-import { recordQuizResults } from "@/lib/session-api";
-import { apiUrl } from "@/lib/api";
+} from '@/lib/notebook-api'
+import { recordPetLearningEvent } from '@/lib/pet-growth'
+import { recordQuizResults } from '@/lib/session-api'
+import { apiUrl } from '@/lib/api'
 
 /** Resolve a possibly-relative AttachmentStore URL to an absolute one so
  *  ``<img src>`` works regardless of the API/frontend port pairing. */
 function resolveImageSrc(url: string | null | undefined): string | undefined {
-  if (!url) return undefined;
-  if (/^(https?:|data:|blob:)/i.test(url)) return url;
-  return apiUrl(url);
+  if (!url) return undefined
+  if (/^(https?:|data:|blob:)/i.test(url)) return url
+  return apiUrl(url)
 }
 
 interface QuizViewerProps {
-  questions: QuizQuestion[];
-  sessionId?: string | null;
+  questions: QuizQuestion[]
+  sessionId?: string | null
   /**
    * The ``turn_id`` of the assistant turn that produced this quiz. Scopes
    * notebook lookups/upserts so two quizzes generated in the same chat
@@ -75,10 +62,10 @@ interface QuizViewerProps {
    * is local-only: answers grade client-side but the notebook is never
    * read or written, so state can't leak across quizzes.
    */
-  turnId?: string | null;
-  language?: string;
+  turnId?: string | null
+  language?: string
   /** Render source-paper copy as an Exam turn rather than ordinary Quiz. */
-  examMode?: boolean;
+  examMode?: boolean
 }
 
 type AnswerImage = {
@@ -87,54 +74,54 @@ type AnswerImage = {
    * specific image. When the image has been persisted server-side the
    * field is replaced with the stable AttachmentStore id.
    */
-  id: string;
+  id: string
   /** Base64 (no ``data:`` prefix) when freshly picked client-side. */
-  base64: string | null;
+  base64: string | null
   /** AttachmentStore URL once the upsert response confirms persistence. */
-  url: string | null;
-  filename: string;
-  mime: string;
+  url: string | null
+  filename: string
+  mime: string
   /** Blob: URL for the local <img> preview when ``base64`` is present. */
-  previewUrl: string | null;
-};
+  previewUrl: string | null
+}
 
 type AnswerState = {
-  selected: string | null;
-  typed: string;
-  submitted: boolean;
-  images: AnswerImage[];
-};
+  selected: string | null
+  typed: string
+  submitted: boolean
+  images: AnswerImage[]
+}
 
 const EMPTY_ANSWER: AnswerState = {
   selected: null,
-  typed: "",
+  typed: '',
   submitted: false,
   images: [],
-};
+}
 
 function makeAnswerImageId(): string {
-  if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
-    return crypto.randomUUID().replaceAll("-", "").slice(0, 12);
+  if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) {
+    return crypto.randomUUID().replaceAll('-', '').slice(0, 12)
   }
-  return Math.random().toString(36).slice(2, 14);
+  return Math.random().toString(36).slice(2, 14)
 }
 
 type JudgmentState = {
-  text: string;
-  isStreaming: boolean;
-  error: string | null;
-};
+  text: string
+  isStreaming: boolean
+  error: string | null
+}
 
 const EMPTY_JUDGMENT: JudgmentState = {
-  text: "",
+  text: '',
   isStreaming: false,
   error: null,
-};
+}
 
-type AnswerView = "reference" | "judgment";
+type AnswerView = 'reference' | 'judgment'
 
 function getQuestionKey(question: QuizQuestion, index: number): string {
-  return question.question_id || `question_${index + 1}`;
+  return question.question_id || `question_${index + 1}`
 }
 
 function isMultipleChoice(question: QuizQuestion): boolean {
@@ -142,7 +129,7 @@ function isMultipleChoice(question: QuizQuestion): boolean {
     isChoiceQuizQuestion(question.question_type) &&
     !!question.options &&
     Object.keys(question.options).length > 0
-  );
+  )
 }
 
 /**
@@ -156,8 +143,8 @@ function isAutoGradable(question: QuizQuestion): boolean {
   // cannot conservatively represent their grading. A source image does not
   // prevent answer-key grading for single-choice questions.
   const hasSourceImage = Boolean(
-    question.source_images?.length || question.source_image_attachments?.length,
-  );
+    question.source_images?.length || question.source_image_attachments?.length
+  )
   return (
     !question.is_multi_select &&
     !!question.correct_answer.trim() &&
@@ -165,142 +152,130 @@ function isAutoGradable(question: QuizQuestion): boolean {
     (isMultipleChoice(question) ||
       isConceptQuizQuestion(question.question_type) ||
       isFillInBlankQuizQuestion(question.question_type))
-  );
+  )
 }
 
 function normalizeFillAnswer(value: string): string {
-  const punctuation = /^[.,!?;:，。！？；：、"'「」『』（）()【】[\]…]+|[.,!?;:，。！？；：、"'「」『』（）()【】[\]…]+$/gu;
+  const punctuation =
+    /^[.,!?;:，。！？；：、"'「」『』（）()【】[\]…]+|[.,!?;:，。！？；：、"'「」『』（）()【】[\]…]+$/gu
   return value
-    .normalize("NFKC")
+    .normalize('NFKC')
     .trim()
-    .replace(/\s+/gu, " ")
-    .replace(punctuation, "")
-    .toLocaleLowerCase();
+    .replace(/\s+/gu, ' ')
+    .replace(punctuation, '')
+    .toLocaleLowerCase()
 }
 
 function getUserAnswer(question: QuizQuestion, answer: AnswerState): string {
   // Choice + concept use the ``selected`` field (option key / "true" / "false").
-  if (
-    isMultipleChoice(question) ||
-    isConceptQuizQuestion(question.question_type)
-  ) {
-    return answer.selected ?? "";
+  if (isMultipleChoice(question) || isConceptQuizQuestion(question.question_type)) {
+    return answer.selected ?? ''
   }
   // Fill-in-blank + free-text types use the typed string.
-  return answer.typed.trim();
+  return answer.typed.trim()
 }
 
 function isAnswerCorrect(question: QuizQuestion, answer: AnswerState): boolean {
-  const userAnswer = getUserAnswer(question, answer);
-  if (!userAnswer) return false;
-  const correct = question.correct_answer.trim();
+  const userAnswer = getUserAnswer(question, answer)
+  if (!userAnswer) return false
+  const correct = question.correct_answer.trim()
   if (isMultipleChoice(question)) {
-    const correctChoiceKey = resolveChoiceAnswerKey(correct, question.options);
+    const correctChoiceKey = resolveChoiceAnswerKey(correct, question.options)
     return (
       userAnswer.toUpperCase() === correctChoiceKey ||
       userAnswer.toUpperCase() === correct.toUpperCase() ||
       userAnswer.toUpperCase() === correct.charAt(0).toUpperCase()
-    );
+    )
   }
   if (isConceptQuizQuestion(question.question_type)) {
-    const correctTF = resolveConceptAnswer(correct);
-    return userAnswer.toLowerCase() === correctTF;
+    const correctTF = resolveConceptAnswer(correct)
+    return userAnswer.toLowerCase() === correctTF
   }
   if (isFillInBlankQuizQuestion(question.question_type)) {
-    return normalizeFillAnswer(userAnswer) === normalizeFillAnswer(correct);
+    return normalizeFillAnswer(userAnswer) === normalizeFillAnswer(correct)
   }
-  return userAnswer.toLocaleLowerCase() === correct.toLocaleLowerCase();
+  return userAnswer.toLocaleLowerCase() === correct.toLocaleLowerCase()
 }
 
 export default function QuizViewer({
   questions,
   sessionId,
   turnId,
-  language = "en",
+  language = 'en',
   examMode = false,
 }: QuizViewerProps) {
-  const { t } = useTranslation();
-  const followupController = useQuizFollowupController();
+  const { t } = useTranslation()
+  const followupController = useQuizFollowupController()
   // Read all follow-up threads so we can light up the "N messages" badge
   // and the per-chip dot indicator. Owned by QuizFollowupProvider so
   // QuizFollowupTabBody and QuizViewer stay in sync.
-  const followupThreads = useAllFollowupThreads();
-  const [idx, setIdx] = useState(0);
-  const [answers, setAnswers] = useState<Record<number, AnswerState>>({});
-  const lastReportedSignatureRef = useRef("");
+  const followupThreads = useAllFollowupThreads()
+  const [idx, setIdx] = useState(0)
+  const [answers, setAnswers] = useState<Record<number, AnswerState>>({})
+  const lastReportedSignatureRef = useRef('')
 
-  const [entryIds, setEntryIds] = useState<Record<string, number>>({});
-  const [bookmarked, setBookmarked] = useState<Record<string, boolean>>({});
+  const [entryIds, setEntryIds] = useState<Record<string, number>>({})
+  const [bookmarked, setBookmarked] = useState<Record<string, boolean>>({})
   // Captured from the notebook entry on lookup so QuizFollowupTabBody
   // can hydrate prior chat history when the follow-up tab opens.
-  const [followupSessionIds, setFollowupSessionIds] = useState<
-    Record<string, string>
-  >({});
-  const [categories, setCategories] = useState<NotebookCategory[]>([]);
-  const [categoryDropdownKey, setCategoryDropdownKey] = useState<string | null>(
-    null,
-  );
-  const [newCategoryName, setNewCategoryName] = useState("");
-  const [categoryBusy, setCategoryBusy] = useState(false);
+  const [followupSessionIds, setFollowupSessionIds] = useState<Record<string, string>>({})
+  const [categories, setCategories] = useState<NotebookCategory[]>([])
+  const [categoryDropdownKey, setCategoryDropdownKey] = useState<string | null>(null)
+  const [newCategoryName, setNewCategoryName] = useState('')
+  const [categoryBusy, setCategoryBusy] = useState(false)
 
-  const [judgments, setJudgments] = useState<Record<number, JudgmentState>>({});
-  const judgeTextsRef = useRef<Map<number, string>>(new Map());
-  const [answerViews, setAnswerViews] = useState<Record<number, AnswerView>>(
-    {},
-  );
+  const [judgments, setJudgments] = useState<Record<number, JudgmentState>>({})
+  const judgeTextsRef = useRef<Map<number, string>>(new Map())
+  const [answerViews, setAnswerViews] = useState<Record<number, AnswerView>>({})
   // Per-question collapsed state for the Reference / Judgment review
   // block. Default: expanded. Persists per question while the QuizViewer
   // instance is alive.
-  const [reviewCollapsed, setReviewCollapsed] = useState<
-    Record<number, boolean>
-  >({});
-  const judgeHandlesRef = useRef<Map<number, QuizJudgeHandle>>(new Map());
-  const autoAdvanceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
-    null,
-  );
-  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const [reviewCollapsed, setReviewCollapsed] = useState<Record<number, boolean>>({})
+  const judgeHandlesRef = useRef<Map<number, QuizJudgeHandle>>(new Map())
+  const autoAdvanceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const fileInputRef = useRef<HTMLInputElement | null>(null)
 
   useEffect(
     () => () => {
-      judgeHandlesRef.current.forEach((handle) => handle.close());
-      judgeHandlesRef.current.clear();
+      judgeHandlesRef.current.forEach(handle => handle.close())
+      judgeHandlesRef.current.clear()
       if (autoAdvanceTimerRef.current !== null) {
-        clearTimeout(autoAdvanceTimerRef.current);
-        autoAdvanceTimerRef.current = null;
+        clearTimeout(autoAdvanceTimerRef.current)
+        autoAdvanceTimerRef.current = null
       }
     },
-    [],
-  );
+    []
+  )
 
   // Manual navigation cancels a pending automatic step. The timer also
   // checks the index before advancing so a quick click cannot jump twice.
   useEffect(() => {
     return () => {
       if (autoAdvanceTimerRef.current !== null) {
-        clearTimeout(autoAdvanceTimerRef.current);
-        autoAdvanceTimerRef.current = null;
+        clearTimeout(autoAdvanceTimerRef.current)
+        autoAdvanceTimerRef.current = null
       }
-    };
-  }, [idx]);
+    }
+  }, [idx])
 
-  const q = questions[idx];
-  const ans = answers[idx] ?? EMPTY_ANSWER;
-  const total = questions.length;
-  const navigationProgress = total > 0 ? ((idx + 1) / total) * 100 : 0;
-  const questionKey = q ? getQuestionKey(q, idx) : "";
+  const q = questions[idx]
+  const ans = answers[idx] ?? EMPTY_ANSWER
+  const total = questions.length
+  const navigationProgress = total > 0 ? ((idx + 1) / total) * 100 : 0
+  const questionKey = q ? getQuestionKey(q, idx) : ''
   const completedCount = useMemo(
-    () => Object.values(answers).filter((answer) => answer.submitted).length,
-    [answers],
-  );
+    () => Object.values(answers).filter(answer => answer.submitted).length,
+    [answers]
+  )
 
   const updateAnswer = useCallback(
     (patch: Partial<AnswerState>) =>
-      setAnswers((prev) => ({
+      setAnswers(prev => ({
         ...prev,
         [idx]: { ...(prev[idx] ?? EMPTY_ANSWER), ...patch },
       })),
-    [idx],
-  );
+    [idx]
+  )
 
   // ── Notebook integration ──────────────────────────────────────
 
@@ -309,167 +284,158 @@ export default function QuizViewer({
       // No turn identity → no notebook reads. A turn-less lookup can only
       // resolve against another turn's rows (question ids are positional),
       // which is exactly the cross-quiz answer inheritance of #677.
-      if (!turnId) return;
+      if (!turnId) return
       try {
-        const entry = await lookupNotebookEntry(sId, qKey, turnId);
+        const entry = await lookupNotebookEntry(sId, qKey, turnId)
         if (entry) {
-          setEntryIds((prev) => ({ ...prev, [qKey]: entry.id }));
-          setBookmarked((prev) => ({ ...prev, [qKey]: entry.bookmarked }));
+          setEntryIds(prev => ({ ...prev, [qKey]: entry.id }))
+          setBookmarked(prev => ({ ...prev, [qKey]: entry.bookmarked }))
           if (entry.followup_session_id) {
-            setFollowupSessionIds((prev) => ({
+            setFollowupSessionIds(prev => ({
               ...prev,
               [qKey]: entry.followup_session_id,
-            }));
+            }))
           }
-          const persistedImages = (entry.user_answer_images ?? []).map(
-            (image) => ({
-              id: image.id || makeAnswerImageId(),
-              base64: null,
-              url: image.url || null,
-              filename: image.filename || "answer.png",
-              mime: image.mime_type || "image/png",
-              previewUrl: null,
-            }),
-          );
-          if (
-            questionIndex !== undefined &&
-            (entry.user_answer || persistedImages.length > 0)
-          ) {
-            setAnswers((prev) => {
-              if (prev[questionIndex]?.submitted) return prev;
+          const persistedImages = (entry.user_answer_images ?? []).map(image => ({
+            id: image.id || makeAnswerImageId(),
+            base64: null,
+            url: image.url || null,
+            filename: image.filename || 'answer.png',
+            mime: image.mime_type || 'image/png',
+            previewUrl: null,
+          }))
+          if (questionIndex !== undefined && (entry.user_answer || persistedImages.length > 0)) {
+            setAnswers(prev => {
+              if (prev[questionIndex]?.submitted) return prev
               return {
                 ...prev,
                 [questionIndex]: {
                   ...EMPTY_ANSWER,
                   selected: entry.user_answer || null,
-                  typed: entry.user_answer || "",
+                  typed: entry.user_answer || '',
                   images: persistedImages,
                   submitted: true,
                 },
-              };
-            });
+              }
+            })
           }
           // Rehydrate the AI judgment so the learner can keep reading
           // it across page refreshes. We only overwrite when local state
           // is still empty so an in-flight judge run isn't clobbered.
-          if (
-            questionIndex !== undefined &&
-            entry.ai_judgment &&
-            entry.ai_judgment.length > 0
-          ) {
-            setJudgments((prev) => {
-              const current = prev[questionIndex];
-              if (current?.text || current?.isStreaming) return prev;
+          if (questionIndex !== undefined && entry.ai_judgment && entry.ai_judgment.length > 0) {
+            setJudgments(prev => {
+              const current = prev[questionIndex]
+              if (current?.text || current?.isStreaming) return prev
               return {
                 ...prev,
                 [questionIndex]: {
-                  text: entry.ai_judgment ?? "",
+                  text: entry.ai_judgment ?? '',
                   isStreaming: false,
                   error: null,
                 },
-              };
-            });
+              }
+            })
           }
         }
       } catch {
         /* entry may not exist yet */
       }
     },
-    [turnId],
-  );
+    [turnId]
+  )
 
   useEffect(() => {
-    if (!sessionId) return;
+    if (!sessionId) return
     questions.forEach((question, i) => {
-      const key = getQuestionKey(question, i);
-      void refreshEntryId(key, sessionId, i);
-    });
-  }, [sessionId, questions, refreshEntryId]);
+      const key = getQuestionKey(question, i)
+      void refreshEntryId(key, sessionId, i)
+    })
+  }, [sessionId, questions, refreshEntryId])
 
   const handleToggleBookmark = useCallback(async () => {
-    if (!q || !sessionId) return;
-    const key = getQuestionKey(q, idx);
-    const eId = entryIds[key];
-    if (!eId) return;
-    const next = !bookmarked[key];
-    setBookmarked((prev) => ({ ...prev, [key]: next }));
+    if (!q || !sessionId) return
+    const key = getQuestionKey(q, idx)
+    const eId = entryIds[key]
+    if (!eId) return
+    const next = !bookmarked[key]
+    setBookmarked(prev => ({ ...prev, [key]: next }))
     try {
-      await updateNotebookEntry(eId, { bookmarked: next });
+      await updateNotebookEntry(eId, { bookmarked: next })
     } catch {
-      setBookmarked((prev) => ({ ...prev, [key]: !next }));
+      setBookmarked(prev => ({ ...prev, [key]: !next }))
     }
-  }, [bookmarked, entryIds, idx, q, sessionId]);
+  }, [bookmarked, entryIds, idx, q, sessionId])
 
   const loadCategories = useCallback(async () => {
     try {
-      setCategories(await listCategories());
+      setCategories(await listCategories())
     } catch {
       /* ignore */
     }
-  }, []);
+  }, [])
 
   const handleOpenCategoryDropdown = useCallback(() => {
-    if (!q) return;
-    const key = getQuestionKey(q, idx);
+    if (!q) return
+    const key = getQuestionKey(q, idx)
     if (categoryDropdownKey === key) {
-      setCategoryDropdownKey(null);
-      return;
+      setCategoryDropdownKey(null)
+      return
     }
-    setCategoryDropdownKey(key);
-    void loadCategories();
-  }, [categoryDropdownKey, idx, loadCategories, q]);
+    setCategoryDropdownKey(key)
+    void loadCategories()
+  }, [categoryDropdownKey, idx, loadCategories, q])
 
   const handleAddToCategory = useCallback(
     async (catId: number) => {
-      if (!q) return;
-      const key = getQuestionKey(q, idx);
-      const eId = entryIds[key];
-      if (!eId) return;
-      setCategoryBusy(true);
+      if (!q) return
+      const key = getQuestionKey(q, idx)
+      const eId = entryIds[key]
+      if (!eId) return
+      setCategoryBusy(true)
       try {
-        await addEntryToCategory(eId, catId);
-        setCategoryDropdownKey(null);
+        await addEntryToCategory(eId, catId)
+        setCategoryDropdownKey(null)
       } catch {
         /* ignore */
       }
-      setCategoryBusy(false);
+      setCategoryBusy(false)
     },
-    [entryIds, idx, q],
-  );
+    [entryIds, idx, q]
+  )
 
   const handleCreateAndAdd = useCallback(async () => {
-    if (!q || !newCategoryName.trim()) return;
-    const key = getQuestionKey(q, idx);
-    const eId = entryIds[key];
-    if (!eId) return;
-    setCategoryBusy(true);
+    if (!q || !newCategoryName.trim()) return
+    const key = getQuestionKey(q, idx)
+    const eId = entryIds[key]
+    if (!eId) return
+    setCategoryBusy(true)
     try {
-      const cat = await createCategory(newCategoryName.trim());
-      await addEntryToCategory(eId, cat.id);
-      setNewCategoryName("");
-      setCategoryDropdownKey(null);
+      const cat = await createCategory(newCategoryName.trim())
+      await addEntryToCategory(eId, cat.id)
+      setNewCategoryName('')
+      setCategoryDropdownKey(null)
     } catch {
       /* ignore */
     }
-    setCategoryBusy(false);
-  }, [entryIds, idx, newCategoryName, q]);
+    setCategoryBusy(false)
+  }, [entryIds, idx, newCategoryName, q])
 
-  const isChoice = q ? isMultipleChoice(q) : false;
-  const isConcept = q ? isConceptQuizQuestion(q.question_type) : false;
-  const isFillBlank = q ? isFillInBlankQuizQuestion(q.question_type) : false;
-  const isGradable = q ? isAutoGradable(q) : false;
-  const currentUserAnswer = q ? getUserAnswer(q, ans) : "";
+  const isChoice = q ? isMultipleChoice(q) : false
+  const isConcept = q ? isConceptQuizQuestion(q.question_type) : false
+  const isFillBlank = q ? isFillInBlankQuizQuestion(q.question_type) : false
+  const isGradable = q ? isAutoGradable(q) : false
+  const currentUserAnswer = q ? getUserAnswer(q, ans) : ''
 
   const isCorrect = useMemo(() => {
-    if (!q || !ans.submitted || !isAutoGradable(q)) return null;
-    return isAnswerCorrect(q, ans);
-  }, [ans, q]);
+    if (!q || !ans.submitted || !isAutoGradable(q)) return null
+    return isAnswerCorrect(q, ans)
+  }, [ans, q])
 
   const submittedResults = useMemo(
     () =>
       questions.flatMap((question, questionIdx) => {
-        const answer = answers[questionIdx];
-        if (!answer?.submitted) return [];
+        const answer = answers[questionIdx]
+        if (!answer?.submitted) return []
         return [
           {
             question_id: question.question_id,
@@ -478,8 +444,8 @@ export default function QuizViewer({
             options: question.options ?? {},
             user_answer: getUserAnswer(question, answer),
             correct_answer: question.correct_answer,
-            explanation: question.explanation ?? "",
-            difficulty: question.difficulty ?? "",
+            explanation: question.explanation ?? '',
+            difficulty: question.difficulty ?? '',
             source_type: question.source_type,
             paper_library_id: question.paper_library_id,
             paper_library_name: question.paper_library_name,
@@ -487,45 +453,41 @@ export default function QuizViewer({
             paper_display_name: question.paper_display_name,
             source_question_number: question.source_question_number,
             source_snapshot_id: question.snapshot_id,
-            grading_method: isAutoGradable(question) ? "deterministic" : "manual",
+            grading_method: isAutoGradable(question) ? 'deterministic' : 'manual',
             is_multi_select: question.is_multi_select,
             image_dependent: Boolean(
-              question.source_images?.length ||
-                question.source_image_attachments?.length,
+              question.source_images?.length || question.source_image_attachments?.length
             ),
-            is_correct: isAutoGradable(question)
-              ? isAnswerCorrect(question, answer)
-              : null,
+            is_correct: isAutoGradable(question) ? isAnswerCorrect(question, answer) : null,
           },
-        ];
+        ]
       }),
-    [answers, questions],
-  );
+    [answers, questions]
+  )
 
   useEffect(() => {
     // Exam intentionally does not create the existing Quiz Performance
     // summary; this feature has no score/completion statistics.
-    if (examMode) return;
+    if (examMode) return
     // Reporting requires a turn identity: an empty ``turn_id`` write lands
     // in the shared legacy namespace, where the next quiz's identically
     // numbered questions would pick it up as their own answers (#677).
-    if (!sessionId || !turnId || total === 0 || completedCount !== total)
-      return;
-    const signature = JSON.stringify(submittedResults);
-    if (!signature || signature === lastReportedSignatureRef.current) return;
-    lastReportedSignatureRef.current = signature;
+    if (!sessionId || !turnId || total === 0 || completedCount !== total) return
+    const signature = JSON.stringify(submittedResults)
+    if (!signature || signature === lastReportedSignatureRef.current) return
+    lastReportedSignatureRef.current = signature
     void recordQuizResults(sessionId, submittedResults, turnId)
       .then(() => {
         questions.forEach((question, i) => {
-          void refreshEntryId(getQuestionKey(question, i), sessionId);
-        });
+          void refreshEntryId(getQuestionKey(question, i), sessionId)
+        })
       })
-      .catch((error) => {
-        console.error("Failed to record quiz results:", error);
+      .catch(error => {
+        console.error('Failed to record quiz results:', error)
         if (lastReportedSignatureRef.current === signature) {
-          lastReportedSignatureRef.current = "";
+          lastReportedSignatureRef.current = ''
         }
-      });
+      })
   }, [
     completedCount,
     examMode,
@@ -535,24 +497,20 @@ export default function QuizViewer({
     submittedResults,
     total,
     turnId,
-  ]);
+  ])
 
   const upsertSingleQuestion = useCallback(
-    async (
-      question: QuizQuestion,
-      answer: AnswerState,
-      questionIndex: number,
-    ) => {
-      if (!sessionId || !turnId) return null;
-      const key = getQuestionKey(question, questionIndex);
+    async (question: QuizQuestion, answer: AnswerState, questionIndex: number) => {
+      if (!sessionId || !turnId) return null
+      const key = getQuestionKey(question, questionIndex)
       try {
-        const imagePayload = answer.images.map((image) => ({
+        const imagePayload = answer.images.map(image => ({
           id: image.id,
           base64: image.base64 ?? undefined,
           url: image.url ?? undefined,
           filename: image.filename,
           mime_type: image.mime,
-        }));
+        }))
         const entry = await upsertNotebookEntry({
           session_id: sessionId,
           turn_id: turnId,
@@ -561,13 +519,11 @@ export default function QuizViewer({
           question_type: question.question_type,
           options: question.options ?? {},
           correct_answer: question.correct_answer,
-          explanation: question.explanation ?? "",
-          difficulty: question.difficulty ?? "",
+          explanation: question.explanation ?? '',
+          difficulty: question.difficulty ?? '',
           user_answer: getUserAnswer(question, answer),
           user_answer_images: imagePayload,
-          is_correct: isAutoGradable(question)
-            ? isAnswerCorrect(question, answer)
-            : null,
+          is_correct: isAutoGradable(question) ? isAnswerCorrect(question, answer) : null,
           source_type: question.source_type,
           paper_library_id: question.paper_library_id,
           paper_library_name: question.paper_library_name,
@@ -575,113 +531,116 @@ export default function QuizViewer({
           paper_display_name: question.paper_display_name,
           source_question_number: question.source_question_number,
           source_snapshot_id: question.snapshot_id,
-          grading_method: isAutoGradable(question) ? "deterministic" : "manual",
+          grading_method: isAutoGradable(question) ? 'deterministic' : 'manual',
           is_multi_select: question.is_multi_select,
           image_dependent: Boolean(
-            question.source_images?.length ||
-              question.source_image_attachments?.length,
+            question.source_images?.length || question.source_image_attachments?.length
           ),
-        });
-        setEntryIds((prev) => ({ ...prev, [key]: entry.id }));
-        setBookmarked((prev) => ({ ...prev, [key]: entry.bookmarked }));
+        })
+        setEntryIds(prev => ({ ...prev, [key]: entry.id }))
+        setBookmarked(prev => ({ ...prev, [key]: entry.bookmarked }))
         // Replace freshly-uploaded ``base64`` images with the
         // AttachmentStore URLs the server hands back, so subsequent
         // upserts don't re-upload the same bytes and the previews can
         // survive a page reload by falling through to ``url``.
-        const persisted = entry.user_answer_images ?? [];
+        const persisted = entry.user_answer_images ?? []
         if (persisted.length > 0) {
-          setAnswers((prev) => {
-            const current = prev[questionIndex];
-            if (!current) return prev;
-            const byId = new Map(persisted.map((image) => [image.id, image]));
-            const nextImages = current.images.map((image) => {
-              const match = byId.get(image.id);
-              if (!match) return image;
+          setAnswers(prev => {
+            const current = prev[questionIndex]
+            if (!current) return prev
+            const byId = new Map(persisted.map(image => [image.id, image]))
+            const nextImages = current.images.map(image => {
+              const match = byId.get(image.id)
+              if (!match) return image
               return {
                 ...image,
                 url: match.url || image.url,
                 // Drop base64 once the server has the bytes.
                 base64: null,
-              };
-            });
+              }
+            })
             return {
               ...prev,
               [questionIndex]: { ...current, images: nextImages },
-            };
-          });
+            }
+          })
         }
-        return entry;
+        return entry
       } catch {
-        return null;
+        return null
       }
     },
-    [sessionId, turnId],
-  );
+    [sessionId, turnId]
+  )
 
   const handleSubmit = () => {
-    if (ans.submitted || !q) return;
-    const questionIndex = idx;
+    if (ans.submitted || !q) return
+    const questionIndex = idx
     const newAnswer = {
       ...(answers[questionIndex] ?? EMPTY_ANSWER),
       submitted: true,
-    };
-    updateAnswer({ submitted: true });
-    void upsertSingleQuestion(q, newAnswer, questionIndex);
+    }
+    updateAnswer({ submitted: true })
+    void upsertSingleQuestion(q, newAnswer, questionIndex)
 
-    if (
-      questionIndex < total - 1 &&
-      isAutoGradable(q) &&
-      isAnswerCorrect(q, newAnswer)
-    ) {
+    const autoGradable = isAutoGradable(q)
+    const correct = autoGradable ? isAnswerCorrect(q, newAnswer) : null
+    recordPetLearningEvent(
+      correct === true
+        ? { kind: 'quiz_correct', label: 'Correct quiz answer', xp: 12 }
+        : correct === false
+          ? { kind: 'quiz_wrong', label: 'Wrong quiz answer', xp: -4 }
+          : { kind: 'quiz_practice', label: 'Practice answer submitted', xp: 4 }
+    )
+
+    if (questionIndex < total - 1 && autoGradable && correct) {
       if (autoAdvanceTimerRef.current !== null) {
-        clearTimeout(autoAdvanceTimerRef.current);
+        clearTimeout(autoAdvanceTimerRef.current)
       }
       autoAdvanceTimerRef.current = setTimeout(() => {
-        autoAdvanceTimerRef.current = null;
-        setIdx((current) =>
-          current === questionIndex ? Math.min(total - 1, current + 1) : current,
-        );
-      }, 800);
+        autoAdvanceTimerRef.current = null
+        setIdx(current => (current === questionIndex ? Math.min(total - 1, current + 1) : current))
+      }, 800)
     }
-  };
+  }
 
   const handleReset = () => {
     // Reset typed/selected state but keep an attached image so the learner
     // doesn't have to re-upload it when retrying.
-    updateAnswer({ selected: null, typed: "", submitted: false });
-    setJudgments((prev) => {
-      const next = { ...prev };
-      delete next[idx];
-      return next;
-    });
-    setAnswerViews((prev) => {
-      const next = { ...prev };
-      delete next[idx];
-      return next;
-    });
-    const existing = judgeHandlesRef.current.get(idx);
+    updateAnswer({ selected: null, typed: '', submitted: false })
+    setJudgments(prev => {
+      const next = { ...prev }
+      delete next[idx]
+      return next
+    })
+    setAnswerViews(prev => {
+      const next = { ...prev }
+      delete next[idx]
+      return next
+    })
+    const existing = judgeHandlesRef.current.get(idx)
     if (existing) {
-      existing.close();
-      judgeHandlesRef.current.delete(idx);
+      existing.close()
+      judgeHandlesRef.current.delete(idx)
     }
-  };
+  }
 
   const handlePickImageClick = useCallback(() => {
-    fileInputRef.current?.click();
-  }, []);
+    fileInputRef.current?.click()
+  }, [])
 
   const handleImageChange = useCallback(
     async (event: ChangeEvent<HTMLInputElement>) => {
-      const files = Array.from(event.target.files ?? []);
+      const files = Array.from(event.target.files ?? [])
       // Reset the input so re-selecting the same file fires onChange again.
-      event.target.value = "";
-      if (files.length === 0) return;
+      event.target.value = ''
+      if (files.length === 0) return
 
-      const newImages: AnswerImage[] = [];
+      const newImages: AnswerImage[] = []
       for (const file of files) {
-        if (!file.type.startsWith("image/")) continue;
+        if (!file.type.startsWith('image/')) continue
         try {
-          const { base64, mime, name } = await readFileAsBase64(file);
+          const { base64, mime, name } = await readFileAsBase64(file)
           newImages.push({
             id: makeAnswerImageId(),
             base64,
@@ -689,76 +648,76 @@ export default function QuizViewer({
             filename: name,
             mime,
             previewUrl: URL.createObjectURL(file),
-          });
+          })
         } catch {
           /* skip this file — user can retry */
         }
       }
-      if (newImages.length === 0) return;
+      if (newImages.length === 0) return
 
-      const prev = answers[idx] ?? EMPTY_ANSWER;
-      updateAnswer({ images: [...prev.images, ...newImages] });
+      const prev = answers[idx] ?? EMPTY_ANSWER
+      updateAnswer({ images: [...prev.images, ...newImages] })
     },
-    [answers, idx, updateAnswer],
-  );
+    [answers, idx, updateAnswer]
+  )
 
   const handleRemoveImage = useCallback(
     (imageId: string) => {
-      const prev = answers[idx] ?? EMPTY_ANSWER;
-      const remaining: AnswerImage[] = [];
+      const prev = answers[idx] ?? EMPTY_ANSWER
+      const remaining: AnswerImage[] = []
       for (const image of prev.images) {
         if (image.id === imageId) {
           if (image.previewUrl) {
             try {
-              URL.revokeObjectURL(image.previewUrl);
+              URL.revokeObjectURL(image.previewUrl)
             } catch {
               /* ignore */
             }
           }
-          continue;
+          continue
         }
-        remaining.push(image);
+        remaining.push(image)
       }
-      updateAnswer({ images: remaining });
+      updateAnswer({ images: remaining })
     },
-    [answers, idx, updateAnswer],
-  );
+    [answers, idx, updateAnswer]
+  )
 
   const handleAiJudge = useCallback(() => {
-    if (!q) return;
-    const answer = answers[idx] ?? EMPTY_ANSWER;
-    const userAnswer = getUserAnswer(q, answer);
-    if (!userAnswer && answer.images.length === 0) return;
+    if (!q) return
+    const answer = answers[idx] ?? EMPTY_ANSWER
+    const userAnswer = getUserAnswer(q, answer)
+    if (!userAnswer && answer.images.length === 0) return
 
     // Cancel any in-flight judge for this question before starting a new run.
-    const existing = judgeHandlesRef.current.get(idx);
+    const existing = judgeHandlesRef.current.get(idx)
     if (existing) {
-      existing.close();
-      judgeHandlesRef.current.delete(idx);
+      existing.close()
+      judgeHandlesRef.current.delete(idx)
     }
 
-    judgeTextsRef.current.set(idx, "");
-    setJudgments((prev) => ({
+    judgeTextsRef.current.set(idx, '')
+    setJudgments(prev => ({
       ...prev,
-      [idx]: { text: "", isStreaming: true, error: null },
-    }));
-    setAnswerViews((prev) => ({ ...prev, [idx]: "judgment" }));
+      [idx]: { text: '', isStreaming: true, error: null },
+    }))
+    setAnswerViews(prev => ({ ...prev, [idx]: 'judgment' }))
 
-    const judgeLanguage: "zh" | "zh-TW" | "en" = language.startsWith("zh-TW")
-      ? "zh-TW"
-      : language.startsWith("zh")
-        ? "zh"
-        : "en";
+    const judgeLanguage: 'zh' | 'zh-TW' | 'en' = language.startsWith('zh-TW')
+      ? 'zh-TW'
+      : language.startsWith('zh')
+        ? 'zh'
+        : 'en'
 
     const handle = startQuizJudge(
       {
         question: q.question,
-        question_type: q.question_type ?? "",
+        question_type: q.question_type ?? '',
         options: q.options ?? null,
-        correct_answer: q.correct_answer ?? "",
-        explanation: q.explanation ?? "",
+        correct_answer: q.correct_answer ?? '',
+        explanation: q.explanation ?? '',
         user_answer: userAnswer,
-        user_answer_images: answer.images.map((image) => ({
+        user_answer_images: answer.images.map(image => ({
           base64: image.base64,
           url: image.url,
           filename: image.filename,
@@ -766,90 +725,85 @@ export default function QuizViewer({
         })),
         question_images:
           q.source_image_attachments && q.source_image_attachments.length > 0
-            ? q.source_image_attachments.map((image) => ({
+            ? q.source_image_attachments.map(image => ({
                 base64: null,
                 url: image.url ?? null,
-                filename: image.filename ?? "question.png",
-                mime_type: image.mime_type ?? "image/png",
+                filename: image.filename ?? 'question.png',
+                mime_type: image.mime_type ?? 'image/png',
               }))
-            : (q.source_images ?? []).map((url) => ({
+            : (q.source_images ?? []).map(url => ({
                 base64: null,
                 url,
-                filename: "question.png",
-                mime_type: "image/png",
+                filename: 'question.png',
+                mime_type: 'image/png',
               })),
         language: judgeLanguage,
       },
       {
-        onChunk: (chunk) => {
-          const text = (judgeTextsRef.current.get(idx) ?? "") + chunk;
-          judgeTextsRef.current.set(idx, text);
-          setJudgments((prev) => {
-            const current = prev[idx] ?? EMPTY_JUDGMENT;
+        onChunk: chunk => {
+          const text = (judgeTextsRef.current.get(idx) ?? '') + chunk
+          judgeTextsRef.current.set(idx, text)
+          setJudgments(prev => {
+            const current = prev[idx] ?? EMPTY_JUDGMENT
             return {
               ...prev,
               [idx]: { ...current, text },
-            };
-          });
+            }
+          })
         },
-        onDone: (streamedText) => {
-          const finalText =
-            streamedText || judgeTextsRef.current.get(idx) || "";
-          setJudgments((prev) => {
-            const current = prev[idx] ?? EMPTY_JUDGMENT;
+        onDone: streamedText => {
+          const finalText = streamedText || judgeTextsRef.current.get(idx) || ''
+          setJudgments(prev => {
+            const current = prev[idx] ?? EMPTY_JUDGMENT
             return {
               ...prev,
               [idx]: { ...current, isStreaming: false },
-            };
-          });
-          judgeHandlesRef.current.delete(idx);
+            }
+          })
+          judgeHandlesRef.current.delete(idx)
           // Persist the AI judgment text on the notebook entry so it
           // survives a page refresh. Best-effort — a failed write just
           // means the next reload won't have the judgment cached.
-          const key = q ? getQuestionKey(q, idx) : "";
-          const eId = key ? entryIds[key] : undefined;
+          const key = q ? getQuestionKey(q, idx) : ''
+          const eId = key ? entryIds[key] : undefined
           if (finalText.trim().length > 0) {
             if (eId) {
-              void updateNotebookEntry(eId, { ai_judgment: finalText }).catch(
-                () => {},
-              );
+              void updateNotebookEntry(eId, { ai_judgment: finalText }).catch(() => {})
             } else if (q) {
               // Submission and judge can complete in either order. If the
               // first upsert has not returned its row id yet, create/update
               // the same Question Bank entry before attaching the judgment.
-              void upsertSingleQuestion(q, answers[idx] ?? EMPTY_ANSWER, idx).then(
-                (createdEntry) => {
-                  if (createdEntry?.id) {
-                    void updateNotebookEntry(createdEntry.id, {
-                      ai_judgment: finalText,
-                    }).catch(() => {});
-                  }
-                },
-              );
+              void upsertSingleQuestion(q, answers[idx] ?? EMPTY_ANSWER, idx).then(createdEntry => {
+                if (createdEntry?.id) {
+                  void updateNotebookEntry(createdEntry.id, {
+                    ai_judgment: finalText,
+                  }).catch(() => {})
+                }
+              })
             }
           }
         },
-        onError: (message) => {
-          setJudgments((prev) => {
-            const current = prev[idx] ?? EMPTY_JUDGMENT;
+        onError: message => {
+          setJudgments(prev => {
+            const current = prev[idx] ?? EMPTY_JUDGMENT
             return {
               ...prev,
               [idx]: { ...current, isStreaming: false, error: message },
-            };
-          });
-          judgeHandlesRef.current.delete(idx);
+            }
+          })
+          judgeHandlesRef.current.delete(idx)
         },
-      },
-    );
-    judgeHandlesRef.current.set(idx, handle);
-  }, [answers, entryIds, idx, language, q, upsertSingleQuestion]);
+      }
+    )
+    judgeHandlesRef.current.set(idx, handle)
+  }, [answers, entryIds, idx, language, q, upsertSingleQuestion])
 
   const handleToggleAnswerView = useCallback(
     (view: AnswerView) => {
-      setAnswerViews((prev) => ({ ...prev, [idx]: view }));
+      setAnswerViews(prev => ({ ...prev, [idx]: view }))
     },
-    [idx],
-  );
+    [idx]
+  )
 
   // ── Follow-up (right-side viewer tab) ─────────────────────────
   //
@@ -862,16 +816,16 @@ export default function QuizViewer({
   // message-count badge.
 
   const handleOpenFollowup = useCallback(() => {
-    if (!q) return;
-    const key = getQuestionKey(q, idx);
-    const answer = answers[idx] ?? EMPTY_ANSWER;
-    const judgment = judgments[idx] ?? EMPTY_JUDGMENT;
+    if (!q) return
+    const key = getQuestionKey(q, idx)
+    const answer = answers[idx] ?? EMPTY_ANSWER
+    const judgment = judgments[idx] ?? EMPTY_JUDGMENT
     followupController.openFollowupTab({
       questionKey: key,
       question: q,
       userAnswer: getUserAnswer(q, answer),
       isCorrect: isAutoGradable(q) ? isAnswerCorrect(q, answer) : null,
-      answerImages: answer.images.map((image) => ({
+      answerImages: answer.images.map(image => ({
         id: image.id,
         base64: image.base64,
         url: image.url,
@@ -884,8 +838,8 @@ export default function QuizViewer({
       notebookEntryId: entryIds[key] ?? null,
       followupSessionId: followupSessionIds[key] ?? null,
       language,
-      tabLabel: `Q${idx + 1} · ${t("Follow-up")}`,
-    });
+      tabLabel: `Q${idx + 1} · ${t('Follow-up')}`,
+    })
   }, [
     answers,
     entryIds,
@@ -897,23 +851,23 @@ export default function QuizViewer({
     q,
     sessionId,
     t,
-  ]);
+  ])
 
-  if (!q) return null;
+  if (!q) return null
 
-  const currentEntryId = entryIds[questionKey];
-  const currentBookmarked = bookmarked[questionKey] ?? false;
-  const showCategoryDropdown = categoryDropdownKey === questionKey;
+  const currentEntryId = entryIds[questionKey]
+  const currentBookmarked = bookmarked[questionKey] ?? false
+  const showCategoryDropdown = categoryDropdownKey === questionKey
 
   return (
     <div className="overflow-hidden rounded-xl border border-[var(--border)] bg-[var(--card)]">
       <div className="flex items-center gap-2 border-b border-[var(--border)] px-3 py-2">
         <button
           type="button"
-          onClick={() => setIdx((value) => Math.max(0, value - 1))}
+          onClick={() => setIdx(value => Math.max(0, value - 1))}
           disabled={idx === 0}
-          title={t("Previous")}
-          aria-label={t("Previous")}
+          title={t('Previous')}
+          aria-label={t('Previous')}
           className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-[var(--border)] bg-[var(--muted)]/60 text-[var(--foreground)] shadow-sm transition-colors hover:border-[var(--primary)] hover:bg-[var(--primary)]/10 hover:text-[var(--primary)] disabled:cursor-not-allowed disabled:border-[var(--border)] disabled:bg-transparent disabled:text-[var(--muted-foreground)] disabled:opacity-40 disabled:hover:bg-transparent"
         >
           <ChevronLeft size={18} strokeWidth={2.5} />
@@ -923,42 +877,36 @@ export default function QuizViewer({
         </span>
         <div className="flex flex-1 flex-wrap gap-1">
           {questions.map((question, questionIndex) => {
-            const answer = answers[questionIndex];
-            const isCurrent = questionIndex === idx;
-            const done = answer?.submitted;
+            const answer = answers[questionIndex]
+            const isCurrent = questionIndex === idx
+            const done = answer?.submitted
             const hasThread =
-              Boolean(
-                followupThreads[getQuestionKey(question, questionIndex)]
-                  ?.sessionId,
-              ) ||
-              Boolean(
-                followupThreads[getQuestionKey(question, questionIndex)]
-                  ?.messages.length,
-              );
+              Boolean(followupThreads[getQuestionKey(question, questionIndex)]?.sessionId) ||
+              Boolean(followupThreads[getQuestionKey(question, questionIndex)]?.messages.length)
             // Color the chip by correctness for auto-gradable types
             // (choice, concept, fill_in_blank). For open-ended types
             // (short_answer / written / coding) we'd be guessing — keep
             // the neutral "completed" tint so we don't mark a thoughtful
             // answer red just because it doesn't match the reference
             // string verbatim.
-            const autoGradable = isAutoGradable(question);
-            const correctness: "correct" | "incorrect" | null =
+            const autoGradable = isAutoGradable(question)
+            const correctness: 'correct' | 'incorrect' | null =
               done && answer && autoGradable
                 ? isAnswerCorrect(question, answer)
-                  ? "correct"
-                  : "incorrect"
-                : null;
+                  ? 'correct'
+                  : 'incorrect'
+                : null
             const baseChip =
-              "flex h-6 w-6 items-center justify-center rounded-full text-[10px] font-semibold transition-all";
+              'flex h-6 w-6 items-center justify-center rounded-full text-[10px] font-semibold transition-all'
             const chipClass = isCurrent
               ? `${baseChip} bg-[var(--primary)] text-white shadow-sm`
-              : correctness === "correct"
+              : correctness === 'correct'
                 ? `${baseChip} bg-green-100 text-green-700 hover:bg-green-200 dark:bg-green-900/40 dark:text-green-300`
-                : correctness === "incorrect"
+                : correctness === 'incorrect'
                   ? `${baseChip} bg-red-100 text-red-700 hover:bg-red-200 dark:bg-red-900/40 dark:text-red-300`
                   : done
                     ? `${baseChip} bg-[var(--primary)]/15 text-[var(--primary)]`
-                    : `${baseChip} bg-[var(--muted)] text-[var(--muted-foreground)] hover:bg-[var(--border)]`;
+                    : `${baseChip} bg-[var(--muted)] text-[var(--muted-foreground)] hover:bg-[var(--border)]`
             return (
               <button
                 key={question.question_id || questionIndex}
@@ -989,15 +937,15 @@ export default function QuizViewer({
                   questionIndex + 1
                 )}
               </button>
-            );
+            )
           })}
         </div>
         <button
           type="button"
-          onClick={() => setIdx((value) => Math.min(total - 1, value + 1))}
+          onClick={() => setIdx(value => Math.min(total - 1, value + 1))}
           disabled={idx === total - 1}
-          title={t("Next")}
-          aria-label={t("Next")}
+          title={t('Next')}
+          aria-label={t('Next')}
           className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-[var(--border)] bg-[var(--muted)]/60 text-[var(--foreground)] shadow-sm transition-colors hover:border-[var(--primary)] hover:bg-[var(--primary)]/10 hover:text-[var(--primary)] disabled:cursor-not-allowed disabled:border-[var(--border)] disabled:bg-transparent disabled:text-[var(--muted-foreground)] disabled:opacity-40 disabled:hover:bg-transparent"
         >
           <ChevronRight size={18} strokeWidth={2.5} />
@@ -1019,11 +967,11 @@ export default function QuizViewer({
             {q.difficulty && (
               <span
                 className={`rounded-md px-1.5 py-0.5 text-[10px] font-medium uppercase ${
-                  q.difficulty === "hard"
-                    ? "bg-red-50 text-red-600 dark:bg-red-950/30 dark:text-red-400"
-                    : q.difficulty === "medium"
-                      ? "bg-amber-50 text-amber-600 dark:bg-amber-950/30 dark:text-amber-400"
-                      : "bg-green-50 text-green-600 dark:bg-green-950/30 dark:text-green-400"
+                  q.difficulty === 'hard'
+                    ? 'bg-red-50 text-red-600 dark:bg-red-950/30 dark:text-red-400'
+                    : q.difficulty === 'medium'
+                      ? 'bg-amber-50 text-amber-600 dark:bg-amber-950/30 dark:text-amber-400'
+                      : 'bg-green-50 text-green-600 dark:bg-green-950/30 dark:text-green-400'
                 }`}
               >
                 {q.difficulty}
@@ -1032,13 +980,11 @@ export default function QuizViewer({
             <span className="rounded-md bg-[var(--muted)] px-1.5 py-0.5 text-[10px] font-medium text-[var(--muted-foreground)]">
               {q.question_type}
             </span>
-            {q.source_type === "original_paper" && (
+            {q.source_type === 'original_paper' && (
               <span className="max-w-[320px] truncate rounded-md bg-blue-100 px-1.5 py-0.5 text-[10px] font-medium text-blue-700 dark:bg-blue-950/30 dark:text-blue-300">
-                {examMode ? t("Exam") : t("Original Paper")}
-                {q.paper_display_name ? ` · ${q.paper_display_name}` : ""}
-                {q.source_question_number
-                  ? ` · Q${q.source_question_number}`
-                  : ""}
+                {examMode ? t('Exam') : t('Original Paper')}
+                {q.paper_display_name ? ` · ${q.paper_display_name}` : ''}
+                {q.source_question_number ? ` · Q${q.source_question_number}` : ''}
               </span>
             )}
           </div>
@@ -1048,44 +994,43 @@ export default function QuizViewer({
               <button
                 onClick={handleToggleBookmark}
                 disabled={!currentEntryId}
-                title={currentBookmarked ? t("Remove Bookmark") : t("Bookmark")}
+                title={currentBookmarked ? t('Remove Bookmark') : t('Bookmark')}
                 className={`rounded-lg p-1.5 transition-all disabled:opacity-30 ${
                   currentBookmarked
-                    ? "scale-110 text-amber-500 dark:text-amber-400"
-                    : "text-[var(--muted-foreground)] hover:text-amber-500 dark:hover:text-amber-400"
+                    ? 'scale-110 text-amber-500 dark:text-amber-400'
+                    : 'text-[var(--muted-foreground)] hover:text-amber-500 dark:hover:text-amber-400'
                 }`}
               >
                 <Bookmark
                   size={18}
                   strokeWidth={currentBookmarked ? 2.5 : 1.8}
-                  fill={currentBookmarked ? "currentColor" : "none"}
+                  fill={currentBookmarked ? 'currentColor' : 'none'}
                 />
               </button>
               <button
                 onClick={handleOpenCategoryDropdown}
                 disabled={!currentEntryId}
-                title={t("Add to Category")}
+                title={t('Add to Category')}
                 className="rounded-lg p-1.5 text-[var(--muted-foreground)] transition-colors hover:text-[var(--foreground)] disabled:opacity-30"
               >
                 <FolderPlus size={16} />
               </button>
               <button
                 onClick={handleOpenFollowup}
-                title={t("Follow-up Chat")}
+                title={t('Follow-up Chat')}
                 className="ml-1 inline-flex items-center gap-1 rounded-lg border border-[var(--primary)]/60 bg-[var(--primary)]/10 px-2 py-1 text-[12px] font-medium text-[var(--primary)] transition-colors hover:bg-[var(--primary)]/15"
               >
                 <MessageSquarePlus size={13} />
-                {t("Follow-up")}
+                {t('Follow-up')}
                 {(() => {
                   const tcount =
-                    followupThreads[questionKey]?.messages.filter(
-                      (m) => m.role !== "system",
-                    ).length ?? 0;
+                    followupThreads[questionKey]?.messages.filter(m => m.role !== 'system')
+                      .length ?? 0
                   return tcount > 0 ? (
                     <span className="rounded-full bg-[var(--primary)]/25 px-1.5 py-0 text-[10px]">
                       {tcount}
                     </span>
-                  ) : null;
+                  ) : null
                 })()}
               </button>
 
@@ -1093,7 +1038,7 @@ export default function QuizViewer({
                 <div className="absolute right-0 top-8 z-20 w-48 rounded-lg border border-[var(--border)] bg-[var(--card)] py-1 shadow-lg">
                   {categories.length > 0 && (
                     <div className="max-h-[160px] overflow-y-auto">
-                      {categories.map((cat) => (
+                      {categories.map(cat => (
                         <button
                           key={cat.id}
                           disabled={categoryBusy}
@@ -1109,11 +1054,9 @@ export default function QuizViewer({
                     <div className="flex items-center gap-1">
                       <input
                         value={newCategoryName}
-                        onChange={(e) => setNewCategoryName(e.target.value)}
-                        onKeyDown={(e) =>
-                          e.key === "Enter" && void handleCreateAndAdd()
-                        }
-                        placeholder={t("New category...")}
+                        onChange={e => setNewCategoryName(e.target.value)}
+                        onKeyDown={e => e.key === 'Enter' && void handleCreateAndAdd()}
+                        placeholder={t('New category...')}
                         className="flex-1 rounded border border-[var(--border)] bg-[var(--background)] px-2 py-1 text-[11px] text-[var(--foreground)] outline-none placeholder:text-[var(--muted-foreground)]"
                       />
                       <button
@@ -1146,16 +1089,16 @@ export default function QuizViewer({
         {q.source_images && q.source_images.length > 0 && (
           <div className="mb-3 grid gap-2 sm:grid-cols-2">
             {q.source_images.map((image, imageIndex) => {
-              const src = resolveImageSrc(image);
-              if (!src) return null;
+              const src = resolveImageSrc(image)
+              if (!src) return null
               return (
                 <img
                   key={`${image}-${imageIndex}`}
                   src={src}
-                  alt={`${t("Original Paper image")} ${imageIndex + 1}`}
+                  alt={`${t('Original Paper image')} ${imageIndex + 1}`}
                   className="max-h-72 w-full rounded-md border border-[var(--border)] bg-[var(--background)] object-contain"
                 />
-              );
+              )
             })}
           </div>
         )}
@@ -1164,35 +1107,35 @@ export default function QuizViewer({
           <div className="space-y-1.5">
             {Object.entries(q.options!).map(([key, text]) => {
               const selectedKeys = new Set(
-                (ans.selected ?? "")
-                  .split(",")
-                  .map((value) => value.trim().toUpperCase())
-                  .filter(Boolean),
-              );
+                (ans.selected ?? '')
+                  .split(',')
+                  .map(value => value.trim().toUpperCase())
+                  .filter(Boolean)
+              )
               const isSelected = q.is_multi_select
                 ? selectedKeys.has(key.toUpperCase())
-                : ans.selected === key;
+                : ans.selected === key
               const correctKeys = new Set(
                 q.correct_answer
                   .split(/[,\s]+/u)
-                  .map((value) => value.trim().toUpperCase())
-                  .filter(Boolean),
-              );
-              const isCorrectOption = correctKeys.has(key.toUpperCase());
-              const showFeedback = ans.submitted;
+                  .map(value => value.trim().toUpperCase())
+                  .filter(Boolean)
+              )
+              const isCorrectOption = correctKeys.has(key.toUpperCase())
+              const showFeedback = ans.submitted
 
               let optionClass =
-                "border-[var(--border)] bg-[var(--background)] text-[var(--foreground)] hover:border-[var(--primary)]/30 hover:bg-[var(--primary)]/[0.02]";
+                'border-[var(--border)] bg-[var(--background)] text-[var(--foreground)] hover:border-[var(--primary)]/30 hover:bg-[var(--primary)]/[0.02]'
 
               if (isSelected && !showFeedback) {
                 optionClass =
-                  "border-[var(--primary)] bg-[var(--primary)]/[0.06] text-[var(--foreground)] ring-1 ring-[var(--primary)]/20";
+                  'border-[var(--primary)] bg-[var(--primary)]/[0.06] text-[var(--foreground)] ring-1 ring-[var(--primary)]/20'
               } else if (showFeedback && isCorrectOption) {
                 optionClass =
-                  "border-green-500 bg-green-50 text-green-800 dark:bg-green-950/20 dark:text-green-300 dark:border-green-700";
+                  'border-green-500 bg-green-50 text-green-800 dark:bg-green-950/20 dark:text-green-300 dark:border-green-700'
               } else if (showFeedback && isSelected && !isCorrectOption) {
                 optionClass =
-                  "border-red-400 bg-red-50 text-red-700 dark:bg-red-950/20 dark:text-red-300 dark:border-red-700";
+                  'border-red-400 bg-red-50 text-red-700 dark:bg-red-950/20 dark:text-red-300 dark:border-red-700'
               }
 
               return (
@@ -1201,66 +1144,58 @@ export default function QuizViewer({
                   disabled={ans.submitted}
                   onClick={() => {
                     if (!q.is_multi_select) {
-                      updateAnswer({ selected: key });
-                      return;
+                      updateAnswer({ selected: key })
+                      return
                     }
-                    const next = new Set(selectedKeys);
-                    const normalizedKey = key.toUpperCase();
-                    if (next.has(normalizedKey)) next.delete(normalizedKey);
-                    else next.add(normalizedKey);
+                    const next = new Set(selectedKeys)
+                    const normalizedKey = key.toUpperCase()
+                    if (next.has(normalizedKey)) next.delete(normalizedKey)
+                    else next.add(normalizedKey)
                     updateAnswer({
-                      selected: next.size > 0 ? Array.from(next).join(",") : null,
-                    });
+                      selected: next.size > 0 ? Array.from(next).join(',') : null,
+                    })
                   }}
                   className={`flex w-full items-start gap-2.5 rounded-lg border px-3 py-2 text-left text-[13px] transition-all ${optionClass}`}
                 >
                   <span
                     className={`mt-[1px] flex h-5 w-5 shrink-0 items-center justify-center rounded-full border text-[11px] font-bold ${
                       isSelected && !showFeedback
-                        ? "border-[var(--primary)] bg-[var(--primary)] text-white"
+                        ? 'border-[var(--primary)] bg-[var(--primary)] text-white'
                         : showFeedback && isCorrectOption
-                          ? "border-green-500 bg-green-500 text-white"
+                          ? 'border-green-500 bg-green-500 text-white'
                           : showFeedback && isSelected && !isCorrectOption
-                            ? "border-red-400 bg-red-400 text-white"
-                            : "border-[var(--border)] text-[var(--muted-foreground)]"
+                            ? 'border-red-400 bg-red-400 text-white'
+                            : 'border-[var(--border)] text-[var(--muted-foreground)]'
                     }`}
                   >
-                    {showFeedback && isCorrectOption ? (
-                      <Check size={11} />
-                    ) : (
-                      key
-                    )}
+                    {showFeedback && isCorrectOption ? <Check size={11} /> : key}
                   </span>
                   <div className="min-w-0 leading-relaxed">
-                    <MarkdownRenderer
-                      content={text}
-                      variant="compact"
-                      enableMath
-                    />
+                    <MarkdownRenderer content={text} variant="compact" enableMath />
                   </div>
                 </button>
-              );
+              )
             })}
           </div>
         ) : isConcept ? (
           // Concept (true/false) — two large buttons.
           (() => {
-            const correctTF = resolveConceptAnswer(q.correct_answer);
-            const showFeedback = ans.submitted;
-            const renderTFButton = (key: "true" | "false", label: string) => {
-              const isSelected = ans.selected === key;
-              const isCorrect = correctTF === key;
+            const correctTF = resolveConceptAnswer(q.correct_answer)
+            const showFeedback = ans.submitted
+            const renderTFButton = (key: 'true' | 'false', label: string) => {
+              const isSelected = ans.selected === key
+              const isCorrect = correctTF === key
               let cls =
-                "border-[var(--border)] bg-[var(--background)] text-[var(--foreground)] hover:border-[var(--primary)]/30";
+                'border-[var(--border)] bg-[var(--background)] text-[var(--foreground)] hover:border-[var(--primary)]/30'
               if (isSelected && !showFeedback) {
                 cls =
-                  "border-[var(--primary)] bg-[var(--primary)]/[0.08] text-[var(--foreground)] ring-1 ring-[var(--primary)]/25";
+                  'border-[var(--primary)] bg-[var(--primary)]/[0.08] text-[var(--foreground)] ring-1 ring-[var(--primary)]/25'
               } else if (showFeedback && isCorrect) {
                 cls =
-                  "border-green-500 bg-green-50 text-green-800 dark:bg-green-950/20 dark:text-green-300 dark:border-green-700";
+                  'border-green-500 bg-green-50 text-green-800 dark:bg-green-950/20 dark:text-green-300 dark:border-green-700'
               } else if (showFeedback && isSelected && !isCorrect) {
                 cls =
-                  "border-red-400 bg-red-50 text-red-700 dark:bg-red-950/20 dark:text-red-300 dark:border-red-700";
+                  'border-red-400 bg-red-50 text-red-700 dark:bg-red-950/20 dark:text-red-300 dark:border-red-700'
               }
               return (
                 <button
@@ -1272,14 +1207,14 @@ export default function QuizViewer({
                 >
                   {label}
                 </button>
-              );
-            };
+              )
+            }
             return (
               <div className="flex gap-2">
-                {renderTFButton("true", t("True"))}
-                {renderTFButton("false", t("False"))}
+                {renderTFButton('true', t('True'))}
+                {renderTFButton('false', t('False'))}
               </div>
-            );
+            )
           })()
         ) : isFillBlank ? (
           // Fill-in-the-blank — single-line input. The question text
@@ -1288,18 +1223,18 @@ export default function QuizViewer({
           // where they type the missing word/phrase.
           <div>
             <div className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-[var(--muted-foreground)]/70">
-              {t("Fill in the Blank")}
+              {t('Fill in the Blank')}
             </div>
             <input
               type="text"
               value={ans.typed}
-              onChange={(event) => updateAnswer({ typed: event.target.value })}
+              onChange={event => updateAnswer({ typed: event.target.value })}
               disabled={ans.submitted}
-              placeholder={t("Type your answer...")}
+              placeholder={t('Type your answer...')}
               className={`w-full rounded-lg border px-3 py-2 text-[13px] outline-none transition-colors placeholder:text-[var(--muted-foreground)] ${
                 ans.submitted
-                  ? "border-[var(--border)] bg-[var(--muted)] text-[var(--foreground)]"
-                  : "border-[var(--border)] bg-[var(--background)] text-[var(--foreground)] focus:border-[var(--primary)]/40"
+                  ? 'border-[var(--border)] bg-[var(--muted)] text-[var(--foreground)]'
+                  : 'border-[var(--border)] bg-[var(--background)] text-[var(--foreground)] focus:border-[var(--primary)]/40'
               }`}
             />
           </div>
@@ -1310,25 +1245,19 @@ export default function QuizViewer({
           <div>
             <textarea
               value={ans.typed}
-              onChange={(event) => updateAnswer({ typed: event.target.value })}
+              onChange={event => updateAnswer({ typed: event.target.value })}
               disabled={ans.submitted}
-              rows={
-                q.question_type === "coding"
-                  ? 6
-                  : q.question_type === "written"
-                    ? 5
-                    : 3
-              }
+              rows={q.question_type === 'coding' ? 6 : q.question_type === 'written' ? 5 : 3}
               placeholder={
-                q.question_type === "coding"
-                  ? t("Write your code here...")
-                  : t("Type your answer...")
+                q.question_type === 'coding'
+                  ? t('Write your code here...')
+                  : t('Type your answer...')
               }
               className={`w-full resize-y rounded-lg border px-3 py-2 text-[13px] outline-none transition-colors placeholder:text-[var(--muted-foreground)] ${
                 ans.submitted
-                  ? "border-[var(--border)] bg-[var(--muted)] text-[var(--foreground)]"
-                  : "border-[var(--border)] bg-[var(--background)] text-[var(--foreground)] focus:border-[var(--primary)]/40"
-              } ${q.question_type === "coding" ? "font-mono" : ""}`}
+                  ? 'border-[var(--border)] bg-[var(--muted)] text-[var(--foreground)]'
+                  : 'border-[var(--border)] bg-[var(--background)] text-[var(--foreground)] focus:border-[var(--primary)]/40'
+              } ${q.question_type === 'coding' ? 'font-mono' : ''}`}
             />
           </div>
         )}
@@ -1344,14 +1273,13 @@ export default function QuizViewer({
               type="file"
               accept="image/*"
               multiple
-              onChange={(event) => void handleImageChange(event)}
+              onChange={event => void handleImageChange(event)}
               className="hidden"
             />
             {ans.images.length > 0 && (
               <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-4">
-                {ans.images.map((image) => {
-                  const previewSrc =
-                    image.previewUrl ?? resolveImageSrc(image.url);
+                {ans.images.map(image => {
+                  const previewSrc = image.previewUrl ?? resolveImageSrc(image.url)
                   return (
                     <div
                       key={image.id}
@@ -1376,14 +1304,14 @@ export default function QuizViewer({
                         <button
                           type="button"
                           onClick={() => handleRemoveImage(image.id)}
-                          title={t("Remove image")}
+                          title={t('Remove image')}
                           className="absolute right-1 top-1 inline-flex h-5 w-5 items-center justify-center rounded-full bg-black/55 text-white opacity-0 transition-opacity group-hover:opacity-100"
                         >
                           <X size={11} />
                         </button>
                       )}
                     </div>
-                  );
+                  )
                 })}
               </div>
             )}
@@ -1395,8 +1323,8 @@ export default function QuizViewer({
               >
                 <ImagePlus size={13} />
                 {ans.images.length === 0
-                  ? t("Attach an image as your answer")
-                  : t("Add another image")}
+                  ? t('Attach an image as your answer')
+                  : t('Add another image')}
               </button>
             )}
           </div>
@@ -1407,17 +1335,17 @@ export default function QuizViewer({
             <button
               onClick={handleSubmit}
               disabled={(() => {
-                if (isChoice || isConcept) return !ans.selected;
+                if (isChoice || isConcept) return !ans.selected
                 // For free-text / fill-blank, require a typed answer; for
                 // non-auto-gradable types, an image attachment also counts.
-                if (ans.typed.trim()) return false;
-                if (!isGradable && ans.images.length > 0) return false;
-                return true;
+                if (ans.typed.trim()) return false
+                if (!isGradable && ans.images.length > 0) return false
+                return true
               })()}
               className="inline-flex items-center gap-1.5 rounded-lg bg-[var(--primary)] px-3 py-1.5 text-[12px] font-medium text-white transition-opacity disabled:opacity-30"
             >
               <Eye size={13} />
-              {t("Check Answer")}
+              {t('Check Answer')}
             </button>
           ) : (
             <>
@@ -1425,11 +1353,11 @@ export default function QuizViewer({
                 <span
                   className={`rounded-md px-2 py-0.5 text-[11px] font-semibold ${
                     isCorrect
-                      ? "bg-green-100 text-green-700 dark:bg-green-950/30 dark:text-green-400"
-                      : "bg-red-100 text-red-700 dark:bg-red-950/30 dark:text-red-400"
+                      ? 'bg-green-100 text-green-700 dark:bg-green-950/30 dark:text-green-400'
+                      : 'bg-red-100 text-red-700 dark:bg-red-950/30 dark:text-red-400'
                   }`}
                 >
-                  {isCorrect ? t("Correct") : t("Incorrect")}
+                  {isCorrect ? t('Correct') : t('Incorrect')}
                 </span>
               )}
               <button
@@ -1437,11 +1365,11 @@ export default function QuizViewer({
                 className="inline-flex items-center gap-1 rounded-lg bg-[var(--muted)] px-2.5 py-1.5 text-[12px] font-medium text-[var(--muted-foreground)] transition-colors hover:text-[var(--foreground)]"
               >
                 <RotateCcw size={11} />
-                {t("Retry")}
+                {t('Retry')}
               </button>
               {(() => {
-                const j = judgments[idx] ?? EMPTY_JUDGMENT;
-                const hasJudgment = j.text.length > 0 || j.error !== null;
+                const j = judgments[idx] ?? EMPTY_JUDGMENT
+                const hasJudgment = j.text.length > 0 || j.error !== null
                 return (
                   <button
                     onClick={handleAiJudge}
@@ -1453,13 +1381,9 @@ export default function QuizViewer({
                     ) : (
                       <Sparkles size={11} />
                     )}
-                    {j.isStreaming
-                      ? t("Judging...")
-                      : hasJudgment
-                        ? t("Re-judge")
-                        : t("AI Judge")}
+                    {j.isStreaming ? t('Judging...') : hasJudgment ? t('Re-judge') : t('AI Judge')}
                   </button>
-                );
+                )
               })()}
             </>
           )}
@@ -1467,23 +1391,19 @@ export default function QuizViewer({
 
         {ans.submitted &&
           (() => {
-            const judgment = judgments[idx] ?? EMPTY_JUDGMENT;
+            const judgment = judgments[idx] ?? EMPTY_JUDGMENT
             const hasJudgment =
-              judgment.text.length > 0 ||
-              judgment.error !== null ||
-              judgment.isStreaming;
+              judgment.text.length > 0 || judgment.error !== null || judgment.isStreaming
             // Default to the reference tab; flip to the judgment tab when
             // the learner first triggers a judge run (set in handleAiJudge).
-            const view: AnswerView =
-              answerViews[idx] ?? (hasJudgment ? "judgment" : "reference");
-            const showReferenceAnswer =
-              !isChoice && !isConcept && !!q.correct_answer;
-            const showAnyReference = showReferenceAnswer || !!q.explanation;
-            if (!showAnyReference && !hasJudgment) return null;
+            const view: AnswerView = answerViews[idx] ?? (hasJudgment ? 'judgment' : 'reference')
+            const showReferenceAnswer = !isChoice && !isConcept && !!q.correct_answer
+            const showAnyReference = showReferenceAnswer || !!q.explanation
+            if (!showAnyReference && !hasJudgment) return null
 
-            const collapsed = reviewCollapsed[idx] === true;
+            const collapsed = reviewCollapsed[idx] === true
             const toggleCollapsed = () =>
-              setReviewCollapsed((prev) => ({ ...prev, [idx]: !collapsed }));
+              setReviewCollapsed(prev => ({ ...prev, [idx]: !collapsed }))
 
             return (
               <div className="mt-3 space-y-2 rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 py-2.5">
@@ -1494,42 +1414,38 @@ export default function QuizViewer({
                   <div className="flex items-center gap-1 border-b border-[var(--border)]/70 pb-1.5">
                     <button
                       type="button"
-                      onClick={() => handleToggleAnswerView("reference")}
+                      onClick={() => handleToggleAnswerView('reference')}
                       className={`rounded-md px-2 py-0.5 text-[11px] font-medium transition-colors ${
-                        view === "reference"
-                          ? "bg-[var(--primary)]/12 text-[var(--primary)]"
-                          : "text-[var(--muted-foreground)] hover:text-[var(--foreground)]"
+                        view === 'reference'
+                          ? 'bg-[var(--primary)]/12 text-[var(--primary)]'
+                          : 'text-[var(--muted-foreground)] hover:text-[var(--foreground)]'
                       }`}
                     >
-                      {t("Reference Answer")}
+                      {t('Reference Answer')}
                     </button>
                     <button
                       type="button"
-                      onClick={() => handleToggleAnswerView("judgment")}
+                      onClick={() => handleToggleAnswerView('judgment')}
                       className={`inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-[11px] font-medium transition-colors ${
-                        view === "judgment"
-                          ? "bg-[var(--primary)]/12 text-[var(--primary)]"
-                          : "text-[var(--muted-foreground)] hover:text-[var(--foreground)]"
+                        view === 'judgment'
+                          ? 'bg-[var(--primary)]/12 text-[var(--primary)]'
+                          : 'text-[var(--muted-foreground)] hover:text-[var(--foreground)]'
                       }`}
                     >
                       <Sparkles size={10} />
-                      {t("AI Judgment")}
-                      {judgment.isStreaming && (
-                        <Loader2 size={10} className="animate-spin" />
-                      )}
+                      {t('AI Judgment')}
+                      {judgment.isStreaming && <Loader2 size={10} className="animate-spin" />}
                     </button>
                     <button
                       type="button"
                       onClick={toggleCollapsed}
-                      aria-label={collapsed ? t("Expand") : t("Collapse")}
-                      title={collapsed ? t("Expand") : t("Collapse")}
+                      aria-label={collapsed ? t('Expand') : t('Collapse')}
+                      title={collapsed ? t('Expand') : t('Collapse')}
                       className="ml-auto inline-flex h-5 w-5 items-center justify-center rounded-md text-[var(--muted-foreground)] transition-colors hover:bg-[var(--muted)] hover:text-[var(--foreground)]"
                     >
                       <ChevronDown
                         size={13}
-                        className={`transition-transform ${
-                          collapsed ? "-rotate-90" : ""
-                        }`}
+                        className={`transition-transform ${collapsed ? '-rotate-90' : ''}`}
                       />
                     </button>
                   </div>
@@ -1540,27 +1456,24 @@ export default function QuizViewer({
                     className="flex w-full items-center gap-1 pb-1.5 text-left"
                   >
                     <span className="text-[10px] font-semibold uppercase tracking-wider text-[var(--muted-foreground)]">
-                      {hasJudgment ? t("AI Judgment") : t("Reference Answer")}
+                      {hasJudgment ? t('AI Judgment') : t('Reference Answer')}
                     </span>
                     <ChevronDown
                       size={13}
                       className={`ml-auto text-[var(--muted-foreground)] transition-transform ${
-                        collapsed ? "-rotate-90" : ""
+                        collapsed ? '-rotate-90' : ''
                       }`}
                     />
                   </button>
                 )}
 
-                {collapsed ? null : hasJudgment && view === "judgment" ? (
+                {collapsed ? null : hasJudgment && view === 'judgment' ? (
                   <div>
                     <div className="mb-1 flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wider text-[var(--muted-foreground)]">
                       <Sparkles size={10} />
-                      {t("AI Judgment")}
+                      {t('AI Judgment')}
                       {judgment.isStreaming && (
-                        <Loader2
-                          size={10}
-                          className="animate-spin text-[var(--primary)]"
-                        />
+                        <Loader2 size={10} className="animate-spin text-[var(--primary)]" />
                       )}
                     </div>
                     {judgment.error ? (
@@ -1569,14 +1482,11 @@ export default function QuizViewer({
                       </div>
                     ) : judgment.text ? (
                       <div className="text-[13px] leading-relaxed text-[var(--foreground)]">
-                        <MarkdownRenderer
-                          content={judgment.text}
-                          variant="prose"
-                        />
+                        <MarkdownRenderer content={judgment.text} variant="prose" />
                       </div>
                     ) : (
                       <div className="text-[12px] text-[var(--muted-foreground)]">
-                        {t("Judging...")}
+                        {t('Judging...')}
                       </div>
                     )}
                   </div>
@@ -1585,13 +1495,13 @@ export default function QuizViewer({
                     {showReferenceAnswer && (
                       <div>
                         <div className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-[var(--muted-foreground)]">
-                          {t("Reference Answer")}
+                          {t('Reference Answer')}
                         </div>
                         <div className="text-[13px] leading-relaxed text-[var(--foreground)]">
                           <MarkdownRenderer
                             content={
-                              q.question_type === "coding" &&
-                              !q.correct_answer.trimStart().startsWith("```")
+                              q.question_type === 'coding' &&
+                              !q.correct_answer.trimStart().startsWith('```')
                                 ? `\`\`\`python\n${q.correct_answer}\n\`\`\``
                                 : q.correct_answer
                             }
@@ -1603,22 +1513,19 @@ export default function QuizViewer({
                     {q.explanation && (
                       <div>
                         <div className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-[var(--muted-foreground)]">
-                          {t("Explanation")}
+                          {t('Explanation')}
                         </div>
                         <div className="text-[13px] leading-relaxed text-[var(--muted-foreground)]">
-                          <MarkdownRenderer
-                            content={q.explanation}
-                            variant="prose"
-                          />
+                          <MarkdownRenderer content={q.explanation} variant="prose" />
                         </div>
                       </div>
                     )}
                   </>
                 )}
               </div>
-            );
+            )
           })()}
       </div>
     </div>
-  );
+  )
 }

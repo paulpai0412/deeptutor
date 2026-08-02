@@ -258,34 +258,19 @@ def _normalize_result(
         )
 
     if available_assets is not None:
-        image_by_page, image_sequence = _image_associations(blocks, available_assets)
         missing_block_images = _missing_block_image_references(blocks, available_assets)
         warnings.extend(
             f"Image asset '{reference}' referenced by the parser was not found."
             for reference in missing_block_images
         )
-        has_image_information = bool(available_assets or image_sequence or missing_block_images)
+        has_image_information = bool(available_assets or missing_block_images)
         used_assets: set[str] = set()
         if has_image_information and not vision_enabled:
             warnings.append(
-                "Vision is unavailable; image associations use page/block order and require manual review."
+                "Vision is unavailable; image associations were not inferred and require manual review."
             )
 
-        for index, question in enumerate(questions):
-            associated = list(question.get("images", []))
-            page = question.get("page")
-            page_images = image_by_page.get(page, []) if isinstance(page, int) else []
-            fallback = [name for name in page_images if name not in associated]
-            if not fallback and not associated and image_sequence:
-                if len(questions) == 1:
-                    fallback = list(image_sequence)
-                elif index < len(image_sequence):
-                    fallback = [image_sequence[index]]
-            if fallback:
-                question["images"] = _dedupe(associated + fallback)
-                question["warnings"].append(
-                    "Image association was inferred from page/block order; verify the image manually."
-                )
+        for question in questions:
             if question.get("images"):
                 used_assets.update(str(name) for name in question["images"])
             elif has_image_information:
@@ -473,36 +458,6 @@ def _missing_block_image_references(
                 if text not in missing:
                     missing.append(text)
     return missing
-
-
-def _image_associations(
-    blocks: list[dict[str, Any]] | None,
-    available_assets: list[str],
-) -> tuple[dict[int, list[str]], list[str]]:
-    by_page: dict[int, list[str]] = {}
-    sequence: list[str] = []
-    for block in blocks or []:
-        if not isinstance(block, dict):
-            continue
-        page = _block_page(block)
-        names = [
-            name
-            for name in (_resolve_asset_name(ref, available_assets) for ref in _block_image_refs(block))
-            if name
-        ]
-        for name in names:
-            if name not in sequence:
-                sequence.append(name)
-            if page is not None:
-                page_names = by_page.setdefault(page, [])
-                if name not in page_names:
-                    page_names.append(name)
-    # A parser may emit image files without a structured content list. Keep a
-    # stable order for the question-order fallback rather than dropping them.
-    for name in available_assets:
-        if name not in sequence:
-            sequence.append(name)
-    return by_page, sequence
 
 
 def _infer_question_page(

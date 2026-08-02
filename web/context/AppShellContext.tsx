@@ -24,10 +24,13 @@ import {
   CODE_BLOCK_WRAP_LONG_LINES_STORAGE_KEY,
   LANGUAGE_EVENT,
   LANGUAGE_STORAGE_KEY,
+  PET_EVENT,
+  PET_STORAGE_KEY,
   SIDEBAR_COLLAPSED_EVENT,
   SIDEBAR_COLLAPSED_STORAGE_KEY,
   normalizeCodeBlockShowLineNumbers,
   normalizeCodeBlockTheme,
+  normalizePet,
   normalizeCodeBlockWrapLongLines,
   normalizeLanguage,
   readStoredActiveSessionId,
@@ -35,15 +38,18 @@ import {
   readStoredCodeBlockTheme,
   readStoredCodeBlockWrapLongLines,
   readStoredLanguage,
+  readStoredPet,
   readStoredSidebarCollapsed,
   writeStoredActiveSessionId,
   writeStoredCodeBlockShowLineNumbers,
   writeStoredCodeBlockTheme,
   writeStoredCodeBlockWrapLongLines,
   writeStoredLanguage,
+  writeStoredPet,
   writeStoredSidebarCollapsed,
   type AppLanguage,
 } from "@/context/app-shell-storage";
+import { DEFAULT_PET_ID } from "@/lib/pets";
 
 interface AppShellContextValue {
   theme: Theme;
@@ -60,6 +66,9 @@ interface AppShellContextValue {
   setCodeBlockShowLineNumbers: (show: boolean) => void;
   codeBlockWrapLongLines: boolean;
   setCodeBlockWrapLongLines: (wrap: boolean) => void;
+  /** Ambient companion pet id ("disabled" hides it). */
+  pet: string;
+  setPet: (pet: string) => void;
 }
 
 const AppShellContext = createContext<AppShellContextValue | null>(null);
@@ -83,6 +92,9 @@ export function AppShellProvider({ children }: { children: React.ReactNode }) {
     useState<boolean>(() => readStoredCodeBlockShowLineNumbers());
   const [codeBlockWrapLongLines, setCodeBlockWrapLongLinesState] =
     useState<boolean>(() => readStoredCodeBlockWrapLongLines());
+  // Start with the catalog default to match SSR; hydrate from localStorage
+  // after mount (same contract as language).
+  const [pet, setPetState] = useState<string>(DEFAULT_PET_ID);
 
   useEffect(() => {
     // Hydrate client-only preferences after SSR-safe first render.
@@ -92,6 +104,7 @@ export function AppShellProvider({ children }: { children: React.ReactNode }) {
     setCodeBlockThemeState(readStoredCodeBlockTheme());
     setCodeBlockShowLineNumbersState(readStoredCodeBlockShowLineNumbers());
     setCodeBlockWrapLongLinesState(readStoredCodeBlockWrapLongLines());
+    setPetState(readStoredPet());
   }, []);
 
   useEffect(() => {
@@ -112,6 +125,9 @@ export function AppShellProvider({ children }: { children: React.ReactNode }) {
       }
       if (event.key === SIDEBAR_COLLAPSED_STORAGE_KEY) {
         setSidebarCollapsedState(event.newValue === "1");
+      }
+      if (event.key === PET_STORAGE_KEY) {
+        setPetState(normalizePet(event.newValue));
       }
       if (event.key === CODE_BLOCK_THEME_STORAGE_KEY) {
         setCodeBlockThemeState(normalizeCodeBlockTheme(event.newValue));
@@ -170,7 +186,15 @@ export function AppShellProvider({ children }: { children: React.ReactNode }) {
     window.addEventListener(LANGUAGE_EVENT, onLanguage);
     window.addEventListener(ACTIVE_SESSION_EVENT, onActiveSession);
     window.addEventListener(SIDEBAR_COLLAPSED_EVENT, onSidebarCollapsed);
+    const onPet = (event: Event) => {
+      const detail = (event as CustomEvent<{ pet?: string }>).detail;
+      if (detail?.pet !== undefined) {
+        setPetState(normalizePet(detail.pet));
+      }
+    };
+
     window.addEventListener(CODE_BLOCK_SETTINGS_EVENT, onCodeBlockSettings);
+    window.addEventListener(PET_EVENT, onPet);
 
     return () => {
       window.removeEventListener("storage", onStorage);
@@ -181,6 +205,7 @@ export function AppShellProvider({ children }: { children: React.ReactNode }) {
         CODE_BLOCK_SETTINGS_EVENT,
         onCodeBlockSettings,
       );
+      window.removeEventListener(PET_EVENT, onPet);
     };
   }, []);
 
@@ -220,6 +245,12 @@ export function AppShellProvider({ children }: { children: React.ReactNode }) {
     setCodeBlockWrapLongLinesState(wrap);
   }, []);
 
+  const setPet = useCallback((nextPet: string) => {
+    const normalizedPet = normalizePet(nextPet);
+    writeStoredPet(normalizedPet);
+    setPetState(normalizedPet);
+  }, []);
+
   const value = useMemo<AppShellContextValue>(
     () => ({
       theme,
@@ -236,6 +267,8 @@ export function AppShellProvider({ children }: { children: React.ReactNode }) {
       setCodeBlockShowLineNumbers,
       codeBlockWrapLongLines,
       setCodeBlockWrapLongLines,
+      pet,
+      setPet,
     }),
     [
       activeSessionId,
@@ -246,6 +279,8 @@ export function AppShellProvider({ children }: { children: React.ReactNode }) {
       setActiveSessionId,
       setCodeBlockShowLineNumbers,
       setCodeBlockTheme,
+      pet,
+      setPet,
       setCodeBlockWrapLongLines,
       setLanguage,
       setSidebarCollapsed,

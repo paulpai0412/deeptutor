@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import asyncio
 import io
+import json
 from typing import Any
 import wave
 
@@ -12,6 +14,7 @@ import pytest
 
 from deeptutor.api.routers import voice as voice_router
 from deeptutor.services.voice import VoiceProviderError
+from deeptutor.services.voice.context_snapshot import RealtimeContextSnapshot
 
 
 @pytest.fixture()
@@ -109,3 +112,983 @@ def test_stt_rejects_empty_upload(client: TestClient) -> None:
         files={"file": ("empty.webm", b"", "audio/webm")},
     )
     assert resp.status_code == 400
+
+
+def test_realtime_status_is_credential_free(client: TestClient) -> None:
+    response = client.get("/api/v1/voice/realtime/status")
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["provider"] == "openai_codex"
+    assert "access" not in str(payload).lower()
+    assert "authorization" not in str(payload).lower()
+    assert "bearer" not in str(payload).lower()
+
+
+class _RealtimeWebSocket:
+    def __init__(self) -> None:
+        self.incoming: asyncio.Queue[dict[str, object]] = asyncio.Queue()
+        self.sent: list[dict[str, object]] = []
+        self.closed = False
+        self.close_code: int | None = None
+
+    async def receive_json(self) -> dict[str, object]:
+        return await self.incoming.get()
+
+    async def send_json(self, payload: dict[str, object]) -> None:
+        self.sent.append(payload)
+
+    async def close(self, code: int = 1000) -> None:
+        self.closed = True
+        self.close_code = code
+
+
+class _StrictRealtimeWebSocket(_RealtimeWebSocket):
+    async def send_json(self, payload: dict[str, object]) -> None:
+        if self.closed:
+            raise RuntimeError('Cannot call "send" once a close message has been sent.')
+        await super().send_json(payload)
+
+
+class _RealtimeSideband:
+    def __init__(self) -> None:
+        self.incoming: asyncio.Queue[dict[str, object] | None] = asyncio.Queue()
+        self.speech: list[tuple[str, str]] = []
+        self.closed = False
+
+    async def events(self):
+        while True:
+            event = await self.incoming.get()
+            if event is None:
+                return
+            yield event
+
+    async def send_handoff_speech(self, handoff_id: str, text: str) -> None:
+        self.speech.append((handoff_id, text))
+
+    async def close(self) -> None:
+        self.closed = True
+        await self.incoming.put(None)
+
+
+class _RealtimeProvider:
+    def __init__(self, sideband: _RealtimeSideband) -> None:
+        self.sideband = sideband
+        self.session_ids: list[str] = []
+        self.call_options: list[dict[str, object]] = []
+
+    async def create_call(self, offer_sdp: str, *, session_id: str, **options: object):
+        from deeptutor.services.voice.realtime import CodexRealtimeCall
+
+        assert offer_sdp
+        self.session_ids.append(session_id)
+        self.call_options.append(options)
+        return CodexRealtimeCall(
+            answer_sdp="v=0\r\nm=audio 9 UDP/TLS/RTP/SAVPF 111\r\n",
+            call_id="rtc_controlled",
+            _sideband_headers={"Authorization": "Bearer controlled-secret"},
+        )
+
+    async def connect_sideband(self, call: object) -> _RealtimeSideband:
+        del call
+        return self.sideband
+
+
+class _RuntimeStore:
+    async def get_turn(self, turn_id: str) -> dict[str, str]:
+        return {"id": turn_id, "session_id": "chat-session"}
+
+
+class _DirectSessionStore:
+    def __init__(self) -> None:
+        self.messages: list[dict[str, object]] = []
+        self.next_id = 1
+
+    async def add_message(self, **payload: object) -> int:
+        record = dict(payload)
+        record["id"] = self.next_id
+        self.next_id += 1
+        self.messages.append(record)
+        return int(record["id"])
+
+
+class _TurnRuntime:
+    def __init__(self, *, wait_for_cancel: bool = False) -> None:
+        self.store = _RuntimeStore()
+        self.wait_for_cancel = wait_for_cancel
+        self.subscribed = asyncio.Event()
+        self.cancelled = asyncio.Event()
+        self.cancelled_turns: list[str] = []
+
+    async def subscribe_turn(self, turn_id: str):
+        del turn_id
+        self.subscribed.set()
+        if self.wait_for_cancel:
+            await self.cancelled.wait()
+            # Deliberately emit a late event: the voice bridge must suppress it.
+            yield {
+                "type": "content",
+                "content": "late response",
+                "metadata": {"call_kind": "llm_final_response"},
+            }
+            return
+        yield {
+            "type": "content",
+            "content": "DeepTutor answer",
+            "metadata": {"call_kind": "llm_final_response"},
+        }
+        yield {"type": "done"}
+
+    async def cancel_turn(self, turn_id: str) -> None:
+        self.cancelled_turns.append(turn_id)
+        self.cancelled.set()
+
+
+class _DelayedTurnRuntime(_TurnRuntime):
+    def __init__(self) -> None:
+        super().__init__()
+        self.release = asyncio.Event()
+
+    async def subscribe_turn(self, turn_id: str):
+        del turn_id
+        self.subscribed.set()
+        await self.release.wait()
+        yield {
+            "type": "content",
+            "content": "DeepTutor delayed answer",
+            "metadata": {"call_kind": "llm_final_response"},
+        }
+        yield {"type": "done"}
+
+
+class _StreamingTurnRuntime(_TurnRuntime):
+    def __init__(self) -> None:
+        super().__init__()
+        self.release = asyncio.Event()
+
+    async def subscribe_turn(self, turn_id: str):
+        del turn_id
+        self.subscribed.set()
+        metadata = {"call_id": "round-1", "call_kind": "agent_loop_round"}
+        yield {"type": "content", "content": "First ", "metadata": metadata}
+        await asyncio.sleep(0.21)
+        yield {"type": "content", "content": "partial. ", "metadata": metadata}
+        await self.release.wait()
+        yield {"type": "content", "content": "Final.", "metadata": metadata}
+        yield {
+            "type": "progress",
+            "metadata": {
+                **metadata,
+                "call_state": "complete",
+                "call_role": "finish",
+            },
+        }
+        yield {"type": "done"}
+
+
+async def _wait_for(predicate, *, timeout: float = 2.0) -> None:
+    async with asyncio.timeout(timeout):
+        while not predicate():
+            await asyncio.sleep(0.01)
+
+
+def _context_snapshot() -> RealtimeContextSnapshot:
+    return RealtimeContextSnapshot(
+        session_id="chat-session",
+        capability="chat",
+        language="en",
+        knowledge_bases=(),
+        direct_output_allowed=False,
+        instructions="controlled context",
+        initial_items=({"role": "developer", "text": "controlled context"},),
+    )
+
+
+async def _fake_context_snapshot(*_args: object, **_kwargs: object) -> RealtimeContextSnapshot:
+    return _context_snapshot()
+
+
+_DELEGATION_EVENT = {
+    "type": "delegation.created",
+    "item": {
+        "id": "delegation-1",
+        "type": "delegation",
+        "target": "client",
+        "content": [{"type": "input_text", "text": "Explain this"}],
+    },
+}
+
+
+@pytest.mark.asyncio
+async def test_realtime_bridge_preloads_context_before_creating_provider_call(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import deeptutor.services.session as session_services
+
+    ws = _RealtimeWebSocket()
+    sideband = _RealtimeSideband()
+    provider = _RealtimeProvider(sideband)
+    runtime = _TurnRuntime()
+    monkeypatch.setattr(voice_router, "CodexOAuthRealtimeProvider", lambda: provider)
+    monkeypatch.setattr(session_services, "get_turn_runtime_manager", lambda: runtime)
+    monkeypatch.setattr(
+        voice_router,
+        "build_realtime_context_snapshot",
+        _fake_context_snapshot,
+    )
+
+    await ws.incoming.put(
+        {
+            "type": "prepare",
+            "session_id": "chat-session",
+            "context": {"knowledge_bases": ["biology"]},
+        }
+    )
+    task = asyncio.create_task(voice_router._serve_codex_realtime(ws))
+    await _wait_for(lambda: any(message.get("type") == "context_ready" for message in ws.sent))
+
+    assert provider.session_ids == []
+    assert not any(message.get("type") == "webrtc_answer" for message in ws.sent)
+    assert (
+        next(message for message in ws.sent if message.get("type") == "context_ready")["session_id"]
+        == "chat-session"
+    )
+
+    await ws.incoming.put({"type": "start", "sdp": "controlled-offer"})
+    await _wait_for(lambda: any(message.get("type") == "webrtc_answer" for message in ws.sent))
+    assert provider.session_ids
+    await ws.incoming.put({"type": "stop"})
+    await task
+
+
+@pytest.mark.asyncio
+async def test_realtime_bridge_binds_committed_turn_and_returns_speakable_output(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import deeptutor.services.session as session_services
+
+    ws = _RealtimeWebSocket()
+    sideband = _RealtimeSideband()
+    provider = _RealtimeProvider(sideband)
+    runtime = _TurnRuntime()
+    store = _DirectSessionStore()
+    monkeypatch.setattr(voice_router, "get_session_store", lambda: store)
+    monkeypatch.setattr(voice_router, "CodexOAuthRealtimeProvider", lambda: provider)
+    monkeypatch.setattr(session_services, "get_turn_runtime_manager", lambda: runtime)
+    monkeypatch.setattr(
+        voice_router,
+        "build_realtime_context_snapshot",
+        _fake_context_snapshot,
+    )
+
+    await ws.incoming.put({"type": "start", "sdp": "controlled-offer"})
+    await sideband.incoming.put(_DELEGATION_EVENT)
+    task = asyncio.create_task(voice_router._serve_codex_realtime(ws))
+    await _wait_for(lambda: any(message.get("type") == "handoff" for message in ws.sent))
+    await sideband.incoming.put(_DELEGATION_EVENT)
+    await asyncio.sleep(0.05)
+    assert len([message for message in ws.sent if message.get("type") == "handoff"]) == 1
+    await ws.incoming.put(
+        {
+            "type": "turn_started",
+            "handoff_id": "delegation-1",
+            "turn_id": "turn-1",
+            "session_id": "chat-session",
+        }
+    )
+    await _wait_for(lambda: bool(sideband.speech))
+    assert any(message.get("type") == "playback_authorized" for message in ws.sent)
+    await ws.incoming.put({"type": "stop"})
+    await task
+
+    assert sideband.speech == [("delegation-1", "DeepTutor answer")]
+    assert not store.messages
+    assert provider.session_ids[0].startswith("deeptutor-")
+    assert provider.call_options[0]["instructions"] == "controlled context"
+    assert provider.call_options[0]["initial_items"] == (
+        {"role": "developer", "text": "controlled context"},
+    )
+    serialized = json.dumps(ws.sent)
+    assert "rtc_controlled" not in serialized
+    assert "controlled-secret" not in serialized
+    assert any(message.get("type") == "webrtc_answer" for message in ws.sent)
+    assert any(message.get("type") == "playback_authorized" for message in ws.sent)
+    assert not any(message.get("type") == "audio_output" for message in ws.sent)
+    assert ws.close_code == 1000
+
+
+@pytest.mark.asyncio
+async def test_realtime_bridge_streams_delegated_speech_before_turn_completion(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import deeptutor.services.session as session_services
+
+    ws = _RealtimeWebSocket()
+    sideband = _RealtimeSideband()
+    runtime = _StreamingTurnRuntime()
+    monkeypatch.setattr(
+        voice_router,
+        "CodexOAuthRealtimeProvider",
+        lambda: _RealtimeProvider(sideband),
+    )
+    monkeypatch.setattr(session_services, "get_turn_runtime_manager", lambda: runtime)
+    monkeypatch.setattr(
+        voice_router,
+        "build_realtime_context_snapshot",
+        _fake_context_snapshot,
+    )
+
+    await ws.incoming.put({"type": "start", "sdp": "controlled-offer"})
+    await sideband.incoming.put(_DELEGATION_EVENT)
+    task = asyncio.create_task(voice_router._serve_codex_realtime(ws))
+    await _wait_for(lambda: any(message.get("type") == "handoff" for message in ws.sent))
+    await ws.incoming.put(
+        {
+            "type": "turn_started",
+            "handoff_id": "delegation-1",
+            "turn_id": "turn-1",
+            "session_id": "chat-session",
+        }
+    )
+
+    await _wait_for(lambda: bool(sideband.speech))
+    assert sideband.speech == [("delegation-1", "First partial. ")]
+    assert not runtime.release.is_set()
+    runtime.release.set()
+    await _wait_for(lambda: len(sideband.speech) == 2)
+    await ws.incoming.put({"type": "stop"})
+    await task
+
+    assert "".join(text for _, text in sideband.speech) == "First partial. Final."
+    assert (
+        len([message for message in ws.sent if message.get("type") == "playback_authorized"]) == 1
+    )
+
+
+@pytest.mark.asyncio
+async def test_realtime_bridge_mutes_provider_commentary_without_cancelling_delegation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import deeptutor.services.session as session_services
+
+    ws = _RealtimeWebSocket()
+    sideband = _RealtimeSideband()
+    provider = _RealtimeProvider(sideband)
+    runtime = _DelayedTurnRuntime()
+    monkeypatch.setattr(voice_router, "CodexOAuthRealtimeProvider", lambda: provider)
+    monkeypatch.setattr(session_services, "get_turn_runtime_manager", lambda: runtime)
+    monkeypatch.setattr(
+        voice_router,
+        "build_realtime_context_snapshot",
+        _fake_context_snapshot,
+    )
+
+    await ws.incoming.put({"type": "start", "sdp": "controlled-offer"})
+    task = asyncio.create_task(voice_router._serve_codex_realtime(ws))
+    try:
+        await sideband.incoming.put(_DELEGATION_EVENT)
+        await _wait_for(lambda: any(message.get("type") == "handoff" for message in ws.sent))
+        await ws.incoming.put(
+            {
+                "type": "turn_started",
+                "handoff_id": "delegation-1",
+                "turn_id": "turn-1",
+                "session_id": "chat-session",
+            }
+        )
+        await _wait_for(lambda: runtime.subscribed.is_set())
+        # Frameless Bidi emits delegation.created before the matching finalized
+        # user turn. That late final must not replace the delegated correlation.
+        await sideband.incoming.put(
+            {
+                "type": "turn.done",
+                "turn": {
+                    "id": "late-user-final",
+                    "role": "user",
+                    "transcript": "Explain this, please.",
+                },
+            }
+        )
+        await sideband.incoming.put(
+            {
+                "type": "input_transcript.added",
+                "item": {"id": "late-user-partial", "text": "Explain this differently"},
+            }
+        )
+        await sideband.incoming.put(
+            {
+                "type": "output_transcript.added",
+                "item": {"id": "provider-commentary", "text": "Working on that"},
+            }
+        )
+        await sideband.incoming.put({"type": "output_audio.delta", "audio": "AQID"})
+        await sideband.incoming.put(
+            {
+                "type": "turn.done",
+                "turn": {
+                    "id": "provider-commentary-turn",
+                    "role": "assistant",
+                    "transcript": "Working on that",
+                },
+            }
+        )
+        await asyncio.sleep(0.05)
+        runtime.release.set()
+
+        await _wait_for(lambda: bool(sideband.speech))
+        assert any(message.get("type") == "playback_authorized" for message in ws.sent)
+        await asyncio.sleep(0.05)
+        await sideband.incoming.put(
+            {
+                "type": "turn.done",
+                "turn": {
+                    "id": "delegated-output-turn",
+                    "role": "assistant",
+                    "transcript": "DeepTutor delayed answer",
+                },
+            }
+        )
+        await asyncio.sleep(0.05)
+    finally:
+        if not task.done():
+            await ws.incoming.put({"type": "stop"})
+        await task
+
+    assert sideband.speech == [("delegation-1", "DeepTutor delayed answer")]
+    assert runtime.cancelled_turns == []
+    assert not any(message.get("type") == "audio_output" for message in ws.sent)
+    assert not any(message.get("type") == "error" for message in ws.sent)
+
+
+@pytest.mark.asyncio
+async def test_realtime_bridge_ignores_whitespace_partial_before_delegation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import deeptutor.services.session as session_services
+
+    ws = _RealtimeWebSocket()
+    sideband = _RealtimeSideband()
+    provider = _RealtimeProvider(sideband)
+    runtime = _TurnRuntime()
+    monkeypatch.setattr(voice_router, "CodexOAuthRealtimeProvider", lambda: provider)
+    monkeypatch.setattr(session_services, "get_turn_runtime_manager", lambda: runtime)
+    monkeypatch.setattr(
+        voice_router,
+        "build_realtime_context_snapshot",
+        _fake_context_snapshot,
+    )
+
+    await ws.incoming.put({"type": "start", "sdp": "controlled-offer"})
+    task = asyncio.create_task(voice_router._serve_codex_realtime(ws))
+    await _wait_for(lambda: any(message.get("type") == "webrtc_answer" for message in ws.sent))
+    await sideband.incoming.put(
+        {
+            "type": "input_transcript.added",
+            "item": {"id": "noise-only", "text": " \n\t "},
+        }
+    )
+    await sideband.incoming.put(_DELEGATION_EVENT)
+    await _wait_for(lambda: any(message.get("type") == "handoff" for message in ws.sent))
+    await ws.incoming.put({"type": "stop"})
+    await task
+
+    assert not any(message.get("type") == "error" for message in ws.sent)
+
+
+@pytest.mark.asyncio
+async def test_realtime_bridge_does_not_send_after_provider_closes_socket(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import deeptutor.services.session as session_services
+
+    ws = _StrictRealtimeWebSocket()
+    sideband = _RealtimeSideband()
+    provider = _RealtimeProvider(sideband)
+    runtime = _TurnRuntime()
+    monkeypatch.setattr(voice_router, "CodexOAuthRealtimeProvider", lambda: provider)
+    monkeypatch.setattr(session_services, "get_turn_runtime_manager", lambda: runtime)
+    monkeypatch.setattr(
+        voice_router,
+        "build_realtime_context_snapshot",
+        _fake_context_snapshot,
+    )
+
+    await ws.incoming.put({"type": "start", "sdp": "controlled-offer"})
+    task = asyncio.create_task(voice_router._serve_codex_realtime(ws))
+    await _wait_for(lambda: any(message.get("type") == "webrtc_answer" for message in ws.sent))
+    await sideband.incoming.put({"type": "error"})
+    await _wait_for(lambda: ws.closed)
+    await ws.incoming.put({"type": "stop"})
+    await task
+
+    assert not any(message.get("type") == "ended" for message in ws.sent)
+
+
+@pytest.mark.asyncio
+async def test_realtime_bridge_fails_closed_on_autonomous_provider_output(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import deeptutor.services.session as session_services
+
+    ws = _RealtimeWebSocket()
+    sideband = _RealtimeSideband()
+    provider = _RealtimeProvider(sideband)
+    runtime = _TurnRuntime()
+    monkeypatch.setattr(voice_router, "CodexOAuthRealtimeProvider", lambda: provider)
+    monkeypatch.setattr(session_services, "get_turn_runtime_manager", lambda: runtime)
+    monkeypatch.setattr(
+        voice_router,
+        "build_realtime_context_snapshot",
+        _fake_context_snapshot,
+    )
+
+    await ws.incoming.put({"type": "start", "sdp": "controlled-offer"})
+    await sideband.incoming.put(
+        {
+            "type": "turn.done",
+            "turn": {
+                "id": "assistant-without-user",
+                "role": "assistant",
+                "transcript": "Unauthorized answer",
+            },
+        }
+    )
+    task = asyncio.create_task(voice_router._serve_codex_realtime(ws))
+    await asyncio.sleep(0.05)
+    await ws.incoming.put({"type": "stop"})
+    await task
+
+    assert not any(message.get("type") == "handoff" for message in ws.sent)
+    assert not any(message.get("type") == "audio_output" for message in ws.sent)
+    assert not any(message.get("type") == "direct_assistant" for message in ws.sent)
+    assert ws.close_code == 1000
+
+
+@pytest.mark.asyncio
+async def test_realtime_bridge_explicit_delegation_intent_keeps_playback_suppressed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import deeptutor.services.session as session_services
+
+    ws = _RealtimeWebSocket()
+    sideband = _RealtimeSideband()
+    provider = _RealtimeProvider(sideband)
+    runtime = _TurnRuntime()
+    monkeypatch.setattr(voice_router, "CodexOAuthRealtimeProvider", lambda: provider)
+    monkeypatch.setattr(session_services, "get_turn_runtime_manager", lambda: runtime)
+    monkeypatch.setattr(
+        voice_router,
+        "build_realtime_context_snapshot",
+        _fake_context_snapshot,
+    )
+
+    text = "請使用目前選取的知識庫先檢索，再回答這個新問題。"
+    await ws.incoming.put({"type": "start", "sdp": "controlled-offer"})
+    await sideband.incoming.put(
+        {
+            "type": "turn.done",
+            "turn": {"id": "explicit-user-turn", "role": "user", "transcript": text},
+        }
+    )
+    await sideband.incoming.put(
+        {
+            "type": "delegation.created",
+            "item": {
+                "id": "explicit-delegation",
+                "type": "delegation",
+                "target": "client",
+                "content": [{"type": "input_text", "text": text}],
+            },
+        }
+    )
+    task = asyncio.create_task(voice_router._serve_codex_realtime(ws))
+    await _wait_for(lambda: any(message.get("type") == "handoff" for message in ws.sent))
+    await ws.incoming.put({"type": "stop"})
+    await task
+
+    assert not any(message.get("type") == "playback_authorized" for message in ws.sent)
+    assert not any(message.get("type") == "error" for message in ws.sent)
+    assert sideband.closed
+
+
+@pytest.mark.asyncio
+async def test_realtime_bridge_buffers_undelegated_terminal_until_user_turn(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import deeptutor.services.session as session_services
+
+    ws = _RealtimeWebSocket()
+    sideband = _RealtimeSideband()
+    provider = _RealtimeProvider(sideband)
+    runtime = _TurnRuntime()
+    store = _DirectSessionStore()
+    monkeypatch.setattr(voice_router, "CodexOAuthRealtimeProvider", lambda: provider)
+    monkeypatch.setattr(voice_router, "get_session_store", lambda: store)
+    monkeypatch.setattr(session_services, "get_turn_runtime_manager", lambda: runtime)
+    monkeypatch.setattr(
+        voice_router,
+        "build_realtime_context_snapshot",
+        _fake_context_snapshot,
+    )
+
+    await ws.incoming.put({"type": "start", "sdp": "controlled-offer"})
+    task = asyncio.create_task(voice_router._serve_codex_realtime(ws))
+    await sideband.incoming.put(
+        {
+            "type": "turn.done",
+            "turn": {
+                "id": "assistant-turn-race",
+                "role": "assistant",
+                "transcript": "Two plus two equals four.",
+            },
+        }
+    )
+    await asyncio.sleep(0.05)
+    assert not any(message.get("type") == "error" for message in ws.sent)
+    assert not store.messages
+    await sideband.incoming.put(
+        {
+            "type": "turn.done",
+            "turn": {
+                "id": "user-final",
+                "role": "user",
+                "transcript": "What is two plus two?",
+            },
+        }
+    )
+    await _wait_for(lambda: any(message.get("type") == "turn_rejected" for message in ws.sent))
+    assert not ws.closed
+    await ws.incoming.put({"type": "stop"})
+    await task
+
+    assert not any(message.get("type") == "handoff" for message in ws.sent)
+    assert not store.messages
+    assert not any(message.get("type") == "playback_authorized" for message in ws.sent)
+    assert not any(message.get("type") == "error" for message in ws.sent)
+
+
+@pytest.mark.asyncio
+async def test_realtime_bridge_rejects_provider_direct_output_in_every_mode(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    import deeptutor.services.session as session_services
+
+    ws = _RealtimeWebSocket()
+    sideband = _RealtimeSideband()
+    provider = _RealtimeProvider(sideband)
+    runtime = _TurnRuntime()
+    store = _DirectSessionStore()
+    monkeypatch.setattr(voice_router, "CodexOAuthRealtimeProvider", lambda: provider)
+    monkeypatch.setattr(voice_router, "get_session_store", lambda: store)
+    monkeypatch.setattr(session_services, "get_turn_runtime_manager", lambda: runtime)
+    monkeypatch.setattr(
+        voice_router,
+        "build_realtime_context_snapshot",
+        _fake_context_snapshot,
+    )
+
+    await ws.incoming.put({"type": "start", "sdp": "controlled-offer"})
+    await sideband.incoming.put(
+        {
+            "type": "turn.done",
+            "turn": {
+                "id": "exam-user-turn",
+                "role": "user",
+                "transcript": "Can I see the answer?",
+            },
+        }
+    )
+    await sideband.incoming.put({"type": "output_audio.delta", "audio": "AQID"})
+    await sideband.incoming.put(
+        {
+            "type": "turn.done",
+            "turn": {
+                "id": "exam-assistant-turn",
+                "role": "assistant",
+                "transcript": "Unauthorized exam answer",
+            },
+        }
+    )
+    task = asyncio.create_task(voice_router._serve_codex_realtime(ws))
+    await _wait_for(lambda: any(message.get("type") == "turn_rejected" for message in ws.sent))
+    assert not ws.closed
+
+    # A later native delegation remains usable in the same microphone session.
+    await sideband.incoming.put(_DELEGATION_EVENT)
+    await _wait_for(lambda: any(message.get("type") == "handoff" for message in ws.sent))
+    await ws.incoming.put({"type": "stop"})
+    await task
+
+    assert any(
+        message.get("code") == "delegation_required"
+        and "Please ask again" in str(message.get("message"))
+        for message in ws.sent
+    )
+    assert any(
+        "answered without native delegation" in record.message
+        and "Can I see the answer?" in record.message
+        for record in caplog.records
+    )
+    assert not any(
+        str(message.get("handoff_id") or "").startswith("local-delegation-")
+        for message in ws.sent
+    )
+    assert not any(message.get("type") == "playback_authorized" for message in ws.sent)
+    assert not any(message.get("type") == "audio_output" for message in ws.sent)
+    assert not store.messages
+    assert ws.close_code == 1000
+
+
+@pytest.mark.asyncio
+async def test_realtime_bridge_rejects_duplicate_undelegated_output_once(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import deeptutor.services.session as session_services
+
+    ws = _RealtimeWebSocket()
+    sideband = _RealtimeSideband()
+    provider = _RealtimeProvider(sideband)
+    runtime = _TurnRuntime()
+    store = _DirectSessionStore()
+    monkeypatch.setattr(voice_router, "CodexOAuthRealtimeProvider", lambda: provider)
+    monkeypatch.setattr(voice_router, "get_session_store", lambda: store)
+    monkeypatch.setattr(session_services, "get_turn_runtime_manager", lambda: runtime)
+    monkeypatch.setattr(
+        voice_router,
+        "build_realtime_context_snapshot",
+        _fake_context_snapshot,
+    )
+
+    await ws.incoming.put({"type": "start", "sdp": "controlled-offer"})
+    task = asyncio.create_task(voice_router._serve_codex_realtime(ws))
+    await sideband.incoming.put(
+        {
+            "type": "turn.done",
+            "turn": {
+                "id": "voice-turn-direct",
+                "role": "user",
+                "transcript": "What is two plus two?",
+            },
+        }
+    )
+    await sideband.incoming.put(
+        {
+            "type": "output_transcript.added",
+            "item": {"id": "assistant-partial-direct", "text": "Two plus two"},
+        }
+    )
+    await sideband.incoming.put({"type": "output_audio.delta", "audio": "AQID"})
+    await sideband.incoming.put(
+        {
+            "type": "turn.done",
+            "turn": {
+                "id": "assistant-turn-direct",
+                "role": "assistant",
+                "transcript": "Two plus two equals four.",
+            },
+        }
+    )
+    await _wait_for(lambda: any(message.get("type") == "turn_rejected" for message in ws.sent))
+    await sideband.incoming.put(
+        {
+            "type": "turn.done",
+            "turn": {
+                "id": "assistant-turn-direct",
+                "role": "assistant",
+                "transcript": "Two plus two equals four.",
+            },
+        }
+    )
+    await asyncio.sleep(0.05)
+    # The duplicate provider event is deduped: still exactly one rejection.
+    assert len([message for message in ws.sent if message.get("type") == "turn_rejected"]) == 1
+    # A stale cross-channel speech-start signal must not break the session.
+    await ws.incoming.put({"type": "cancel_output"})
+    await asyncio.sleep(0.05)
+    await ws.incoming.put({"type": "stop"})
+    await task
+
+    assert not store.messages
+    assert not any(message.get("type") == "handoff" for message in ws.sent)
+    assert not runtime.subscribed.is_set()
+    assert len([message for message in ws.sent if message.get("type") == "turn_rejected"]) == 1
+    assert not any(message.get("type") == "playback_authorized" for message in ws.sent)
+    assert not any(message.get("type") == "audio_output" for message in ws.sent)
+
+
+@pytest.mark.asyncio
+async def test_realtime_bridge_recognizes_barge_in_but_requires_native_delegation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import deeptutor.services.session as session_services
+
+    ws = _RealtimeWebSocket()
+    sideband = _RealtimeSideband()
+    provider = _RealtimeProvider(sideband)
+    runtime = _StreamingTurnRuntime()
+    monkeypatch.setattr(voice_router, "CodexOAuthRealtimeProvider", lambda: provider)
+    monkeypatch.setattr(session_services, "get_turn_runtime_manager", lambda: runtime)
+    monkeypatch.setattr(
+        voice_router,
+        "build_realtime_context_snapshot",
+        _fake_context_snapshot,
+    )
+
+    await ws.incoming.put({"type": "start", "sdp": "controlled-offer"})
+    await sideband.incoming.put(_DELEGATION_EVENT)
+    task = asyncio.create_task(voice_router._serve_codex_realtime(ws))
+    await _wait_for(lambda: any(message.get("type") == "handoff" for message in ws.sent))
+    await ws.incoming.put(
+        {
+            "type": "turn_started",
+            "handoff_id": "delegation-1",
+            "turn_id": "question-turn",
+            "session_id": "chat-session",
+        }
+    )
+    await _wait_for(lambda: bool(sideband.speech))
+
+    # The learner answers while the delegated question is still being spoken.
+    await sideband.incoming.put(
+        {
+            "type": "turn.done",
+            "turn": {
+                "id": "barge-in-user",
+                "role": "user",
+                "transcript": "答案 C",
+            },
+        }
+    )
+    await sideband.incoming.put(
+        {
+            "type": "turn.done",
+            "turn": {
+                "id": "barge-in-assistant",
+                "role": "assistant",
+                "transcript": "Provider direct answer",
+            },
+        }
+    )
+    await _wait_for(lambda: any(message.get("type") == "turn_rejected" for message in ws.sent))
+
+    handoffs = [message for message in ws.sent if message.get("type") == "handoff"]
+    runtime.release.set()
+    await ws.incoming.put({"type": "stop"})
+    await task
+
+    assert len(handoffs) == 1
+    assert handoffs[0].get("handoff_id") == "delegation-1"
+    assert len([message for message in ws.sent if message.get("type") == "turn_rejected"]) == 1
+
+
+@pytest.mark.asyncio
+async def test_realtime_bridge_cancels_undelegated_output_and_ignores_late_audio(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import deeptutor.services.session as session_services
+
+    ws = _RealtimeWebSocket()
+    sideband = _RealtimeSideband()
+    provider = _RealtimeProvider(sideband)
+    store = _DirectSessionStore()
+    runtime = _TurnRuntime()
+    monkeypatch.setattr(voice_router, "CodexOAuthRealtimeProvider", lambda: provider)
+    monkeypatch.setattr(voice_router, "get_session_store", lambda: store)
+    monkeypatch.setattr(session_services, "get_turn_runtime_manager", lambda: runtime)
+    monkeypatch.setattr(
+        voice_router,
+        "build_realtime_context_snapshot",
+        _fake_context_snapshot,
+    )
+
+    await ws.incoming.put({"type": "start", "sdp": "controlled-offer"})
+    task = asyncio.create_task(voice_router._serve_codex_realtime(ws))
+    await sideband.incoming.put(
+        {
+            "type": "turn.done",
+            "turn": {
+                "id": "voice-turn-cancel",
+                "role": "user",
+                "transcript": "Explain this slowly",
+            },
+        }
+    )
+    await sideband.incoming.put(
+        {
+            "type": "output_transcript.added",
+            "item": {"id": "assistant-partial-cancel", "text": "I will explain"},
+        }
+    )
+    await sideband.incoming.put({"type": "output_audio.delta", "audio": "AQID"})
+    await asyncio.sleep(0.05)
+    assert not any(message.get("type") == "playback_authorized" for message in ws.sent)
+    assert not any(message.get("type") == "audio_output" for message in ws.sent)
+    await ws.incoming.put({"type": "cancel_output"})
+    await _wait_for(lambda: any(message.get("state") == "interrupted" for message in ws.sent))
+    sent_before_late = len(ws.sent)
+    await sideband.incoming.put({"type": "output_audio.delta", "audio": "AQID"})
+    await sideband.incoming.put(
+        {
+            "type": "turn.done",
+            "turn": {
+                "id": "assistant-turn-late",
+                "role": "assistant",
+                "transcript": "Late answer must not persist.",
+            },
+        }
+    )
+    await asyncio.sleep(0.05)
+    await ws.incoming.put({"type": "stop"})
+    await task
+
+    assert not any(message.get("type") == "audio_output" for message in ws.sent)
+    assert len(ws.sent) >= sent_before_late
+    assert any(message.get("state") == "interrupted" for message in ws.sent)
+    assert not any(message.get("type") == "direct_assistant" for message in ws.sent)
+    assert not store.messages
+
+
+@pytest.mark.asyncio
+async def test_realtime_bridge_cancels_runtime_and_suppresses_late_output(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import deeptutor.services.session as session_services
+
+    ws = _RealtimeWebSocket()
+    sideband = _RealtimeSideband()
+    provider = _RealtimeProvider(sideband)
+    runtime = _TurnRuntime(wait_for_cancel=True)
+    monkeypatch.setattr(voice_router, "CodexOAuthRealtimeProvider", lambda: provider)
+    monkeypatch.setattr(session_services, "get_turn_runtime_manager", lambda: runtime)
+    monkeypatch.setattr(
+        voice_router,
+        "build_realtime_context_snapshot",
+        _fake_context_snapshot,
+    )
+
+    await ws.incoming.put({"type": "start", "sdp": "controlled-offer"})
+    await sideband.incoming.put(_DELEGATION_EVENT)
+    task = asyncio.create_task(voice_router._serve_codex_realtime(ws))
+    await _wait_for(lambda: any(message.get("type") == "handoff" for message in ws.sent))
+    await ws.incoming.put(
+        {
+            "type": "turn_started",
+            "handoff_id": "delegation-1",
+            "turn_id": "turn-1",
+            "session_id": "chat-session",
+        }
+    )
+    await asyncio.wait_for(runtime.subscribed.wait(), timeout=2)
+    await ws.incoming.put({"type": "cancel_output"})
+    await asyncio.wait_for(runtime.cancelled.wait(), timeout=2)
+    await sideband.incoming.put({"type": "output_audio.delta", "audio": "AQID"})
+    await _wait_for(lambda: any(message.get("state") == "listening" for message in ws.sent))
+    await asyncio.sleep(0.05)
+    await ws.incoming.put({"type": "stop"})
+    await task
+
+    assert runtime.cancelled_turns == ["turn-1"]
+    assert sideband.speech == []
+    assert any(message.get("state") == "interrupted" for message in ws.sent)
+    assert not any(message.get("type") == "audio_output" for message in ws.sent)
+    assert "AQID" not in json.dumps(ws.sent)

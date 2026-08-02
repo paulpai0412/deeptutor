@@ -16,6 +16,13 @@ def test_model_override_capability() -> None:
     assert has_thinking_tags("openai", "deepseek-reasoner") is True
 
 
+def test_openai_codex_gpt_5_5_supports_vision() -> None:
+    """The current OpenAI Codex GPT-5.5 route accepts image input."""
+    assert supports_vision("openai_codex", "openai-codex/gpt-5.5") is True
+    assert supports_vision("openai_codex", "openai_codex/gpt-5.5") is True
+    assert supports_vision("openai_codex", "openai-codex/gpt-5.1-codex") is False
+
+
 def test_gemma_response_format_disabled() -> None:
     """Gemma models do not support json_object response_format (only json_schema/text).
 

@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import {
   ArrowLeft,
@@ -10,13 +10,12 @@ import {
   Pencil,
   Search,
   Trash2,
-  Upload,
   X,
 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
-import FileDropZone from '@/components/knowledge/FileDropZone'
+import PaperLibraryUploadSection from '@/components/knowledge/PaperLibraryUploadSection'
+import MarkdownRenderer from '@/components/common/MarkdownRenderer'
 import {
-  getKnowledgeUploadPolicy,
   deletePaper,
   deleteLibraryPaper,
   getPaperLibraryPaper,
@@ -31,22 +30,12 @@ import {
   retryPaper,
   updateLibraryPaperQuestion,
   updatePaperQuestion,
-  uploadPaperLibrary,
-  uploadPaperLibraryToLibrary,
-  type KnowledgeUploadPolicy,
   type PaperLibraryDetail,
   type PaperLibraryQuestion,
   type PaperLibraryRecord,
   type PaperLibrarySummary,
 } from '@/lib/knowledge-api'
 import { apiUrl } from '@/lib/api'
-import { DEFAULT_UPLOAD_POLICY, validateFiles } from '@/lib/knowledge-helpers'
-
-const PAPER_UPLOAD_POLICY: KnowledgeUploadPolicy = {
-  ...DEFAULT_UPLOAD_POLICY,
-  extensions: ['.pdf'],
-  accept: '.pdf,application/pdf',
-}
 
 const PROCESSING_STATUSES = new Set(['pending', 'processing'])
 const PAPER_STATUS_OPTIONS = [
@@ -61,17 +50,17 @@ const PAPER_STATUS_OPTIONS = [
 function statusLabel(status: string, t: (key: string) => string): string {
   switch (status) {
     case 'ready':
-      return t('Paper ready')
+      return t('File ready')
     case 'ready_with_warnings':
-      return t('Paper ready with warnings')
+      return t('File ready with warnings')
     case 'partial':
-      return t('Paper partially ready')
+      return t('File partially ready')
     case 'failed':
-      return t('Paper extraction failed')
+      return t('File extraction failed')
     case 'processing':
-      return t('Paper processing')
+      return t('File processing')
     default:
-      return t('Paper pending')
+      return t('File pending')
   }
 }
 
@@ -102,7 +91,7 @@ interface PaperReviewProps {
   savingQuestionId: string | null
 }
 
-function PaperReview({
+export function PaperReview({
   paper,
   onBack,
   onStartQuiz,
@@ -223,16 +212,21 @@ function PaperReview({
                   </span>
                 </div>
 
-                <p className="mt-3 whitespace-pre-wrap text-[13px] leading-relaxed text-[var(--foreground)]">
-                  {question.question_text}
-                </p>
+                <div className="mt-3 text-[13px] leading-relaxed text-[var(--foreground)]">
+                  <MarkdownRenderer
+                    content={question.question_text}
+                    variant="compact"
+                  />
+                </div>
 
                 {Object.keys(question.options).length > 0 && (
                   <dl className="mt-3 space-y-1 rounded-lg bg-[var(--muted)]/30 p-3 text-[12px]">
                     {Object.entries(question.options).map(([key, value]) => (
                       <div key={key} className="flex gap-2">
                         <dt className="font-semibold text-[var(--muted-foreground)]">{key}.</dt>
-                        <dd className="whitespace-pre-wrap text-[var(--foreground)]">{value}</dd>
+                        <dd className="text-[var(--foreground)]">
+                          <MarkdownRenderer content={value} variant="compact" />
+                        </dd>
                       </div>
                     ))}
                   </dl>
@@ -344,41 +338,27 @@ interface PaperLibraryPanelProps {
   libraryId?: string
   /** Other libraries available for a move action in the Knowledge Center. */
   libraries?: PaperLibrarySummary[]
+  /** Hide the legacy inline upload card when rendered in the detail shell. */
+  hideUpload?: boolean
 }
 
 export default function PaperLibraryPanel({
   libraryId,
   libraries = [],
+  hideUpload = false,
 }: PaperLibraryPanelProps) {
   const { t } = useTranslation()
   const router = useRouter()
   const [papers, setPapers] = useState<PaperLibraryRecord[]>([])
-  const [files, setFiles] = useState<File[]>([])
-  const [uploadPolicy, setUploadPolicy] = useState<KnowledgeUploadPolicy>(PAPER_UPLOAD_POLICY)
   const [query, setQuery] = useState('')
   const [search, setSearch] = useState('')
   const [status, setStatus] = useState('')
   const [loading, setLoading] = useState(true)
-  const [uploading, setUploading] = useState(false)
   const [errorMsg, setErrorMsg] = useState<string | null>(null)
-  const [notice, setNotice] = useState<string | null>(null)
   const [editing, setEditing] = useState<{ id: string; name: string } | null>(null)
   const [selectedPaper, setSelectedPaper] = useState<PaperLibraryDetail | null>(null)
   const [reviewLoading, setReviewLoading] = useState(false)
   const [savingQuestionId, setSavingQuestionId] = useState<string | null>(null)
-
-  const paperPolicy = useMemo<KnowledgeUploadPolicy>(
-    () => ({
-      ...uploadPolicy,
-      extensions: ['.pdf'],
-      accept: '.pdf,application/pdf',
-    }),
-    [uploadPolicy],
-  )
-  const selection = useMemo(
-    () => validateFiles(files, paperPolicy, t),
-    [files, paperPolicy, t],
-  )
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -405,39 +385,6 @@ export default function PaperLibraryPanel({
     const timer = window.setInterval(() => void load(), 2000)
     return () => window.clearInterval(timer)
   }, [load, papers])
-
-  useEffect(() => {
-    void getKnowledgeUploadPolicy()
-      .then(policy => setUploadPolicy(policy))
-      .catch(() => undefined)
-  }, [])
-
-  const handleUpload = useCallback(async () => {
-    if (selection.validFiles.length === 0) return
-    setUploading(true)
-    setErrorMsg(null)
-    setNotice(null)
-    try {
-      const result = libraryId
-        ? await uploadPaperLibraryToLibrary(libraryId, selection.validFiles)
-        : await uploadPaperLibrary(selection.validFiles)
-      setFiles([])
-      const rejected = result.rejected.length + selection.invalidFiles.length
-      setNotice(
-        rejected > 0
-          ? t('{{count}} papers uploaded; {{rejected}} rejected', {
-              count: result.papers.length,
-              rejected,
-            })
-          : t('{{count}} papers uploaded', { count: result.papers.length }),
-      )
-      await load()
-    } catch (error) {
-      setErrorMsg(error instanceof Error ? error.message : String(error))
-    } finally {
-      setUploading(false)
-    }
-  }, [libraryId, load, selection, t])
 
   const handleStartQuiz = useCallback((paperId: string) => {
     const libraryQuery = libraryId
@@ -579,54 +526,13 @@ export default function PaperLibraryPanel({
 
   return (
     <div className="space-y-4">
-      <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
-        <div className="mb-3 flex items-start justify-between gap-3">
-          <div>
-            <h2 className="text-[14px] font-semibold text-[var(--foreground)]">
-              {t('Paper Library')}
-            </h2>
-            <p className="mt-1 text-[12px] leading-relaxed text-[var(--muted-foreground)]">
-              {t('Upload independent PDF papers for Exams.')}
-            </p>
-          </div>
-          <Upload className="h-4 w-4 text-[var(--muted-foreground)]" />
-        </div>
-        <FileDropZone
-          files={files}
-          onChange={setFiles}
-          uploadPolicy={paperPolicy}
-          disabled={uploading}
+      {!hideUpload && (
+        <PaperLibraryUploadSection
+          libraryId={libraryId}
+          onUploaded={load}
           compact
-          hidePolicyHint
         />
-        <div className="mt-3 flex items-center justify-end gap-2">
-          {files.length > 0 && (
-            <button
-              type="button"
-              onClick={() => setFiles([])}
-              disabled={uploading}
-              className="inline-flex items-center gap-1.5 rounded-lg border border-[var(--border)] px-3 py-1.5 text-[12px] text-[var(--muted-foreground)] hover:bg-[var(--muted)] disabled:opacity-40"
-            >
-              <X size={13} />
-              {t('Clear selection')}
-            </button>
-          )}
-          <button
-            type="button"
-            onClick={() => void handleUpload()}
-            disabled={uploading || selection.validFiles.length === 0}
-            className="inline-flex items-center gap-1.5 rounded-lg bg-[var(--primary)] px-3 py-1.5 text-[12px] font-medium text-white disabled:cursor-not-allowed disabled:opacity-40"
-          >
-            {uploading ? <Loader2 size={13} className="animate-spin" /> : <Upload size={13} />}
-            {uploading ? t('Uploading...') : t('Upload PDFs')}
-          </button>
-        </div>
-        {notice && (
-          <p className="mt-3 rounded-lg bg-emerald-50 px-3 py-2 text-[12px] text-emerald-700 dark:bg-emerald-950/20 dark:text-emerald-300">
-            {notice}
-          </p>
-        )}
-      </div>
+      )}
 
       <div className="flex items-center justify-between gap-3">
         <form

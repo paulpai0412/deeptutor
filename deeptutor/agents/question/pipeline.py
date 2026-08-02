@@ -1604,13 +1604,13 @@ class QuestionPipeline:
         return text or self._fallback_empty_tool_list()
 
     def _fallback_empty_tool_list(self) -> str:
-        return "- 无" if self.language == "zh" else "- none"
+        return "- 無" if self.language.startswith("zh") else "- none"
 
     def _kb_system_note(self) -> str:
         if not self.kb_name:
             return ""
-        if self.language == "zh":
-            return f"用户已挂载知识库：{self.kb_name}。调用 rag 时，kb_name 必须填这个名称。"
+        if self.language.startswith("zh"):
+            return f"使用者已掛載知識庫：{self.kb_name}。呼叫 rag 時，kb_name 必須填入這個名稱。"
         return (
             f"Attached knowledge bases: {self.kb_name}. When calling rag, kb_name "
             f"must be {self.kb_name!r}."
@@ -1738,10 +1738,10 @@ class QuestionPipeline:
 
     def _correctness_label(self, is_correct: bool | None) -> str:
         if is_correct is True:
-            return "correct" if self.language != "zh" else "做对"
+            return "correct" if not self.language.startswith("zh") else "答對"
         if is_correct is False:
-            return "incorrect" if self.language != "zh" else "做错"
-        return "unknown" if self.language != "zh" else "未知"
+            return "incorrect" if not self.language.startswith("zh") else "答錯"
+        return "unknown" if not self.language.startswith("zh") else "未知"
 
     def _render_plan_summary(self, plan: QuizPlan) -> str:
         if not plan.templates:
@@ -1784,17 +1784,17 @@ class QuestionPipeline:
         return "\n\n".join(lines)
 
     def _render_question_markdown(self, qa: QuizPair, ordinal: int) -> str:
-        header = "题目" if self.language == "zh" else "Question"
+        header = "題目" if self.language.startswith("zh") else "Question"
         lines = [f"### {header} {ordinal}\n", qa.question]
         if isinstance(qa.options, dict) and qa.options:
             for key in _CHOICE_KEYS:
                 if key in qa.options:
                     lines.append(f"- {key}. {qa.options[key]}")
         if qa.correct_answer:
-            answer_label = "答案" if self.language == "zh" else "Answer"
+            answer_label = "答案" if self.language.startswith("zh") else "Answer"
             lines.append(f"\n**{answer_label}:** {qa.correct_answer}")
         if qa.explanation:
-            expl_label = "解析" if self.language == "zh" else "Explanation"
+            expl_label = "解析" if self.language.startswith("zh") else "Explanation"
             lines.append(f"\n**{expl_label}:** {qa.explanation}")
         return "\n".join(lines).strip()
 
@@ -1849,7 +1849,7 @@ class QuestionPipeline:
             stage=STAGE_QUIZZING,
             metadata=merge_trace_metadata(meta, {"trace_kind": "error"}),
         )
-        prefix = "⚠️ " if self.language == "zh" else "⚠ "
+        prefix = "⚠️ " if self.language.startswith("zh") else "⚠ "
         await stream.content(
             f"{prefix}{message}",
             source=SOURCE,

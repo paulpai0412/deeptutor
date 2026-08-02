@@ -11,7 +11,9 @@ import logging
 from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
 
 from deeptutor.agents.chat import ChatAgent, SessionManager
-from deeptutor.services.config import PROJECT_ROOT, load_config_with_main
+from deeptutor.i18n.stream import is_traditional_chinese
+from deeptutor.i18n.zh_tw import to_traditional_chinese
+from deeptutor.services.config import PROJECT_ROOT, load_config_with_main, parse_language
 from deeptutor.services.llm.config import get_llm_config
 from deeptutor.services.settings.interface_settings import get_ui_language
 
@@ -70,12 +72,11 @@ async def websocket_chat(websocket: WebSocket):
     try:
         while True:
             data = await websocket.receive_json()
-            requested_language = str(data.get("language") or "").lower().strip()
+            requested_language = str(data.get("language") or "").strip()
+            requested_code = requested_language.lower().replace("_", "-")
             language = (
-                "zh"
-                if requested_language.startswith("zh")
-                else "en"
-                if requested_language.startswith("en")
+                parse_language(requested_language)
+                if requested_code.startswith(("zh", "en"))
                 else get_ui_language(default=config.get("system", {}).get("language", "en"))
             )
             message = data.get("message", "").strip()
@@ -159,12 +160,17 @@ async def websocket_chat(websocket: WebSocket):
                     api_version=api_version,
                 )
 
+                traditional = is_traditional_chinese(language)
                 if enable_rag and kb_name:
                     await websocket.send_json(
                         {
                             "type": "status",
                             "stage": "rag",
-                            "message": f"Searching knowledge base: {kb_name}...",
+                            "message": (
+                                f"正在搜尋知識庫：{kb_name}..."
+                                if traditional
+                                else f"Searching knowledge base: {kb_name}..."
+                            ),
                         }
                     )
 
@@ -173,7 +179,7 @@ async def websocket_chat(websocket: WebSocket):
                         {
                             "type": "status",
                             "stage": "web",
-                            "message": "Searching the web...",
+                            "message": "正在搜尋網路..." if traditional else "Searching the web...",
                         }
                     )
 
@@ -181,7 +187,7 @@ async def websocket_chat(websocket: WebSocket):
                     {
                         "type": "status",
                         "stage": "generating",
-                        "message": "Generating response...",
+                        "message": "正在產生回覆..." if traditional else "Generating response...",
                     }
                 )
 
@@ -199,15 +205,20 @@ async def websocket_chat(websocket: WebSocket):
 
                 async for chunk_data in stream_generator:
                     if chunk_data["type"] == "chunk":
+                        chunk_content = str(chunk_data["content"] or "")
+                        if traditional:
+                            chunk_content = to_traditional_chinese(chunk_content)
                         await websocket.send_json(
                             {
                                 "type": "stream",
-                                "content": chunk_data["content"],
+                                "content": chunk_content,
                             }
                         )
-                        full_response += chunk_data["content"]
+                        full_response += chunk_content
                     elif chunk_data["type"] == "complete":
-                        full_response = chunk_data["response"]
+                        full_response = str(chunk_data["response"] or "")
+                        if traditional:
+                            full_response = to_traditional_chinese(full_response)
                         sources = chunk_data.get("sources", {"rag": [], "web": []})
 
                 if sources.get("rag") or sources.get("web"):

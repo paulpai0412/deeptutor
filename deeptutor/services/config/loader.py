@@ -169,27 +169,17 @@ def get_path_from_config(config: dict[str, Any], path_key: str, default: str = N
 
 
 def parse_language(language: Any) -> str:
-    """
-    Unified language configuration parser, supports multiple input formats
-
-    Supported language representations:
-    - English: "en", "english", "English"
-    - Chinese: "zh", "chinese", "Chinese"
-
-    Args:
-        language: Language configuration value (can be "zh"/"en"/"Chinese"/"English" etc.)
-
-    Returns:
-        Standardized language code: 'zh' or 'en', defaults to 'zh'
-    """
+    """Normalize language settings, preserving Traditional Chinese."""
     if not language:
         return "zh"
 
     if isinstance(language, str):
-        lang_lower = language.lower()
-        if lang_lower in ["en", "english"]:
+        lang_lower = language.strip().lower().replace("_", "-")
+        if lang_lower in {"en", "english"} or lang_lower.startswith("en-"):
             return "en"
-        if lang_lower in ["zh", "chinese", "cn"]:
+        if lang_lower in {"zh-tw", "zh-hant", "zh-hk", "tw", "traditional"}:
+            return "zh-TW"
+        if lang_lower in {"zh", "zh-cn", "zh-hans", "chinese", "cn"} or lang_lower.startswith("zh-"):
             return "zh"
 
     return "zh"  # Default Chinese

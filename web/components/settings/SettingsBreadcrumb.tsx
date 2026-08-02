@@ -7,6 +7,7 @@ import { ChevronRight } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import { breadcrumbFor, type Lang } from "@/lib/settings-nav";
+import { toTaiwanChinese } from "@/lib/taiwan-zh";
 
 // Top-left location trail, e.g. 设置 / 模型 / LLM. Earlier crumbs are links;
 // the current page is plain text. Replaces the old single "back" link so the
@@ -15,7 +16,7 @@ export default function SettingsBreadcrumb() {
   const pathname = usePathname() ?? "";
   const { t, i18n } = useTranslation();
   const zh = i18n.language?.toLowerCase().startsWith("zh");
-  const tr = (l: Lang) => (zh ? l.zh : l.en);
+  const tr = (l: Lang) => (zh ? toTaiwanChinese(l.zh) : l.en);
 
   const crumbs = breadcrumbFor(pathname);
 

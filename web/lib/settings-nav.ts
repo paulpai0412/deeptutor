@@ -2,6 +2,7 @@
 
 import {
   AudioLines,
+  AudioWaveform,
   Bot,
   Boxes,
   Brain,
@@ -132,6 +133,18 @@ const MODEL_CHILDREN: SettingsLeaf[] = [
     icon: Mic,
     tile: "bg-pink-500/10 text-pink-600 dark:text-pink-400",
     service: "stt",
+  },
+  {
+    key: "realtime_voice",
+    href: "/settings/realtime-voice",
+    label: { zh: "即时语音", en: "Realtime Voice" },
+    blurb: {
+      zh: "GPT-Live 模型授权、音色与连接测试。",
+      en: "GPT-Live model authorization, voice, and connection test.",
+    },
+    icon: AudioWaveform,
+    tile: "bg-sky-500/10 text-sky-600 dark:text-sky-400",
+    adminOnly: true,
   },
   {
     key: "imagegen",
@@ -367,6 +380,14 @@ export function isNavOnlyRoute(pathname: string): boolean {
   return NAV_ONLY_ROUTES.has(pathname);
 }
 
+const TOOLBARLESS_LEAF_ROUTES = new Set<string>([
+  "/settings/realtime-voice",
+]);
+
+export function showsSettingsToolbar(pathname: string): boolean {
+  return !isNavOnlyRoute(pathname) && !TOOLBARLESS_LEAF_ROUTES.has(pathname);
+}
+
 // The on-disk file (under data/user/settings/) each leaf module persists to.
 // Surfaced in the toolbar status line so every page says where its parameters
 // live, without duplicating the string on each page.
@@ -378,6 +399,7 @@ const STORAGE_PATHS: Record<string, string> = {
   "/settings/search": "data/user/settings/model_catalog.json",
   "/settings/tts": "data/user/settings/model_catalog.json",
   "/settings/stt": "data/user/settings/model_catalog.json",
+  "/settings/realtime-voice": "data/user/settings/realtime_voice.json",
   "/settings/image": "data/user/settings/model_catalog.json",
   "/settings/video": "data/user/settings/model_catalog.json",
   "/settings/document-parsing": "data/user/settings/document_parsing.json",

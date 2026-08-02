@@ -23,6 +23,53 @@ DEFAULT_CODEX_URL = "https://chatgpt.com/backend-api/codex/responses"
 DEFAULT_ORIGINATOR = "DeepTutor"
 
 
+def load_codex_oauth_token() -> Any:
+    """Load the server-level Codex OAuth token without exposing its value."""
+    try:
+        from oauth_cli_kit import get_token as get_codex_token
+    except ImportError as exc:  # pragma: no cover - optional dependency
+        raise RuntimeError(
+            "oauth_cli_kit is not installed. Install CLI deps or switch provider."
+        ) from exc
+    token = get_codex_token()
+    if not getattr(token, "access", None):
+        raise RuntimeError(
+            "OpenAI Codex is not logged in. Run `deeptutor provider login openai-codex`."
+        )
+    return token
+
+
+def has_codex_oauth_token() -> bool:
+    """Return whether a usable server-level Codex OAuth token is present."""
+    try:
+        load_codex_oauth_token()
+    except Exception:
+        return False
+    return True
+
+
+def authorize_codex_oauth() -> None:
+    """Run the existing server-side browser OAuth flow without returning tokens."""
+    try:
+        from oauth_cli_kit import login_oauth_interactive
+    except ImportError as exc:  # pragma: no cover - optional dependency
+        raise RuntimeError(
+            "oauth_cli_kit is not installed. Install CLI dependencies first."
+        ) from exc
+
+    def callback_timeout(_: str) -> str:
+        raise RuntimeError("OpenAI Codex OAuth browser callback timed out.")
+
+    token = login_oauth_interactive(
+        print_fn=lambda _: None,
+        prompt_fn=callback_timeout,
+        originator=DEFAULT_ORIGINATOR,
+        open_browser=True,
+    )
+    if not getattr(token, "access", None):
+        raise RuntimeError("OpenAI Codex OAuth authorization failed.")
+
+
 class OpenAICodexProvider(LLMProvider):
     """Use OpenAI Codex OAuth tokens to call the Responses API."""
 
@@ -31,13 +78,7 @@ class OpenAICodexProvider(LLMProvider):
         self.default_model = default_model
 
     async def _load_token(self) -> Any:
-        try:
-            from oauth_cli_kit import get_token as get_codex_token
-        except ImportError as exc:  # pragma: no cover - optional dependency
-            raise RuntimeError(
-                "oauth_cli_kit is not installed. Install CLI deps or switch provider."
-            ) from exc
-        return await asyncio.to_thread(get_codex_token)
+        return await asyncio.to_thread(load_codex_oauth_token)
 
     async def _call_codex(
         self,

@@ -351,6 +351,12 @@ IMAGEGEN_PROVIDERS: dict[str, GenerationProviderSpec] = {
         default_api_base="https://api.openai.com/v1",
         default_model="gpt-image-1",
     ),
+    "openai_codex": GenerationProviderSpec(
+        label="OpenAI Codex OAuth",
+        default_api_base="",
+        adapter="codex_oauth",
+        default_model="gpt-5.5",
+    ),
     "volcengine": GenerationProviderSpec(
         label="Volcengine Ark (Seedream)",
         default_api_base="https://ark.cn-beijing.volces.com/api/v3",

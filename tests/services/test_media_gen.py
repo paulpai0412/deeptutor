@@ -25,6 +25,7 @@ from deeptutor.services.generation_http import (
 )
 from deeptutor.services.imagegen import generate_image
 from deeptutor.services.imagegen.adapters.chat_completions import ChatCompletionsImagegenAdapter
+from deeptutor.services.imagegen.adapters.codex_oauth import CodexOAuthImagegenAdapter
 from deeptutor.services.imagegen.adapters.openai_compat import OpenAICompatImagegenAdapter
 from deeptutor.services.imagegen.config import ImagegenConfig
 from deeptutor.services.videogen import generate_video, probe_video
@@ -100,6 +101,156 @@ async def test_imagegen_adapter_b64_json(monkeypatch: pytest.MonkeyPatch) -> Non
     assert post["url"] == "https://api.openai.com/v1/images/generations"
     assert post["json"] == {"model": "gpt-image-1", "prompt": "a cat", "n": 2, "size": "1024x1024"}
     assert post["headers"]["Authorization"] == "Bearer sk-test"
+
+
+@pytest.mark.asyncio
+async def test_codex_oauth_imagegen_adapter_streams_native_image(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import json
+    from types import SimpleNamespace
+
+    import deeptutor.services.llm.provider_core.openai_codex_provider as codex_provider
+
+    encoded = base64.b64encode(b"PNGDATA").decode("ascii")
+    events = [
+        {
+            "type": "response.output_item.done",
+            "item": {
+                "type": "image_generation_call",
+                "result": encoded,
+            },
+        }
+    ]
+    captured: dict[str, Any] = {}
+
+    class FakeResponse:
+        status_code = 200
+
+        async def aiter_lines(self):
+            for event in events:
+                yield f"data: {json.dumps(event)}"
+                yield ""
+
+        async def aread(self) -> bytes:
+            return b""
+
+    class StreamContext:
+        async def __aenter__(self):
+            return FakeResponse()
+
+        async def __aexit__(self, *_args: Any) -> None:
+            return None
+
+    def fake_stream(self, method: str, url: str, **kwargs: Any):
+        captured.update(method=method, url=url, **kwargs)
+        return StreamContext()
+
+    monkeypatch.setattr(
+        codex_provider,
+        "load_codex_oauth_token",
+        lambda: SimpleNamespace(access="oauth-token", account_id="acct-1"),
+    )
+    monkeypatch.setattr(httpx.AsyncClient, "stream", fake_stream)
+
+    config = ImagegenConfig(
+        model="openai-codex/gpt-5.5",
+        adapter="codex_oauth",
+        size="1024x1024",
+        quality="high",
+    )
+    images = await CodexOAuthImagegenAdapter().generate("a blue book", config, n=4)
+
+    assert images == [(b"PNGDATA", "image/png")]
+    assert captured["method"] == "POST"
+    assert captured["url"] == "https://chatgpt.com/backend-api/codex/responses"
+    assert captured["headers"]["Authorization"] == "Bearer oauth-token"
+    assert captured["json"]["model"] == "gpt-5.5"
+    assert captured["json"]["tools"] == [
+        {"type": "image_generation", "size": "1024x1024", "quality": "high"}
+    ]
+    assert "n" not in captured["json"]
+    assert "style" not in captured["json"]["tools"][0]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("events", "status", "detail", "expected"),
+    [
+        ([{"type": "response.completed"}], 200, "", "no native image_generation"),
+        (
+            [
+                {
+                    "type": "response.output_item.done",
+                    "item": {"type": "image_generation_call", "result": "not-base64"},
+                }
+            ],
+            200,
+            "",
+            "invalid image_generation",
+        ),
+        ([], 401, "unauthorized", "HTTP 401"),
+    ],
+)
+async def test_codex_oauth_imagegen_adapter_fails_closed(
+    monkeypatch: pytest.MonkeyPatch,
+    events: list[dict[str, Any]],
+    status: int,
+    detail: str,
+    expected: str,
+) -> None:
+    import json
+    from types import SimpleNamespace
+
+    import deeptutor.services.llm.provider_core.openai_codex_provider as codex_provider
+
+    class FakeResponse:
+        status_code = status
+
+        async def aiter_lines(self):
+            for event in events:
+                yield f"data: {json.dumps(event)}"
+                yield ""
+
+        async def aread(self) -> bytes:
+            return detail.encode()
+
+    class StreamContext:
+        async def __aenter__(self):
+            return FakeResponse()
+
+        async def __aexit__(self, *_args: Any) -> None:
+            return None
+
+    monkeypatch.setattr(
+        codex_provider,
+        "load_codex_oauth_token",
+        lambda: SimpleNamespace(access="oauth-token", account_id="acct-1"),
+    )
+    monkeypatch.setattr(
+        httpx.AsyncClient,
+        "stream",
+        lambda self, method, url, **kwargs: StreamContext(),
+    )
+
+    config = ImagegenConfig(model="openai-codex/gpt-5.5", adapter="codex_oauth")
+    with pytest.raises(GenerationProviderError, match=expected):
+        await CodexOAuthImagegenAdapter().generate("a blue book", config)
+
+
+@pytest.mark.asyncio
+async def test_codex_oauth_imagegen_adapter_rejects_missing_oauth(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import deeptutor.services.llm.provider_core.openai_codex_provider as codex_provider
+
+    def missing_token() -> Any:
+        raise RuntimeError("OpenAI Codex is not logged in")
+
+    monkeypatch.setattr(codex_provider, "load_codex_oauth_token", missing_token)
+    config = ImagegenConfig(model="openai-codex/gpt-5.5", adapter="codex_oauth")
+    with pytest.raises(GenerationProviderError, match="not logged in"):
+        await CodexOAuthImagegenAdapter().generate("a blue book", config)
 
 
 @pytest.mark.asyncio
@@ -244,6 +395,33 @@ def test_resolve_imagegen_config_fills_provider_default_base() -> None:
     assert cfg.base_url == "https://ark.cn-beijing.volces.com/api/v3"
     assert cfg.size == "1024x1024"
     assert cfg.api_key == "ark-key"
+
+
+def test_resolve_imagegen_codex_oauth_uses_native_adapter() -> None:
+    catalog = {
+        "version": 1,
+        "services": {
+            "imagegen": {
+                "active_profile_id": "p",
+                "active_model_id": "m",
+                "profiles": [
+                    {
+                        "id": "p",
+                        "binding": "openai_codex",
+                        "base_url": "",
+                        "api_key": "",
+                        "models": [{"id": "m", "model": "gpt-5.5"}],
+                    }
+                ],
+            }
+        },
+    }
+    cfg = resolve_imagegen_runtime_config(catalog=catalog)
+    assert cfg.provider_name == "openai_codex"
+    assert cfg.adapter == "codex_oauth"
+    assert cfg.model == "gpt-5.5"
+    assert cfg.base_url == ""
+    assert cfg.api_key == ""
 
 
 def test_resolve_imagegen_openrouter_uses_chat_adapter() -> None:

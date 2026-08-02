@@ -12,6 +12,15 @@ from deeptutor.services.path_service import get_path_service
 
 from .origins import normalize_origins
 
+DEFAULT_REALTIME_VOICE_SETTINGS: dict[str, Any] = {
+    "version": 1,
+    "provider": "openai_codex",
+    "model": "gpt-live-1-boulder-alpha",
+    "voice": "cove",
+}
+
+REALTIME_VOICE_PROVIDERS = frozenset({"openai_codex"})
+
 DEFAULT_SYSTEM_SETTINGS: dict[str, Any] = {
     "version": 1,
     "backend_port": 8001,
@@ -362,6 +371,21 @@ class RuntimeSettingsService:
         _atomic_write_json(self.path_for("system"), payload)
         return payload
 
+    def load_realtime_voice(self, *, include_process_overrides: bool = True) -> dict[str, Any]:
+        payload = self._load_or_create(
+            "realtime_voice",
+            DEFAULT_REALTIME_VOICE_SETTINGS,
+            self._normalize_realtime_voice,
+        )
+        if include_process_overrides:
+            payload = self._apply_realtime_voice_process_overrides(payload)
+        return payload
+
+    def save_realtime_voice(self, settings: dict[str, Any]) -> dict[str, Any]:
+        payload = self._normalize_realtime_voice({**DEFAULT_REALTIME_VOICE_SETTINGS, **settings})
+        _atomic_write_json(self.path_for("realtime_voice"), payload)
+        return payload
+
     def load_auth(self, *, include_process_overrides: bool = True) -> dict[str, Any]:
         payload = self._load_or_create(
             "auth",
@@ -489,6 +513,7 @@ class RuntimeSettingsService:
 
     def ensure_defaults(self) -> None:
         self.load_system(include_process_overrides=False)
+        self.load_realtime_voice(include_process_overrides=False)
         self.load_auth(include_process_overrides=False)
         self.load_integrations(include_process_overrides=False)
         self.load_mineru(include_process_overrides=False)
@@ -634,6 +659,23 @@ class RuntimeSettingsService:
         if value := self._process_env_value("CHAT_ATTACHMENT_MAX_CHARS_TOTAL"):
             payload["chat_attachment_max_chars_total"] = value
         return self._normalize_system(payload)
+
+    def _apply_realtime_voice_process_overrides(self, settings: dict[str, Any]) -> dict[str, Any]:
+        payload = dict(settings)
+        if value := self._process_env_value("DEEPTUTOR_REALTIME_VOICE_PROVIDER"):
+            payload["provider"] = value
+        return self._normalize_realtime_voice(payload)
+
+    def _normalize_realtime_voice(self, settings: dict[str, Any]) -> dict[str, Any]:
+        provider = _string(settings.get("provider")).lower().replace("-", "_")
+        model = _string(settings.get("model"))
+        voice = _string(settings.get("voice")).lower()
+        return {
+            "version": 1,
+            "provider": (provider or "openai_codex")[:80],
+            "model": (model or "gpt-live-1-boulder-alpha")[:120],
+            "voice": (voice or "cove")[:80],
+        }
 
     def _apply_auth_process_overrides(self, settings: dict[str, Any]) -> dict[str, Any]:
         payload = dict(settings)
@@ -1010,6 +1052,10 @@ def get_ws_max_size() -> int:
     return compute_ws_max_size(get_chat_attachment_limits().max_total_bytes)
 
 
+def load_realtime_voice_settings() -> dict[str, Any]:
+    return get_runtime_settings_service().load_realtime_voice()
+
+
 def load_auth_settings() -> dict[str, Any]:
     return get_runtime_settings_service().load_auth()
 
@@ -1054,7 +1100,9 @@ __all__ = [
     "DEFAULT_LLAMAINDEX_SETTINGS",
     "DEFAULT_MINERU_SETTINGS",
     "DEFAULT_PAGEINDEX_SETTINGS",
+    "DEFAULT_REALTIME_VOICE_SETTINGS",
     "DEFAULT_SYSTEM_SETTINGS",
+    "REALTIME_VOICE_PROVIDERS",
     "DOCUMENT_PARSING_ENGINE_DOCLING",
     "DOCUMENT_PARSING_ENGINE_MARKITDOWN",
     "DOCUMENT_PARSING_ENGINE_MINERU",
@@ -1071,6 +1119,7 @@ __all__ = [
     "get_runtime_settings_service",
     "get_ws_max_size",
     "load_auth_settings",
+    "load_realtime_voice_settings",
     "load_document_parsing_settings",
     "load_graphrag_settings",
     "load_integrations_settings",

@@ -112,7 +112,7 @@ export const getFileExtension = (filename: string): string => {
 };
 
 export const selectionFileId = (file: File): string =>
-  `${file.name}:${file.size}:${file.lastModified}`;
+  `${file.webkitRelativePath || file.name}:${file.size}:${file.lastModified}`;
 
 export const mergeSelectedFiles = (
   existing: File[],

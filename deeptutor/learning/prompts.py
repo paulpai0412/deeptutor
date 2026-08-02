@@ -35,7 +35,12 @@ def get_learning_prompts(language: str = "zh") -> dict[str, Any]:
     for candidate in candidates:
         path = _PROMPT_DIR / f"{candidate}.yaml"
         if path.exists():
-            return yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+            loaded = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+            if lang == "zh-TW":
+                from deeptutor.i18n.zh_tw import convert_nested
+
+                return convert_nested(loaded)
+            return loaded
     return {}
 
 

@@ -68,6 +68,7 @@ export default function NotebooksSection() {
   const [selected, setSelected] = useState<NotebookDetail | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
   const [expandedRecordId, setExpandedRecordId] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
   const loadDetail = useCallback(
     async (notebookId: string, list?: NotebookInfo[]) => {
@@ -108,6 +109,7 @@ export default function NotebooksSection() {
 
   const load = useCallback(async () => {
     setLoading(true);
+    setError(null);
     try {
       const nbs = await listNotebooks();
       const next: NotebookInfo[] = nbs.map((nb) => ({
@@ -128,6 +130,10 @@ export default function NotebooksSection() {
         setSelectedId(null);
         setSelected(null);
       }
+    } catch (cause) {
+      setNotebooks([]);
+      setSelected(null);
+      setError(cause instanceof Error ? cause.message : String(cause));
     } finally {
       setLoading(false);
     }
@@ -228,6 +234,11 @@ export default function NotebooksSection() {
 
   return (
     <div className="space-y-6">
+      {error && (
+        <p role="alert" className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-[12px] text-red-700 dark:border-red-900/50 dark:bg-red-950/20 dark:text-red-300">
+          {error}
+        </p>
+      )}
       <SpaceSectionHeader
         icon={NotebookPen}
         title={t("Notebooks")}

@@ -16,10 +16,12 @@ import { useTranslation } from "react-i18next";
 import type { CodeBlockThemeId } from "@/components/common/code-block-themes";
 import {
   normalizeCodeBlockTheme,
+  normalizePet,
   writeStoredCodeBlockShowLineNumbers,
   writeStoredCodeBlockTheme,
   writeStoredCodeBlockWrapLongLines,
   writeStoredLanguage,
+  writeStoredPet,
 } from "@/context/app-shell-storage";
 import { useAppShell } from "@/context/AppShellContext";
 import { apiFetch, apiUrl } from "@/lib/api";
@@ -107,7 +109,10 @@ export type Catalog = {
 
 export type UiSettings = {
   theme: "light" | "dark" | "glass" | "snow";
-  language: "en" | "zh";
+  language: "en" | "zh" | "zh-TW";
+  voice_input_mode: "dictation" | "realtime";
+  /** Ambient companion pet id; "disabled" hides it. */
+  pet: string;
   code_block_theme: string;
   code_block_show_line_numbers: boolean;
   code_block_wrap_long_lines: boolean;
@@ -160,6 +165,8 @@ export type ProviderOption = {
   default_dim?: string;
   default_model?: string;
   default_voice?: string;
+  auth_mode?: string;
+  oauth_ready?: boolean;
 };
 
 export type SystemStatus = {
@@ -397,7 +404,7 @@ function nextModelName(
   models: CatalogModel[],
   language: UiSettings["language"],
 ): string {
-  const prefix = language === "zh" ? "模型" : "Model ";
+  const prefix = language.startsWith("zh") ? "模型" : "Model ";
   const used = new Set(models.map((model) => model.name.trim()));
   let index = models.length + 1;
   while (used.has(`${prefix}${index}`)) {
@@ -443,6 +450,7 @@ type SettingsContextValue = {
   codeBlockTheme: UiSettings["code_block_theme"];
   codeBlockShowLineNumbers: UiSettings["code_block_show_line_numbers"];
   codeBlockWrapLongLines: UiSettings["code_block_wrap_long_lines"];
+  pet: UiSettings["pet"];
   toast: string;
   setToast: (value: string) => void;
 
@@ -452,6 +460,7 @@ type SettingsContextValue = {
   updateCodeBlockTheme: (next: CodeBlockThemeId) => Promise<void>;
   updateCodeBlockShowLineNumbers: (next: boolean) => Promise<void>;
   updateCodeBlockWrapLongLines: (next: boolean) => Promise<void>;
+  updatePet: (next: string) => Promise<void>;
 
   // Catalog mutation
   mutateCatalog: (mutator: (next: Catalog) => void) => void;
@@ -533,6 +542,8 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
     setCodeBlockTheme: setAppShellCodeBlockTheme,
     setCodeBlockShowLineNumbers: setAppShellCodeBlockShowLineNumbers,
     setCodeBlockWrapLongLines: setAppShellCodeBlockWrapLongLines,
+    pet,
+    setPet: setAppShellPet,
   } = useAppShell();
 
   const [status, setStatus] = useState<SystemStatus | null>(null);
@@ -628,6 +639,10 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
       // the code-block settings event; AppShellContext (the single source) picks
       // them up, so no separate copy needs seeding here.
       syncLoadedCodeBlockSettingsToAppShell(payload.ui);
+      // Pet follows the same app-shell pattern: the backend value is the
+      // source of truth; writing storage dispatches PET_EVENT so AppShell
+      // (and therefore the ambient workspace pet) picks it up live.
+      writeStoredPet(normalizePet(payload.ui.pet));
       if (payload.providers) setProviders(payload.providers);
       settingsLoaded = true;
     } catch (err) {
@@ -719,6 +734,14 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
       await persistUiSettingsPatch({ code_block_show_line_numbers: next });
     },
     [setAppShellCodeBlockShowLineNumbers],
+  );
+
+  const updatePet = useCallback(
+    async (next: string) => {
+      setAppShellPet(next);
+      await persistUiSettingsPatch({ pet: normalizePet(next) });
+    },
+    [setAppShellPet],
   );
 
   const updateCodeBlockWrapLongLines = useCallback(
@@ -1245,6 +1268,7 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
       codeBlockTheme,
       codeBlockShowLineNumbers,
       codeBlockWrapLongLines,
+      pet,
       toast,
       setToast,
       updateTheme,
@@ -1252,6 +1276,7 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
       updateCodeBlockTheme,
       updateCodeBlockShowLineNumbers,
       updateCodeBlockWrapLongLines,
+      updatePet,
       mutateCatalog,
       addProfile,
       removeActiveProfile,
@@ -1300,6 +1325,7 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
       llmContextDetection,
       logs,
       mutateCatalog,
+      pet,
       providers,
       registerExtension,
       removeActiveModel,
@@ -1326,6 +1352,7 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
       updateLanguage,
       updateModelBoolField,
       updateModelField,
+      updatePet,
       updateProfileField,
       updateTheme,
     ],

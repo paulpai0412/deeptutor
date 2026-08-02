@@ -6,6 +6,15 @@ import Link from "next/link";
 import { useTranslation } from "react-i18next";
 import { login, fetchAuthStatus, checkIsFirstUser } from "@/lib/auth";
 
+function LoginLoading() {
+  const { t } = useTranslation();
+  return (
+    <div className="w-full max-w-sm text-center text-sm text-[var(--muted-foreground)]">
+      {t("auth.loadingSignIn")}
+    </div>
+  );
+}
+
 function LoginPageContent() {
   const { t } = useTranslation();
   const router = useRouter();
@@ -151,7 +160,7 @@ function LoginPageContent() {
       </p>
 
       <p className="mt-3 text-center text-xs text-[var(--muted-foreground)]">
-        DeepTutor · Agent-Native Learning
+        {t("auth.tagline")}
       </p>
     </div>
   );
@@ -160,11 +169,7 @@ function LoginPageContent() {
 export default function LoginPage() {
   return (
     <Suspense
-      fallback={
-        <div className="w-full max-w-sm text-center text-sm text-[var(--muted-foreground)]">
-          Loading sign in...
-        </div>
-      }
+      fallback={<LoginLoading />}
     >
       <LoginPageContent />
     </Suspense>

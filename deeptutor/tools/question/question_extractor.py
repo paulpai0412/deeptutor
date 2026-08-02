@@ -211,6 +211,7 @@ Important Notes:
 9. Preserve source page when available as an integer "page" field
 10. Return top-level "complete": true only when the full document was covered; include a top-level "warnings" array for omissions or uncertainty
 11. Ensure the returned format is valid JSON
+12. Never infer an image association from question order, page order, or image count. If the relationship is uncertain, return an empty images array.
 """
 
     document_content = (
@@ -250,7 +251,7 @@ Please analyze the complete document above, extract all question information, an
 
     # Send the complete image set to a known vision-capable primary model.
     # Text-only models still receive the names and structural blocks above;
-    # paper extraction applies a deterministic page/block fallback later.
+    # paper extraction keeps uncertain image associations empty.
     image_warnings: list[str] = []
     if image_files and supports_vision(binding, model):
         attachments = []
@@ -288,7 +289,7 @@ Please analyze the complete document above, extract all question information, an
                 )
     elif image_files:
         image_warnings.append(
-            "Vision is unavailable; image associations use page/block order and require manual review."
+            "Vision is unavailable; image associations were not inferred and require manual review."
         )
 
     complete_call = llm_callable or llm_complete

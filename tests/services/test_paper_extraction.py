@@ -140,7 +140,7 @@ def test_paper_extraction_uses_snapshotted_parser_engine(
     assert service.get_paper(paper.paper_id).extraction_config["parser_engine"] == "text_only"
 
 
-def test_fixed_image_pdf_fixture_persists_assets_and_non_vision_fallback(tmp_path: Path) -> None:
+def test_fixed_image_pdf_fixture_does_not_infer_unreferenced_images(tmp_path: Path) -> None:
     pytest.importorskip("pymupdf4llm")
     fixture = Path(__file__).parents[1] / "fixtures" / "paper_library" / "image-question.pdf"
     service = PaperLibraryService(tmp_path / "papers")
@@ -185,10 +185,69 @@ def test_fixed_image_pdf_fixture_persists_assets_and_non_vision_fallback(tmp_pat
     image_files = list(service.asset_dir(paper.paper_id).glob("*.png"))
     assert len(image_files) == 1
     questions = service.get_questions(paper.paper_id)
-    assert questions[0]["images"] == [image_files[0].name]
+    assert questions[0]["images"] == []
     assert questions[0]["page"] == 1
-    assert not any("/" in image for image in questions[0]["images"])
-    assert any("Vision is unavailable" in warning for warning in record.warnings)
+    assert any(
+        "No image asset could be confidently associated" in warning
+        for warning in questions[0]["warnings"]
+    )
+    assert any(
+        "Vision is unavailable; image associations were not inferred" in warning
+        for warning in record.warnings
+    )
+    assert any("could not be confidently associated" in warning for warning in record.warnings)
+
+
+def test_extraction_keeps_only_explicit_image_associations(tmp_path: Path) -> None:
+    service = PaperLibraryService(tmp_path / "papers")
+    paper = service.add_pdf("multiple-images.pdf", _pdf_bytes())
+    asset_dir = tmp_path / "parsed-assets"
+    asset_dir.mkdir()
+    (asset_dir / "map.png").write_bytes(b"map")
+    (asset_dir / "reading.png").write_bytes(b"reading")
+    parser = FakeParser(
+        ParsedDocument(
+            markdown="Question 1\nQuestion 2\nQuestion 3",
+            blocks=[
+                {"type": "image", "img_path": "map.png", "page": 1},
+                {"type": "image", "img_path": "reading.png", "page": 1},
+            ],
+            asset_dir=asset_dir,
+            engine="fake",
+        )
+    )
+
+    async def fake_llm(**_) -> str:
+        return (
+            '{"complete": true, "questions": ['
+            '{"question_number": "1", "question_text": "First"},'
+            '{"question_number": "2", "question_text": "Second"},'
+            '{"question_number": "3", "question_text": "See the map", "images": ["map.png"]}'
+            ']}'
+        )
+
+    record = asyncio.run(
+        extract_paper(
+            service,
+            paper.paper_id,
+            parser=parser,
+            llm_call=fake_llm,
+            llm_config=_config(),
+        )
+    )
+
+    questions = {
+        question["question_number"]: question for question in service.get_questions(paper.paper_id)
+    }
+    assert record.status == "ready_with_warnings"
+    assert questions["1"]["images"] == []
+    assert questions["2"]["images"] == []
+    assert questions["3"]["images"] == ["map.png"]
+    assert all(
+        "Image association was inferred" not in warning
+        for question in questions.values()
+        for warning in question["warnings"]
+    )
 
 
 def test_failed_reextraction_preserves_previous_questions_and_assets(tmp_path: Path) -> None:

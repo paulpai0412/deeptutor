@@ -36,7 +36,7 @@ class DeepSolveRequestConfig(BaseModel):
 class DeepQuestionRequestConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    mode: Literal["custom", "mimic", "original_paper"] = "custom"
+    mode: Literal["custom", "mimic", "original_paper", "proctor"] = "custom"
     topic: str = ""
     num_questions: int = Field(default=1, ge=1, le=50)
     difficulty: str = ""
@@ -58,7 +58,10 @@ class DeepQuestionRequestConfig(BaseModel):
 class ExamRequestConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    mode: Literal["original_paper"] = "original_paper"
+    # original_paper starts/restarts a paper run; proctor continues an
+    # already-running exam interactively (progress derives from the
+    # session's snapshot + recorded judgments, not from this config).
+    mode: Literal["original_paper", "proctor"] = "original_paper"
     paper_id: str = ""
 
 
@@ -143,7 +146,7 @@ def validate_deep_question_request_config(
 
 def validate_exam_request_config(raw_config: dict[str, Any] | None) -> ExamRequestConfig:
     model = _validate_model(ExamRequestConfig, raw_config, label="exam")
-    if not model.paper_id.strip():
+    if model.mode == "original_paper" and not model.paper_id.strip():
         raise ValueError("Invalid exam config: paper_id is required.")
     cleaned = _clean_public_config(raw_config)
     unexpected = sorted(set(cleaned) - {"mode", "paper_id"})

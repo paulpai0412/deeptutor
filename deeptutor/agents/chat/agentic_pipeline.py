@@ -43,7 +43,7 @@ from deeptutor.runtime.registry.deferred_tools import (
     render_deferred_tools_manifest,
 )
 from deeptutor.runtime.registry.tool_registry import get_tool_registry
-from deeptutor.services.config import get_chat_params
+from deeptutor.services.config import get_chat_params, parse_language
 from deeptutor.services.llm import (
     get_llm_config,
     get_token_limit_kwargs,  # noqa: F401  (re-exported for tests)
@@ -189,7 +189,7 @@ class AgenticChatPipeline:
         temperature: float | None = None,
         max_tokens: int | None = None,
     ) -> None:
-        self.language = "zh" if language.lower().startswith("zh") else "en"
+        self.language = parse_language(language)
         self.llm_config = get_llm_config()
         self.binding = getattr(self.llm_config, "binding", None) or "openai"
         self.model = getattr(self.llm_config, "model", None)
@@ -718,7 +718,7 @@ class AgenticChatPipeline:
         if not choices:
             return ""
         capped = choices[:30]
-        lines = ["[用户的笔记本列表]" if self.language == "zh" else "[User's notebooks]"]
+        lines = ["[使用者的筆記本清單]" if self.language.startswith("zh") else "[User's notebooks]"]
         for entry in capped:
             nid = entry.get("id", "")
             name = entry.get("name", nid)
@@ -1319,8 +1319,8 @@ class AgenticChatPipeline:
         if rag_kbs:
             joined = ", ".join(rag_kbs)
             rag_note = (
-                f"用户已挂载知识库：{joined}。调用 rag 时，kb_name 必须从其中选一个。"
-                if self.language == "zh"
+                f"使用者已掛載知識庫：{joined}。呼叫 rag 時，kb_name 必須從其中選一個。"
+                if self.language.startswith("zh")
                 else (
                     f"Attached knowledge bases: {joined}. When calling rag, kb_name "
                     "must be one of these names."
@@ -1344,11 +1344,11 @@ class AgenticChatPipeline:
             )
             lines.append(f"- {kb}: {listed or '(no indexed documents)'}")
         docs_block = "\n".join(lines)
-        if self.language == "zh":
+        if self.language.startswith("zh"):
             return (
-                "\n以下知识库使用托管的 PageIndex 引擎，其文档通过已加载的 "
-                "PageIndex MCP 工具阅读：先用 mcp_pageindex_get_document_structure "
-                "查看结构，再用 mcp_pageindex_get_page_content 读取相关页面。文档清单：\n"
+                "\n以下知識庫使用託管的 PageIndex 引擎，其文件透過已載入的 "
+                "PageIndex MCP 工具閱讀：先用 mcp_pageindex_get_document_structure "
+                "檢視結構，再用 mcp_pageindex_get_page_content 讀取相關頁面。文件清單：\n"
                 f"{docs_block}"
             )
         return (
@@ -1374,14 +1374,14 @@ class AgenticChatPipeline:
             )
         except Exception:
             return ""
-        if self.language == "zh":
+        if self.language.startswith("zh"):
             return (
-                "[本轮工作区]\n"
-                f"脚本和临时文件应写入：{exec_dir}\n"
-                "相对路径会解析到这个目录。需要创建 PDF、图片、表格或其他下载文件时，"
-                "直接通过 exec 写入并运行脚本（如 heredoc：python - <<'PY' … PY，"
-                "或 cat > gen.py <<'EOF' … EOF 后再运行）。生成的文件会自动以可下载"
-                "卡片呈现给用户——在回答里描述你做了什么即可，不要粘贴原始 URL。"
+                "[本輪工作區]\n"
+                f"腳本和暫存檔案應寫入：{exec_dir}\n"
+                "相對路徑會解析到這個目錄。需要建立 PDF、圖片、表格或其他下載檔案時，"
+                "直接透過 exec 寫入並執行腳本（例如 heredoc：python - <<'PY' … PY，"
+                "或 cat > gen.py <<'EOF' … EOF 後再執行）。產生的檔案會自動以可下載"
+                "卡片呈現給使用者——在回答中描述你做了什麼即可，不要貼上原始 URL。"
             )
         return (
             "[Turn workspace]\n"

@@ -61,12 +61,13 @@ export function formatContextWindowSource(
 
 export function formatContextWindowUpdatedAt(
   value: string | undefined,
-  language: "en" | "zh",
+  language: "en" | "zh" | "zh-TW",
 ): string {
   if (!value) return "";
   const parsed = new Date(value);
   if (Number.isNaN(parsed.getTime())) return value;
-  return parsed.toLocaleString(language === "zh" ? "zh-CN" : "en-US", {
+  const locale = language === "zh-TW" ? "zh-TW" : language === "zh" ? "zh-CN" : "en-US";
+  return parsed.toLocaleString(locale, {
     dateStyle: "medium",
     timeStyle: "short",
   });
@@ -96,9 +97,9 @@ export function activeModelDetail(
 // CJK glyphs are already square blocks so we drop both and bump size a hair.
 export function labelClass(
   size: "sm" | "md" | "lg",
-  language: "en" | "zh",
+  language: "en" | "zh" | "zh-TW",
 ): string {
-  if (language === "zh") {
+  if (language.startsWith("zh")) {
     if (size === "sm") return "text-[10.5px] font-medium";
     if (size === "lg") return "text-[12px] font-medium";
     return "text-[11px] font-medium";

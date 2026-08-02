@@ -10,7 +10,10 @@ from __future__ import annotations
 _LANGUAGE_LABELS: dict[str, str] = {
     "zh": "中文（简体）",
     "zh-cn": "中文（简体）",
-    "zh-tw": "繁體中文",
+    "zh-hans": "中文（简体）",
+    "zh-tw": "繁體中文（臺灣）",
+    "zh-hant": "繁體中文（臺灣）",
+    "zh-hk": "繁體中文（臺灣）",
     "en": "English",
     "ja": "日本語",
     "ko": "한국어",
@@ -24,7 +27,10 @@ _LANGUAGE_LABELS: dict[str, str] = {
 
 
 def normalize_language(language: str | None) -> str:
-    return (language or "en").strip().lower() or "en"
+    code = (language or "en").strip().lower().replace("_", "-") or "en"
+    if code in {"zh-hant", "zh-hk", "tw", "traditional"}:
+        return "zh-tw"
+    return code
 
 
 def language_label(language: str | None) -> str:
@@ -39,6 +45,14 @@ def language_directive(language: str | None) -> str:
     """Return a strict reader-facing language instruction for prompts."""
     code = normalize_language(language)
     label = language_label(code)
+    if code in {"zh-tw", "zh-hant", "zh-hk"}:
+        return (
+            "\n\n[語言要求 / Language] "
+            f"請嚴格使用{label}撰寫所有面向讀者的文字（標題、內文、說明、提示、過渡句、"
+            "題幹、選項等）。即使參考資料、JSON 欄位名稱或英文術語出現在 prompt 中，也"
+            f"不得切換語言；保留必要的專有名詞原文（例如人名、產品名、公式中的變數符號等）即可，"
+            f"其餘一律使用{label}，並採用臺灣常用詞彙。"
+        )
     if code.startswith("zh"):
         return (
             "\n\n[语言要求 / Language] "

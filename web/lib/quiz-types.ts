@@ -104,6 +104,18 @@ export interface QuizQuestion {
   source?: Record<string, unknown>;
 }
 
+/** Return the non-empty answer choices in display order for a quiz question. */
+export function getQuizQuestionOptions(
+  question: Pick<QuizQuestion, "options">,
+): Array<[string, string]> {
+  return Object.entries(question.options ?? {}).filter(
+    ([key, value]) =>
+      key.trim().length > 0 &&
+      typeof value === "string" &&
+      value.trim().length > 0,
+  );
+}
+
 export interface QuizFollowupContext {
   parent_quiz_session_id?: string;
   question_id: string;
@@ -313,6 +325,81 @@ export function extractQuizQuestions(
   );
 }
 
+export function extractQuizQuestionsFromEvents(
+  events: Array<{
+    type?: string;
+    metadata?: Record<string, unknown> | undefined;
+  }>,
+): QuizQuestion[] | null {
+  const result = [...events]
+    .reverse()
+    .find((event) => event.type === "result");
+  return (
+    extractQuizQuestions(result?.metadata) ??
+    extractStreamingQuizQuestions(events)
+  );
+}
+
+const ENGLISH_ORDINALS = [
+  "first",
+  "second",
+  "third",
+  "fourth",
+  "fifth",
+  "sixth",
+  "seventh",
+  "eighth",
+  "ninth",
+  "tenth",
+] as const;
+const CHINESE_DIGITS = "一二三四五六七八九";
+
+function chineseOrdinal(value: number): string {
+  if (value < 10) return CHINESE_DIGITS[value - 1] ?? String(value);
+  if (value === 10) return "十";
+  if (value < 20) return `十${CHINESE_DIGITS[value - 11] ?? ""}`;
+  if (value < 100) {
+    const tens = CHINESE_DIGITS[Math.floor(value / 10) - 1] ?? "";
+    const ones = value % 10;
+    return `${tens}十${ones ? CHINESE_DIGITS[ones - 1] : ""}`;
+  }
+  return String(value);
+}
+
+/** Resolve an explicit question ordinal; answer-disclosure remains LLM policy. */
+export function findReferencedQuizQuestion(
+  text: string,
+  questions: QuizQuestion[],
+): QuizQuestion | null {
+  const normalized = text.toLocaleLowerCase();
+  const compact = normalized.replace(/\s+/g, "");
+  for (let index = 0; index < questions.length; index += 1) {
+    const ordinal = index + 1;
+    const chinese = chineseOrdinal(ordinal);
+    const hasChineseReference =
+      compact.includes(`第${ordinal}題`) ||
+      compact.includes(`第${ordinal}题`) ||
+      Boolean(
+        chinese &&
+          (compact.includes(`第${chinese}題`) ||
+            compact.includes(`第${chinese}题`)),
+      );
+    const hasNumericReference = new RegExp(
+      `\\b(?:question|q)\\s*#?\\s*${ordinal}\\b`,
+      "i",
+    ).test(normalized);
+    const english = ENGLISH_ORDINALS[index];
+    if (
+      hasChineseReference ||
+      hasNumericReference ||
+      Boolean(english && normalized.includes(`${english} question`))
+    ) {
+      return questions[index];
+    }
+  }
+  return null;
+}
+
 export interface QuizFollowupExtras {
   /** Filenames of the learner's image answers (bytes ride on first msg). */
   userAnswerImageFilenames?: string[] | null;
@@ -348,6 +435,7 @@ export function buildQuizFollowupConfig(
   };
 
   return {
+    ...(question.paper_id ? { paper_id: question.paper_id } : {}),
     followup_question_context: context,
   };
 }
@@ -402,6 +490,40 @@ export function summarizeQuizConfig(
     tr(titleCase(cfg.difficulty || "auto")),
     typeSummary,
   ].join(" · ");
+}
+
+/**
+ * Exam turn routing. An exam has two turn kinds: starting/restarting a
+ * paper (original_paper, needs paper_id) and continuing an already-running
+ * exam interactively (proctor — progress derives server-side). Once the
+ * session contains emitted exam questions, subsequent sends default to
+ * proctor so a typed or voice answer never re-emits the whole paper.
+ */
+export function resolveExamWSConfig({
+  examActive,
+  quizConfig,
+}: {
+  examActive: boolean;
+  quizConfig: DeepQuestionFormConfig;
+}): Record<string, unknown> {
+  if (examActive) return { mode: "proctor" };
+  return buildQuizWSConfig({ ...quizConfig, mode: "original_paper" });
+}
+
+/**
+ * Same routing for generated quizzes: once a quiz is on the table, further
+ * sends are interactive proctor turns. Generating fresh questions requires
+ * an explicit Confirm (which passes its config as an override).
+ */
+export function resolveQuizWSConfig({
+  quizActive,
+  quizConfig,
+}: {
+  quizActive: boolean;
+  quizConfig: DeepQuestionFormConfig;
+}): Record<string, unknown> {
+  if (quizActive) return { mode: "proctor" };
+  return buildQuizWSConfig(quizConfig);
 }
 
 /**

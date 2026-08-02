@@ -99,6 +99,7 @@ export default function KnowledgeSelector({
       <button
         type="button"
         onClick={() => setOpen(!open)}
+        data-testid={isPaperLibrary ? "paper-library-selector" : "knowledge-selector"}
         aria-label={
           isPaperLibrary ? t("Paper Library") : t("Select knowledge bases")
         }
@@ -148,6 +149,12 @@ export default function KnowledgeSelector({
                   <button
                     key={option.key}
                     type="button"
+                    data-testid={
+                      isPaperLibrary
+                        ? `paper-library-option-${option.key}`
+                        : `knowledge-option-${option.key}`
+                    }
+                    aria-pressed={active}
                     onClick={() =>
                       isPaperLibrary
                         ? onSelectPaperLibrary?.(option.key)

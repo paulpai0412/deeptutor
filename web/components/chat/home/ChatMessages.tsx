@@ -1398,7 +1398,11 @@ export const ChatMessageList = memo(function ChatMessageList({
         })();
 
         return (
-          <div key={`${msg.role}-${i}`} className="w-full">
+          <div
+            key={`${msg.role}-${i}`}
+            className="w-full"
+            data-testid={msg.role === "assistant" ? "chat-assistant-message" : "chat-user-message"}
+          >
             <InlineFileCardProvider
               attachments={msg.attachments ?? []}
               events={msg.events}
@@ -1436,6 +1440,18 @@ export const ChatMessageList = memo(function ChatMessageList({
                   ),
               );
               if (!terminalError) return null;
+              // Barge-in is normal interaction, not a failure — cancelled
+              // turns get a quiet note; the red card is for real errors only.
+              if (
+                (terminalError.metadata as { status?: string } | undefined)
+                  ?.status === "cancelled"
+              ) {
+                return (
+                  <div className="mt-2 text-[11px] text-[var(--muted-foreground)]">
+                    {t("Interrupted")}
+                  </div>
+                );
+              }
               return (
                 <div className="mt-3 flex w-full max-w-[min(520px,90%)] items-center gap-2 rounded-xl border border-[var(--destructive)]/30 bg-[var(--destructive)]/5 px-3 py-2">
                   <AlertCircle className="h-4 w-4 shrink-0 text-[var(--destructive)]" />

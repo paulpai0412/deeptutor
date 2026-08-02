@@ -245,7 +245,13 @@ async def test_deep_question_capability_uses_single_call_followup_agent(
             "question_followup_context": {
                 "question_id": "q_3",
                 "question": "What does density mean in win-rate comparison?",
-                "question_type": "written",
+                "question_type": "choice",
+                "options": {
+                    "A": "Coverage",
+                    "B": "Informative value",
+                    "C": "Relevant content without redundancy",
+                    "D": "Credibility",
+                },
                 "user_answer": "coverage",
                 "correct_answer": "relevant information without redundancy",
                 "is_correct": False,
@@ -261,6 +267,7 @@ async def test_deep_question_capability_uses_single_call_followup_agent(
         captured["process"]["history_context"] == "User previously asked for a simpler explanation."
     )
     assert captured["process"]["question_context"]["question_id"] == "q_3"
+    assert captured["process"]["question_context"]["options"]["D"] == "Credibility"
     assert any(
         event.type == StreamEventType.CONTENT
         and "key distinction between density and coverage" in event.content

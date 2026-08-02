@@ -20,7 +20,6 @@ import {
   X,
 } from "lucide-react";
 import SpaceSectionHeader from "@/components/space/SpaceSectionHeader";
-import PaperLibraryPanel from "@/components/space/PaperLibraryPanel";
 import {
   createCategory,
   deleteCategory,
@@ -50,7 +49,6 @@ const FILTERS: { mode: FilterMode; label: string }[] = [
 
 export default function QuestionBankSection() {
   const { t } = useTranslation();
-  const [activeTab, setActiveTab] = useState<"saved" | "papers">("saved");
   const [items, setItems] = useState<NotebookEntry[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -206,34 +204,6 @@ export default function QuestionBankSection() {
         }
       />
 
-      <div
-        role="tablist"
-        aria-label={t("Question Bank sections")}
-        className="flex items-center gap-1 border-b border-[var(--border)]"
-      >
-        {([
-          ["saved", "Saved Questions"],
-          ["papers", "Paper Library"],
-        ] as const).map(([tab, label]) => (
-          <button
-            key={tab}
-            type="button"
-            role="tab"
-            aria-selected={activeTab === tab}
-            onClick={() => setActiveTab(tab)}
-            className={`border-b-2 px-3 py-2 text-[12px] font-medium transition-colors ${
-              activeTab === tab
-                ? "border-[var(--primary)] text-[var(--foreground)]"
-                : "border-transparent text-[var(--muted-foreground)] hover:text-[var(--foreground)]"
-            }`}
-          >
-            {t(label)}
-          </button>
-        ))}
-      </div>
-
-      {activeTab === "papers" ? <PaperLibraryPanel /> : (
-        <div className="space-y-4">
       {/* Category manager */}
       <div
         className={`overflow-hidden rounded-xl border transition-colors ${
@@ -749,8 +719,6 @@ export default function QuestionBankSection() {
             );
           })}
         </ul>
-      )}
-        </div>
       )}
     </div>
   );

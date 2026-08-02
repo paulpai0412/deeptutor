@@ -102,7 +102,13 @@ class GitHubCopilotProvider(OpenAICompatProvider):
             self._client.api_key = self._copilot_access_token
             return
 
-        await self._try_existing_local_auth()
+        try:
+            token = await self._exchange_token()
+        except Exception:
+            await self._try_existing_local_auth()
+            return
+        self.api_key = token
+        self._client.api_key = token
 
     async def _chat_impl(
         self,

@@ -136,3 +136,17 @@ Source extras (.[ extra ], defined in pyproject.toml):
 .[dev]            — Test / lint tooling
 .[all]            — Everything above
 ```
+
+## Agent skills
+
+### Issue tracker
+
+Work is tracked in GitHub Issues in `paulpai0412/deeptutor`; use the `gh` CLI. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+Use the canonical `needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, and `wontfix` labels. See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+This is a single-context repository. Read the root `CONTEXT.md` and applicable `docs/adr/` decisions when they exist. See `docs/agents/domain.md`.

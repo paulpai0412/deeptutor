@@ -82,6 +82,11 @@ export interface SendMessageOptions {
   parentMessageId?: number | null;
 }
 
+export interface StartedTurn {
+  sessionId: string;
+  turnId: string;
+}
+
 export interface ChatState {
   sessionId: string | null;
   sessionTitle: string;
@@ -94,6 +99,8 @@ export interface ChatState {
   personaSelection: string;
   messages: MessageItem[];
   isStreaming: boolean;
+  /** Runtime status of the selected session's last/live turn. */
+  status: SessionRuntimeStatus;
   currentStage: string;
   language: string;
   /** Edit-branching: keyed by stringified parent_message_id (or "null"
@@ -774,7 +781,7 @@ interface ChatContextValue {
     questionNotebookReferences?: QuestionNotebookReferencePayload,
     persona?: string,
     memoryReferences?: MemoryReferencePayload,
-  ) => void;
+  ) => Promise<StartedTurn | null>;
   cancelStreamingTurn: () => void;
   /**
    * Deliver the user's reply for a turn that is paused on an
@@ -969,6 +976,15 @@ export function UnifiedChatProvider({
   // assistant message if the server rejects the request (e.g. ``regenerate_busy``
   // or ``nothing_to_regenerate``). Keyed by session entry key.
   const pendingRegenerateRef = useRef<Map<string, MessageItem>>(new Map());
+  const pendingStartRef = useRef<
+    Map<
+      string,
+      Array<{
+        resolve: (value: StartedTurn | null) => void;
+        timer: number;
+      }>
+    >
+  >(new Map());
   // Forward-declared so ``handleRunnerEvent`` (created above
   // ``loadSession`` in source order) can trigger a server refresh after
   // a turn finishes without taking a stale closure of ``loadSession``.
@@ -986,6 +1002,13 @@ export function UnifiedChatProvider({
       runnersRef.current.clear();
       retryTimersRef.current.forEach((id) => clearTimeout(id));
       retryTimersRef.current.clear();
+      pendingStartRef.current.forEach((waiters) => {
+        waiters.forEach(({ resolve, timer }) => {
+          clearTimeout(timer);
+          resolve(null);
+        });
+      });
+      pendingStartRef.current.clear();
     },
     [],
   );
@@ -1058,6 +1081,17 @@ export function UnifiedChatProvider({
             turnId,
           });
           moveRunner(effectiveKey, sessionId);
+          const pending = pendingStartRef.current.get(effectiveKey);
+          const waiter = pending?.shift();
+          if (waiter) {
+            window.clearTimeout(waiter.timer);
+            waiter.resolve(
+              turnId ? { sessionId, turnId } : null,
+            );
+          }
+          if (pending && pending.length === 0) {
+            pendingStartRef.current.delete(effectiveKey);
+          }
         }
         return;
       }
@@ -1434,6 +1468,20 @@ export function UnifiedChatProvider({
         dispatch({ type: "NEW_SESSION", key });
       }
       const session = currentState.sessions[key] ?? createSessionEntry(key);
+      const startedTurn = new Promise<StartedTurn | null>((resolve) => {
+        const timer = window.setTimeout(() => {
+          const waiters = pendingStartRef.current.get(key);
+          if (waiters) {
+            const index = waiters.findIndex((waiter) => waiter.resolve === resolve);
+            if (index >= 0) waiters.splice(index, 1);
+            if (waiters.length === 0) pendingStartRef.current.delete(key);
+          }
+          resolve(null);
+        }, 15_000);
+        const waiters = pendingStartRef.current.get(key) || [];
+        waiters.push({ resolve, timer });
+        pendingStartRef.current.set(key, waiters);
+      });
       const replaySnapshot = options?.requestSnapshotOverride;
       const effectiveCapability =
         replaySnapshot?.capability ?? session.activeCapability;
@@ -1592,6 +1640,7 @@ export function UnifiedChatProvider({
           ? { parent_message_id: wireParentId }
           : {}),
       });
+      return startedTurn;
     },
     [makeDraftKey, sendThroughRunner],
   );
@@ -1697,6 +1746,7 @@ export function UnifiedChatProvider({
       personaSelection: current.personaSelection,
       messages: current.messages,
       isStreaming: current.isStreaming,
+      status: current.status,
       currentStage: current.currentStage,
       language: current.language,
       selectedBranches: current.selectedBranches,

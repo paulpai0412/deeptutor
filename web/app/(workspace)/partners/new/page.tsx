@@ -359,8 +359,8 @@ export default function NewPartnerPage() {
                   className="w-48 rounded-xl border border-[var(--border)] bg-transparent px-3 py-2 text-[14px] outline-none transition-colors focus:border-[var(--ring)]"
                 >
                   <option value="">{t("Auto (English)")}</option>
-                  <option value="en">English</option>
-                  <option value="zh">中文</option>
+                  <option value="en">{t("English")}</option>
+                  <option value="zh">{t("Chinese")}</option>
                 </select>
               </div>
             </div>

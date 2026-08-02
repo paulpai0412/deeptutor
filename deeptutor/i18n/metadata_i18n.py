@@ -84,7 +84,12 @@ def tool_description_i18n(name: str, fallback: str = "") -> dict[str, str]:
 
 
 def localized_description(values: dict[str, str], language: str) -> str:
-    lang = "zh" if (language or "en").lower().startswith("zh") else "en"
+    code = (language or "en").lower().replace("_", "-")
+    if code in {"zh-tw", "zh-hant", "zh-hk", "tw", "traditional"}:
+        from deeptutor.i18n.zh_tw import to_traditional_chinese
+
+        return to_traditional_chinese(values.get("zh") or values.get("en") or "")
+    lang = "zh" if code.startswith("zh") else "en"
     return values.get(lang) or values.get("en") or values.get("zh") or ""
 
 

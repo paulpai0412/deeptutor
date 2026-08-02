@@ -5,13 +5,17 @@ import { usePathname } from "next/navigation";
 import SettingsBreadcrumb from "@/components/settings/SettingsBreadcrumb";
 import { SettingsToolbar } from "@/components/settings/SettingsToolbar";
 import { SettingsLoadStatusBanner } from "@/components/settings/SettingsLoadStatusBanner";
-import { SETTINGS_HUB_HREF, isNavOnlyRoute } from "@/lib/settings-nav";
+import {
+  SETTINGS_HUB_HREF,
+  showsSettingsToolbar,
+} from "@/lib/settings-nav";
 
 // Two-level hub: the dashboard at `/settings` is the entry; categories with
 // several settings open a sub-hub, the rest go straight to a leaf. Every page
 // below the hub carries a breadcrumb top-left so the user knows where they
 // are. The sticky Save Draft / Apply toolbar rides above the scroll area on
-// leaf pages only — nav-only pages (hub, sub-hubs) have nothing to save.
+// catalog leaf pages only — navigation hubs and independently persisted
+// leaves such as Realtime Voice do not use the catalog toolbar.
 
 export default function SettingsMain({
   children,
@@ -29,7 +33,7 @@ export default function SettingsMain({
     );
   }
 
-  const showToolbar = !isNavOnlyRoute(pathname);
+  const showToolbar = showsSettingsToolbar(pathname);
 
   return (
     <div className="flex h-full min-w-0 flex-col overflow-hidden bg-[var(--background)]">

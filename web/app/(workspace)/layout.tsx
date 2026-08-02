@@ -1,6 +1,7 @@
 import WorkspaceSidebar from "@/components/sidebar/WorkspaceSidebar";
 import { CapabilityAccessProvider } from "@/components/access/CapabilityAccessContext";
 import CapabilityGate from "@/components/access/CapabilityGate";
+import { AmbientPet } from "@/components/pets/AmbientPet";
 import { UnifiedChatProvider } from "@/context/UnifiedChatContext";
 
 export default function WorkspaceLayout({
@@ -17,6 +18,7 @@ export default function WorkspaceLayout({
             <CapabilityGate>{children}</CapabilityGate>
           </main>
         </div>
+        <AmbientPet />
       </UnifiedChatProvider>
     </CapabilityAccessProvider>
   );

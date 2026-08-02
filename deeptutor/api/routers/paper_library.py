@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 import mimetypes
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any
 import uuid
 
-from fastapi import APIRouter, BackgroundTasks, File, HTTPException, Query, UploadFile
+from fastapi import APIRouter, BackgroundTasks, File, Form, HTTPException, Query, UploadFile
 from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
@@ -26,6 +26,7 @@ from deeptutor.services.paper_library import (
     PaperLibraryError,
     PaperLibraryService,
     PaperValidationError,
+    normalize_folder_path,
 )
 from deeptutor.utils.document_validator import DocumentValidator
 
@@ -49,6 +50,7 @@ class PaperLibrarySummary(BaseModel):
     name: str
     description: str = ""
     settings: dict[str, Any] = Field(default_factory=dict)
+    folders: list[str] = Field(default_factory=list)
     created_at: str = ""
     updated_at: str = ""
     paper_count: int = 0
@@ -84,6 +86,7 @@ class PaperSummary(BaseModel):
     warning_count: int
     created_at: str
     updated_at: str
+    folder_path: str = ""
     error: str = ""
     warnings: list[str] = Field(default_factory=list)
     progress: dict = Field(default_factory=dict)
@@ -99,6 +102,20 @@ class PaperDetail(PaperSummary):
 
 class PaperListResponse(BaseModel):
     papers: list[PaperSummary]
+    folders: list[str] = Field(default_factory=list)
+
+
+class PaperFolderCreateRequest(BaseModel):
+    name: str = Field(min_length=1, max_length=120)
+    parent_path: str = Field(default="", max_length=2000)
+
+
+class PaperFolderResponse(BaseModel):
+    path: str
+
+
+class PaperFolderListResponse(BaseModel):
+    folders: list[str] = Field(default_factory=list)
 
 
 class PaperUploadResponse(BaseModel):
@@ -113,6 +130,7 @@ class PaperRenameRequest(BaseModel):
 
 class PaperMoveRequest(BaseModel):
     target_library_id: str = Field(min_length=1)
+    target_folder_path: str = Field(default="", max_length=2000)
 
 
 class PaperQuestionUpdate(BaseModel):
@@ -249,11 +267,29 @@ async def _run_paper_extraction_batch(
                     continue
 
 
+def _upload_path_parts(filename: str, relative_path: str | None) -> tuple[str, str]:
+    """Return a safe basename and normalized folder path for one upload."""
+    raw = str(relative_path or "").strip().replace("\\", "/")
+    if not raw:
+        return filename, ""
+    path = PurePosixPath(raw)
+    if (
+        path.is_absolute()
+        or ".." in path.parts
+        or not path.name
+        or any(ord(char) < 32 or ord(char) == 127 for char in path.name)
+    ):
+        raise PaperValidationError("Upload relative path must stay inside the Paper Library.")
+    folder_path = normalize_folder_path(path.parent.as_posix() if str(path.parent) != "." else "")
+    return path.name, folder_path
+
+
 async def _upload_papers(
     background_tasks: BackgroundTasks,
     files: list[UploadFile],
     *,
     library_id: str | None = None,
+    rel_paths: list[str] | None = None,
 ) -> PaperUploadResponse:
     service = get_paper_library_service()
     user = get_current_user()
@@ -269,14 +305,17 @@ async def _upload_papers(
     papers: list[PaperSummary] = []
     rejected: list[dict[str, str]] = []
     jobs: list[tuple[str, str]] = []
-    for upload in files:
+    for index, upload in enumerate(files):
         filename = upload.filename or "paper.pdf"
+        relative_path = rel_paths[index] if rel_paths and index < len(rel_paths) else ""
         try:
+            safe_filename, folder_path = _upload_path_parts(filename, relative_path)
             content = await upload.read(DocumentValidator.MAX_FILE_SIZE + 1)
             record = service.add_pdf(
-                filename,
+                safe_filename,
                 content,
                 library_id=library_id,
+                folder_path=folder_path,
                 extraction_config=extraction_config,
             )
             if record.status == "pending":
@@ -306,8 +345,9 @@ async def _upload_papers(
 async def upload_papers(
     background_tasks: BackgroundTasks,
     files: list[UploadFile] = File(...),
+    rel_paths: list[str] | None = Form(default=None),
 ) -> PaperUploadResponse:
-    return await _upload_papers(background_tasks, files)
+    return await _upload_papers(background_tasks, files, rel_paths=rel_paths)
 
 
 @router.get("/libraries", response_model=PaperLibraryListResponse)
@@ -397,13 +437,57 @@ async def list_library_papers(
     library_id: str,
     search: str | None = Query(default=None),
     status: str | None = Query(default=None),
+    folder_path: str | None = Query(default=None),
 ) -> PaperListResponse:
     service = get_paper_library_service()
     try:
-        papers = service.list_papers(library_id=library_id, search=search, status=status)
+        papers = service.list_papers(
+            library_id=library_id,
+            search=search,
+            status=status,
+            folder_path=folder_path,
+        )
+        folders = service.list_folders(library_id)
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail="Paper Library not found") from exc
-    return PaperListResponse(papers=[_summary(record) for record in papers])
+    except PaperValidationError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return PaperListResponse(
+        papers=[_summary(record) for record in papers],
+        folders=folders,
+    )
+
+
+@router.get("/libraries/{library_id}/folders", response_model=PaperFolderListResponse)
+async def list_library_folders(library_id: str) -> PaperFolderListResponse:
+    service = get_paper_library_service()
+    try:
+        return PaperFolderListResponse(folders=service.list_folders(library_id))
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="Paper Library not found") from exc
+
+
+@router.post(
+    "/libraries/{library_id}/folders",
+    response_model=PaperFolderResponse,
+    status_code=201,
+)
+async def create_library_folder(
+    library_id: str,
+    payload: PaperFolderCreateRequest,
+) -> PaperFolderResponse:
+    service = get_paper_library_service()
+    try:
+        path = service.create_folder(
+            library_id,
+            payload.name,
+            parent_path=payload.parent_path,
+        )
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="Paper Library or parent folder not found") from exc
+    except PaperValidationError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return PaperFolderResponse(path=path)
 
 
 @router.post("/libraries/{library_id}/upload", response_model=PaperUploadResponse)
@@ -411,8 +495,14 @@ async def upload_library_papers(
     library_id: str,
     background_tasks: BackgroundTasks,
     files: list[UploadFile] = File(...),
+    rel_paths: list[str] | None = Form(default=None),
 ) -> PaperUploadResponse:
-    return await _upload_papers(background_tasks, files, library_id=library_id)
+    return await _upload_papers(
+        background_tasks,
+        files,
+        library_id=library_id,
+        rel_paths=rel_paths,
+    )
 
 
 @router.patch(
@@ -447,11 +537,17 @@ async def move_library_paper(
     service = get_paper_library_service()
     _require_library_paper(service, library_id, paper_id)
     try:
-        record = service.move_paper(paper_id, payload.target_library_id)
+        record = service.move_paper(
+            paper_id,
+            payload.target_library_id,
+            payload.target_folder_path,
+        )
     except FileNotFoundError as exc:
-        raise HTTPException(status_code=404, detail="Paper Library not found") from exc
+        raise HTTPException(status_code=404, detail="Paper Library or destination folder not found") from exc
     except PaperBusyError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except PaperValidationError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     except PaperLibraryError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     return _summary(record)

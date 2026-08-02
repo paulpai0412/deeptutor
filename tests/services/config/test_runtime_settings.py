@@ -18,6 +18,7 @@ RUNTIME_ENV_KEYS = (
     "CORS_ORIGINS",
     "DISABLE_SSL_VERIFY",
     "CHAT_ATTACHMENT_DIR",
+    "DEEPTUTOR_REALTIME_VOICE_PROVIDER",
     "AUTH_ENABLED",
     "NEXT_PUBLIC_AUTH_ENABLED",
     "AUTH_USERNAME",
@@ -192,6 +193,7 @@ def test_startup_ensure_creates_missing_runtime_jsons_with_defaults(
     assert (settings_dir / "system.json").exists()
     assert (settings_dir / "auth.json").exists()
     assert (settings_dir / "integrations.json").exists()
+    assert (settings_dir / "realtime_voice.json").exists()
     assert (settings_dir / "document_parsing.json").exists()
     assert (settings_dir / "model_catalog.json").exists()
     _parsing_file = _read_json(settings_dir / "document_parsing.json")
@@ -209,6 +211,37 @@ def test_startup_ensure_creates_missing_runtime_jsons_with_defaults(
         "imagegen",
         "videogen",
     }
+
+
+def test_realtime_voice_provider_is_independent_and_fail_closed(tmp_path: Path) -> None:
+    service = RuntimeSettingsService(tmp_path / "settings", process_env={})
+
+    assert service.load_realtime_voice() == {
+        "version": 1,
+        "provider": "openai_codex",
+        "model": "gpt-live-1-boulder-alpha",
+        "voice": "cove",
+    }
+    saved = service.save_realtime_voice(
+        {
+            "provider": "unsupported",
+            "model": "gpt-live-1-boulder-alpha",
+            "voice": "JUNIPER",
+        }
+    )
+    assert saved == {
+        "version": 1,
+        "provider": "unsupported",
+        "model": "gpt-live-1-boulder-alpha",
+        "voice": "juniper",
+    }
+
+    overridden = RuntimeSettingsService(
+        tmp_path / "overridden",
+        process_env={"DEEPTUTOR_REALTIME_VOICE_PROVIDER": "openai-codex"},
+    )
+    overridden.save_realtime_voice({"provider": "openai_codex"})
+    assert overridden.load_realtime_voice()["provider"] == "openai_codex"
 
 
 def test_mineru_defaults_and_normalization(tmp_path: Path) -> None:

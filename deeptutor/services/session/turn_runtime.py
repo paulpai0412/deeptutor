@@ -683,6 +683,18 @@ class TurnRuntimeManager:
         runtime_only_config = {
             key: raw_config.pop(key) for key in runtime_only_keys if key in raw_config
         }
+        if capability == "exam" and not str(raw_config.get("paper_id") or "").strip():
+            # Exam mode is session-persistent, but paper_id only travels in the
+            # per-turn config from the originating client. Voice / restored
+            # sessions legitimately arrive without it — recover from the
+            # session's latest quiz snapshot instead of hard-failing.
+            if str(raw_config.get("mode") or "original_paper") == "original_paper":
+                session_id = str(payload.get("session_id") or "").strip()
+                if session_id:
+                    snapshot = await self.store.get_latest_quiz_snapshot(session_id)
+                    recovered = str((snapshot or {}).get("paper_id") or "").strip()
+                    if recovered:
+                        raw_config["paper_id"] = recovered
         try:
             from deeptutor.runtime.request_contracts import validate_capability_config
 
@@ -1859,6 +1871,17 @@ class TurnRuntimeManager:
         execution: _TurnExecution,
         event: StreamEvent,
     ) -> dict[str, Any]:
+        # Localize the human-readable event channel at the session transport
+        # boundary. This covers WS/SSE progress, errors, traces, and streamed
+        # answer chunks, while leaving structured metadata untouched.
+        from deeptutor.i18n.stream import localize_stream_event
+
+        localized = localize_stream_event(
+            event,
+            str(execution.payload.get("language") or "en"),
+        )
+        if localized is not event:
+            event.content = localized.content
         if event.type == StreamEventType.DONE and not event.metadata.get("status"):
             event.metadata = {**event.metadata, "status": "completed"}
         event.session_id = execution.session_id

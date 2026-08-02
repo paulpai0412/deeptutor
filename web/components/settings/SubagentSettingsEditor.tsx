@@ -13,6 +13,7 @@ import {
 } from "@/components/settings/shared";
 import { Toggle } from "@/components/settings/Toggle";
 import { agentGlyph } from "@/components/agents/agent-icons";
+import { toTaiwanChinese } from "@/lib/taiwan-zh";
 import {
   getBackendOptions,
   getSubagentSettings,
@@ -250,7 +251,10 @@ const GEMINI_PERMISSION_MODES: { value: string; label: Lang }[] = [
 export function SubagentSettingsEditor({ kind }: { kind: string }) {
   const { i18n } = useTranslation();
   const zh = i18n.language?.toLowerCase().startsWith("zh");
-  const tr = useCallback((l: Lang) => (zh ? l.zh : l.en), [zh]);
+  const tr = useCallback(
+    (l: Lang) => (zh ? toTaiwanChinese(l.zh) : l.en),
+    [zh],
+  );
 
   const [options, setOptions] = useState<SubagentBackendOptions | null>(null);
   const [config, setConfig] = useState<SubagentBackendConfig>({ ...DEFAULTS });

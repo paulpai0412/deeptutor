@@ -111,7 +111,7 @@ const nextConfig = {
   // allow-list. Without it, browsing http://127.0.0.1:<port>/ against a dev
   // server bound to localhost silently breaks client hydration — the SSR HTML
   // renders, but no React event handlers or effects ever attach.
-  allowedDevOrigins: ["127.0.0.1"],
+  allowedDevOrigins: ["127.0.0.1", "localhost"],
 
   // Turbopack configuration (used when running `npm run dev:turbo`)
   turbopack: {

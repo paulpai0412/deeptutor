@@ -12,6 +12,7 @@ import json
 import logging
 import time
 from typing import Any, List, Literal, Optional
+from uuid import uuid4
 
 from fastapi import APIRouter, HTTPException, Request, status
 from fastapi.responses import StreamingResponse
@@ -75,6 +76,13 @@ DEFAULT_UI_SETTINGS = {
     # preference (not catalog); the chat surface also keeps a per-session
     # override on top of this global default.
     "voice_autoplay": False,
+    # Meaning of the composer microphone. Dictation is the safe,
+    # backwards-compatible default; Realtime Conversation is enabled by a
+    # later voice session integration.
+    "voice_input_mode": "dictation",
+    # Ambient companion pet (ported from Codex CLI). "disabled" hides the
+    # pet; any other value must be a pet id from the web catalog.
+    "pet": "codex",
     # Seconds the chat UI waits for any turn event before declaring the
     # connection timed out. Bumped from 60 → 180 so slow tools (image/video
     # generation) don't trip it; user-adjustable in Settings > Network.
@@ -94,7 +102,9 @@ class SidebarNavOrder(BaseModel):
 
 class UISettings(BaseModel):
     theme: Literal["light", "dark", "glass", "snow"] = "snow"
-    language: Literal["zh", "en"] = "en"
+    language: Literal["zh", "zh-TW", "en"] = "en"
+    voice_input_mode: Literal["dictation", "realtime"] = "dictation"
+    pet: str = "codex"
     sidebar_description: Optional[str] = None
     sidebar_nav_order: Optional[SidebarNavOrder] = None
     code_block_theme: Optional[str] = None
@@ -116,7 +126,9 @@ class UISettingsUpdate(BaseModel):
     # for exclude_unset partial merges, but an explicit value is still validated
     # so PUT /ui cannot persist a theme/language the app can't render.
     theme: Literal["light", "dark", "glass", "snow"] | None = None
-    language: Literal["zh", "en"] | None = None
+    language: Literal["zh", "zh-TW", "en"] | None = None
+    voice_input_mode: Literal["dictation", "realtime"] | None = None
+    pet: str | None = None
     sidebar_description: str | None = None
     sidebar_nav_order: SidebarNavOrder | None = None
     code_block_theme: str | None = None
@@ -128,6 +140,30 @@ class VoiceAutoplayUpdate(BaseModel):
     voice_autoplay: bool
 
 
+class VoiceInputModeUpdate(BaseModel):
+    voice_input_mode: Literal["dictation", "realtime"]
+
+
+class RealtimeVoiceSettingsUpdate(BaseModel):
+    provider: Literal["openai_codex"]
+    model: Literal["gpt-live-1-boulder-alpha"]
+    voice: Literal[
+        "juniper",
+        "maple",
+        "spruce",
+        "ember",
+        "vale",
+        "breeze",
+        "arbor",
+        "sol",
+        "cove",
+    ]
+
+
+class RealtimeVoiceConnectionTest(BaseModel):
+    sdp: str = Field(min_length=1, max_length=200_000)
+
+
 class ChatResponseTimeoutUpdate(BaseModel):
     chat_response_timeout: int = Field(ge=CHAT_RESPONSE_TIMEOUT_MIN, le=CHAT_RESPONSE_TIMEOUT_MAX)
 
@@ -137,7 +173,7 @@ class ThemeUpdate(BaseModel):
 
 
 class LanguageUpdate(BaseModel):
-    language: Literal["zh", "en"]
+    language: Literal["zh", "zh-TW", "en"]
 
 
 class SidebarDescriptionUpdate(BaseModel):
@@ -331,7 +367,7 @@ def _require_settings_admin() -> None:
         )
 
 
-def _provider_choices() -> dict[str, list[dict[str, str]]]:
+def _provider_choices() -> dict[str, list[dict[str, Any]]]:
     """Build dropdown options for provider selection, keyed by service type."""
     from deeptutor.services.config.provider_runtime import (
         EMBEDDING_PROVIDERS,
@@ -339,6 +375,12 @@ def _provider_choices() -> dict[str, list[dict[str, str]]]:
         STT_PROVIDERS,
         TTS_PROVIDERS,
         VIDEOGEN_PROVIDERS,
+    )
+    from deeptutor.services.llm.provider_core.github_copilot_auth import (
+        has_stored_github_token,
+    )
+    from deeptutor.services.llm.provider_core.openai_codex_provider import (
+        has_codex_oauth_token,
     )
     from deeptutor.services.provider_registry import PROVIDERS
 
@@ -354,6 +396,14 @@ def _provider_choices() -> dict[str, list[dict[str, str]]]:
                     else s.label
                 ),
                 "base_url": s.default_api_base,
+                **(
+                    {
+                        "auth_mode": "oauth",
+                        "oauth_ready": has_stored_github_token(),
+                    }
+                    if s.name == "github_copilot"
+                    else {}
+                ),
             }
             for s in PROVIDERS
         ],
@@ -414,6 +464,14 @@ def _provider_choices() -> dict[str, list[dict[str, str]]]:
                 "label": spec.label,
                 "base_url": spec.default_api_base,
                 "default_model": spec.default_model,
+                **(
+                    {
+                        "auth_mode": "oauth",
+                        "oauth_ready": has_codex_oauth_token(),
+                    }
+                    if name == "openai_codex"
+                    else {}
+                ),
             }
             for name, spec in IMAGEGEN_PROVIDERS.items()
         ],
@@ -1031,6 +1089,135 @@ async def update_voice_autoplay(update: VoiceAutoplayUpdate):
     current_ui["voice_autoplay"] = update.voice_autoplay
     save_ui_settings(current_ui)
     return {"voice_autoplay": update.voice_autoplay}
+
+
+def _realtime_voice_settings_payload() -> dict[str, Any]:
+    from deeptutor.services.voice.realtime import (
+        SUPPORTED_CODEX_REALTIME_MODELS,
+        SUPPORTED_CODEX_REALTIME_VOICES,
+        realtime_voice_status,
+    )
+
+    settings = get_runtime_settings_service().load_realtime_voice()
+    return {
+        "provider": settings["provider"],
+        "model": settings["model"],
+        "voice": settings["voice"],
+        "models": list(SUPPORTED_CODEX_REALTIME_MODELS),
+        "voices": list(SUPPORTED_CODEX_REALTIME_VOICES),
+        "status": realtime_voice_status().public_dict(),
+    }
+
+
+@router.get("/realtime-voice")
+async def get_realtime_voice_settings():
+    _require_settings_admin()
+    return _realtime_voice_settings_payload()
+
+
+@router.put("/realtime-voice")
+async def update_realtime_voice_settings(update: RealtimeVoiceSettingsUpdate):
+    _require_settings_admin()
+    get_runtime_settings_service().save_realtime_voice(update.model_dump())
+    return _realtime_voice_settings_payload()
+
+
+@router.post("/llm/github-copilot/oauth/start")
+async def start_github_copilot_oauth():
+    """Start a GitHub device-flow login; the UI shows the returned user code."""
+    _require_settings_admin()
+    from deeptutor.services.llm.provider_core.github_copilot_auth import (
+        start_device_login,
+    )
+
+    session = await start_device_login()
+    return {
+        "status": session.status,
+        "user_code": session.user_code,
+        "verification_uri": session.verification_uri,
+    }
+
+
+@router.get("/llm/github-copilot/oauth/status")
+async def github_copilot_oauth_status():
+    """Poll the device-flow login state and whether a token is stored."""
+    from deeptutor.services.llm.provider_core.github_copilot_auth import (
+        device_login_status,
+        has_stored_github_token,
+    )
+
+    session = device_login_status()
+    return {
+        "status": session.status,
+        "user_code": session.user_code,
+        "verification_uri": session.verification_uri,
+        "error": session.error,
+        "oauth_ready": has_stored_github_token(),
+    }
+
+
+@router.post("/realtime-voice/authorize")
+async def authorize_realtime_voice():
+    """Launch the existing Codex OAuth browser flow on the DeepTutor host."""
+    _require_settings_admin()
+    from deeptutor.services.llm.provider_core.openai_codex_provider import (
+        authorize_codex_oauth,
+    )
+
+    try:
+        await asyncio.to_thread(authorize_codex_oauth)
+    except Exception as exc:  # noqa: BLE001 - redact OAuth internals at the API boundary
+        logger.warning("OpenAI Codex OAuth authorization failed: %s", type(exc).__name__)
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=(
+                "OpenAI Codex OAuth authorization failed. Try again or run "
+                "`deeptutor provider login openai-codex` on the server."
+            ),
+        ) from exc
+    return _realtime_voice_settings_payload()
+
+
+@router.post("/realtime-voice/test")
+async def test_realtime_voice_connection(payload: RealtimeVoiceConnectionTest):
+    """Create a real AVAS call and V3 sideband, then close it immediately."""
+    _require_settings_admin()
+    from deeptutor.services.voice.realtime import (
+        CodexOAuthRealtimeProvider,
+        CodexRealtimeSideband,
+        RealtimeVoiceProviderError,
+    )
+
+    session: CodexRealtimeSideband | None = None
+    try:
+        provider = CodexOAuthRealtimeProvider()
+        call = await provider.create_call(
+            payload.sdp,
+            session_id=f"deeptutor-settings-test-{uuid4().hex}",
+        )
+        session = await provider.connect_sideband(call)
+        return {
+            "ok": True,
+            "message": "GPT-Live V3 connection succeeded.",
+            **_realtime_voice_settings_payload(),
+        }
+    except RealtimeVoiceProviderError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=str(exc),
+        ) from exc
+    finally:
+        if session is not None:
+            await session.close()
+
+
+@router.put("/voice-input-mode")
+async def update_voice_input_mode(update: VoiceInputModeUpdate):
+    """Persist the global meaning of the chat composer microphone."""
+    current_ui = load_ui_settings()
+    current_ui["voice_input_mode"] = update.voice_input_mode
+    save_ui_settings(current_ui)
+    return {"voice_input_mode": update.voice_input_mode}
 
 
 @router.put("/chat-response-timeout")

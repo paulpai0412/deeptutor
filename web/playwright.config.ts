@@ -1,4 +1,24 @@
+import fs from "node:fs";
+import path from "node:path";
 import { defineConfig, devices } from "@playwright/test";
+
+// The coding-agent Chromium image may provide browser dependencies in a
+// user-local extraction instead of the system loader path. Keep normal CI
+// untouched, but make direct `npx playwright test` runs use that extraction
+// when it is present.
+const localBrowserLibDirs = [
+  process.env.PLAYWRIGHT_LD_LIBRARY_PATH,
+  "/tmp/playwright-libs/usr/lib/x86_64-linux-gnu",
+  "/tmp/playwright-libs/lib/x86_64-linux-gnu",
+].filter((directory): directory is string => Boolean(directory && fs.existsSync(directory)));
+if (localBrowserLibDirs.length > 0) {
+  const existing = process.env.LD_LIBRARY_PATH
+    ?.split(path.delimiter)
+    .filter(Boolean) ?? [];
+  process.env.LD_LIBRARY_PATH = [
+    ...new Set([...localBrowserLibDirs, ...existing]),
+  ].join(path.delimiter);
+}
 
 const BASE_URL =
   process.env.WEB_BASE_URL ||

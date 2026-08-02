@@ -236,6 +236,7 @@ class PartnerRunner:
         so the channel doesn't send it twice).
         """
         from deeptutor.runtime.orchestrator import ChatOrchestrator
+        from deeptutor.i18n.stream import localize_stream_event
         from deeptutor.services.model_selection.runtime import (
             activate_llm_selection,
             reset_llm_selection,
@@ -288,6 +289,7 @@ class PartnerRunner:
             with user_context(partner_user(self.partner_id, name=self.config.name)):
                 orchestrator = ChatOrchestrator()
                 async for event in orchestrator.handle(context):
+                    event = localize_stream_event(event, context.language)
                     if on_event is not None:
                         await on_event(event)
                     meta = event.metadata or {}
@@ -494,8 +496,9 @@ class PartnerRunner:
             return []
 
     def _language(self) -> str:
-        lang = str(getattr(self.config, "language", "") or "").strip().lower()
-        return "zh" if lang.startswith("zh") else "en"
+        from deeptutor.services.config import parse_language
+
+        return parse_language(str(getattr(self.config, "language", "") or ""))
 
     def _channel_delivery_flag(self, channel_name: str, name: str, *, default: bool) -> bool:
         channels = getattr(self.config, "channels", None) or {}
