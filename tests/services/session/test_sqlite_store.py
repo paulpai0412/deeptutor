@@ -265,3 +265,48 @@ def test_category_cascade_on_entry_delete(store: SQLiteSessionStore) -> None:
     asyncio.run(store.delete_notebook_entry(eid))
     cats = asyncio.run(store.list_categories())
     assert cats[0]["entry_count"] == 0
+
+
+def test_realtime_voice_turns_chain_to_canonical_tail(
+    store: SQLiteSessionStore,
+) -> None:
+    """Invariant: a voice reply must chain under the assistant question it
+    answers, and the next turn's context walk must contain that question.
+
+    Realtime Voice sends omit ``parent_message_id`` (appendToLatest), so the
+    store's legacy auto-append resolves the canonical tail. Regression test
+    for the production bug where 20/20 consecutive voice replies were
+    persisted under a stale parent, hiding the question from the next turn.
+    """
+    session = asyncio.run(store.create_session())
+    sid = session["id"]
+
+    start_user = asyncio.run(
+        store.add_message(session_id=sid, role="user", content="開始考試")
+    )
+    question = asyncio.run(
+        store.add_message(
+            session_id=sid, role="assistant", content="第 1 題：下列何者正確？"
+        )
+    )
+    reply = asyncio.run(
+        store.add_message(session_id=sid, role="user", content="B")
+    )
+    followup = asyncio.run(
+        store.add_message(
+            session_id=sid, role="assistant", content="答對了。第 2 題：…"
+        )
+    )
+
+    messages = asyncio.run(store.get_messages(sid))
+    by_id = {int(m["id"]): m for m in messages}
+    assert by_id[question]["parent_message_id"] == start_user
+    # THE invariant: the reply chains under the question, not a stale parent.
+    assert by_id[reply]["parent_message_id"] == question
+    assert by_id[followup]["parent_message_id"] == reply
+
+    # Context walk from the tail (leaf=None) must surface the question.
+    context = asyncio.run(store.get_messages_for_context(sid))
+    contents = [str(m.get("content") or "") for m in context]
+    assert "第 1 題：下列何者正確？" in contents
+    assert contents[-1] == "答對了。第 2 題：…"

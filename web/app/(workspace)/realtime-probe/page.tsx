@@ -23,7 +23,12 @@ export default function RealtimeProbePage() {
   }, []);
   const { state: chatState, sendMessage, loadSession } = useUnifiedChat();
   const handleFinalTranscript = useCallback(
-    (text: string) => sendMessage(text),
+    // Realtime Voice turns append to the persisted session tail; the
+    // visible tip can lag behind the backend save while speaking.
+    (text: string) =>
+      sendMessage(text, undefined, undefined, undefined, undefined, {
+        appendToLatest: true,
+      }),
     [sendMessage],
   );
   const handleSessionReady = useCallback(
