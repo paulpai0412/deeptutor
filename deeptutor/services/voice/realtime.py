@@ -380,6 +380,26 @@ class CodexRealtimeSideband:
         """Append one DeepTutor-owned speakable chunk to the delegation."""
         await self._send_context(handoff_id, output_text, channel="speakable")
 
+    async def send_speech(self, output_text: str) -> None:
+        """Append speakable text without a delegation (session-level append).
+
+        Used for synthetic transcript handoffs, where the user utterance was
+        committed from its final transcript and no provider delegation item
+        exists to append to. Mirrors the official ``appendSpeech`` contract:
+        ``session.context.append`` with the ``speakable`` channel.
+        """
+        output_text = str(output_text)
+        if not output_text.strip():
+            raise RealtimeVoiceProviderError("Realtime speech output is empty.")
+        for chunk in _utf8_chunks(output_text):
+            await self._send(
+                {
+                    "type": "session.context.append",
+                    "channel": "speakable",
+                    "content": [{"type": "input_text", "text": chunk}],
+                }
+            )
+
     async def _send_context(self, handoff_id: str, output_text: str, *, channel: str) -> None:
         handoff_id = str(handoff_id).strip()
         output_text = str(output_text)

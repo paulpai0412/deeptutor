@@ -128,7 +128,7 @@ export function useRealtimeVoiceSession(
   }, []);
   const [audioOutputReceived, setAudioOutputReceived] = useState(false);
   const [audioOutputCount, setAudioOutputCount] = useState(0);
-  const [lastTurnMode, setLastTurnMode] = useState<"delegated" | null>(null);
+  const [lastTurnMode, setLastTurnMode] = useState<"delegated" | "transcript" | null>(null);
   const [error, setError] = useState<string | null>(null);
   const socketRef = useRef<WebSocket | null>(null);
   const peerRef = useRef<RTCPeerConnection | null>(null);
@@ -147,7 +147,6 @@ export function useRealtimeVoiceSession(
   const mutedRef = useRef(false);
   const assistantPendingRef = useRef(false);
   const outputActiveRef = useRef(false);
-  const playbackAuthorizedRef = useRef(false);
   const interruptionSentRef = useRef(false);
   const onFinalTranscriptRef = useRef(onFinalTranscript);
   const onSessionReadyRef = useRef(options.onSessionReady);
@@ -212,7 +211,6 @@ export function useRealtimeVoiceSession(
     handoffIdRef.current = null;
     transcriptCommittedRef.current = false;
     assistantPendingRef.current = false;
-    playbackAuthorizedRef.current = false;
     interruptionSentRef.current = false;
     ignoreAudioRef.current = false;
     releaseStream();
@@ -232,7 +230,6 @@ export function useRealtimeVoiceSession(
     }
     interruptionSentRef.current = true;
     ignoreAudioRef.current = true;
-    playbackAuthorizedRef.current = false;
     assistantPendingRef.current = false;
     clearSoftInterrupt();
     pauseRemoteAudio();
@@ -246,7 +243,10 @@ export function useRealtimeVoiceSession(
     const audio = remoteAudioRef.current;
     const stream = remoteStreamRef.current;
     if (!audio || !stream) return false;
-    audio.muted = !playbackAuthorizedRef.current;
+    // Codex mode: one audio source (GPT-Live), always playable. There is no
+    // playback authorization — the protocol has no ownership signal for
+    // audio, so gating it only created races (issue #33).
+    audio.muted = false;
     if (audio.srcObject !== stream) audio.srcObject = stream;
     try {
       await audio.play();
@@ -257,7 +257,6 @@ export function useRealtimeVoiceSession(
   }, []);
 
   const resumeRemoteAudio = useCallback(async (): Promise<boolean> => {
-    if (!playbackAuthorizedRef.current) return false;
     const ready = await primeRemoteAudio();
     const audio = remoteAudioRef.current;
     if (!ready || !audio) return false;
@@ -285,12 +284,9 @@ export function useRealtimeVoiceSession(
     softInterruptTimerRef.current = window.setTimeout(() => {
       softInterruptTimerRef.current = null;
       softSuppressedRef.current = false;
-      // False start: the server never took over (still authorized) and the
-      // answer is still going — resume it as if nothing happened.
-      if (
-        playbackAuthorizedRef.current &&
-        (outputActiveRef.current || assistantPendingRef.current)
-      ) {
+      // False start: no turn took over and the answer is still going —
+      // resume it as if nothing happened.
+      if (outputActiveRef.current || assistantPendingRef.current) {
         if (remoteAudioRef.current) remoteAudioRef.current.muted = false;
         void resumeRemoteAudio();
       }
@@ -307,7 +303,6 @@ export function useRealtimeVoiceSession(
     ignoreAudioRef.current = false;
     assistantPendingRef.current = false;
     outputActiveRef.current = false;
-    playbackAuthorizedRef.current = false;
     interruptionSentRef.current = false;
     handoffIdRef.current = null;
     transcriptCommittedRef.current = false;
@@ -371,16 +366,6 @@ export function useRealtimeVoiceSession(
           if (payload.type === "output_audio.delta" && softSuppressedRef.current) {
             return;
           }
-          if (
-            payload.type === "output_audio.delta" &&
-            !playbackAuthorizedRef.current
-          ) {
-            // The server sideband is the only authority for native delegation
-            // and playback. Provider events can reach this browser data channel
-            // before the server sends handoff or speech authorization; keep
-            // the media muted and let the server fail closed if needed.
-            return;
-          }
           if (payload.type === "output_audio.delta") {
             // The PCM/base64 field is intentionally ignored. WebRTC plays the
             // media track; React stores only this content-free receipt signal.
@@ -397,7 +382,6 @@ export function useRealtimeVoiceSession(
             payload.type === "turn.done" &&
             payload.turn?.role === "assistant"
           ) {
-            if (!playbackAuthorizedRef.current) return;
             assistantPendingRef.current = false;
             outputActiveRef.current = false;
             setState(mutedRef.current ? "muted" : "listening");
@@ -414,9 +398,8 @@ export function useRealtimeVoiceSession(
         remoteStreamRef.current = remoteStream;
         const audio = remoteAudioRef.current ?? new Audio();
         audio.autoplay = true;
-        audio.muted = !playbackAuthorizedRef.current;
+        audio.muted = false;
         audio.onplaying = () => {
-          if (!playbackAuthorizedRef.current) return;
           if (!outputActiveRef.current) {
             outputActiveRef.current = true;
             setAudioOutputReceived(true);
@@ -499,24 +482,8 @@ export function useRealtimeVoiceSession(
           }
           return;
         }
-        if (message.type === "playback_suppressed") {
-          clearSoftInterrupt();
-          playbackAuthorizedRef.current = false;
-          if (remoteAudioRef.current) remoteAudioRef.current.muted = true;
-          pauseRemoteAudio();
-          return;
-        }
-        if (message.type === "playback_authorized") {
-          clearSoftInterrupt();
-          playbackAuthorizedRef.current = true;
-          ignoreAudioRef.current = false;
-          interruptionSentRef.current = false;
-          void resumeRemoteAudio();
-          return;
-        }
         if (message.type === "audio_output") {
           if (softSuppressedRef.current) return;
-          if (!playbackAuthorizedRef.current) return;
           ignoreAudioRef.current = false;
           interruptionSentRef.current = false;
           if (!outputActiveRef.current) {
@@ -526,20 +493,6 @@ export function useRealtimeVoiceSession(
           }
           setState("speaking");
           void resumeRemoteAudio();
-          return;
-        }
-        if (message.type === "turn_rejected") {
-          clearSoftInterrupt();
-          playbackAuthorizedRef.current = false;
-          ignoreAudioRef.current = true;
-          assistantPendingRef.current = false;
-          outputActiveRef.current = false;
-          if (remoteAudioRef.current) remoteAudioRef.current.muted = true;
-          pauseRemoteAudio();
-          transcriptCommittedRef.current = false;
-          setPartialTranscript("");
-          setError(message.message || "GPT-Live did not delegate this turn. Please ask again.");
-          setState(mutedRef.current ? "muted" : "listening");
           return;
         }
         if (message.type === "assistant_transcript" && message.phase === "final") {
@@ -561,9 +514,12 @@ export function useRealtimeVoiceSession(
             setPartialTranscript((current) =>
               appendRealtimeTranscript(reset ? "" : current, update),
             );
-          } else if (message.phase === "final" && message.mode === "delegated") {
+          } else if (
+            message.phase === "final" &&
+            (message.mode === "delegated" || message.mode === "transcript")
+          ) {
             const text = update.trim();
-            setLastTurnMode("delegated");
+            setLastTurnMode(message.mode);
             transcriptCommittedRef.current = true;
             setPartialTranscript(text);
             const handoffId = handoffIdRef.current;
@@ -573,8 +529,6 @@ export function useRealtimeVoiceSession(
               closeSession();
               return;
             }
-            playbackAuthorizedRef.current = false;
-            if (remoteAudioRef.current) remoteAudioRef.current.muted = true;
             assistantPendingRef.current = true;
             interruptionSentRef.current = false;
             void sessionReadyRef.current
@@ -642,7 +596,6 @@ export function useRealtimeVoiceSession(
       setState("error");
     }
   }, [
-    clearSoftInterrupt,
     closeSession,
     pauseRemoteAudio,
     releaseAudio,

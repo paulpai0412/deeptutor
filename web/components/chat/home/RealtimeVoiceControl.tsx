@@ -24,7 +24,7 @@ type Props = {
   error: string | null;
   audioOutputReceived: boolean;
   audioOutputCount: number;
-  lastTurnMode: "delegated" | null;
+  lastTurnMode: "delegated" | "transcript" | null;
   disabled: boolean;
   onToggle: () => void;
   onToggleMute: () => void;

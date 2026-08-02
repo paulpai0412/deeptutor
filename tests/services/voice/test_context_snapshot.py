@@ -92,8 +92,11 @@ async def test_snapshot_is_bounded_access_checked_and_retrieves_prior_context() 
     assert "Current page context" in serialized
     assert "Current question context" in serialized
     assert "delegation" in snapshot.instructions.lower()
-    assert "EVERY completed user utterance" in snapshot.instructions
-    assert "NEVER answer" in snapshot.instructions
+    # Codex-model contract: delegation is a prompt bias; direct answers are
+    # harmless (brief acknowledgments only), never enforced (issue #33).
+    assert "voice surface" in snapshot.instructions
+    assert "brief acknowledgment" in snapshot.instructions
+    assert "NEVER answer" not in snapshot.instructions
     assert len(snapshot.initial_items) <= MAX_CONTEXT_ITEMS
     assert sum(count_tokens(item["text"]) for item in snapshot.initial_items) <= MAX_CONTEXT_TOKENS
     assert store.preferences == {
@@ -261,16 +264,16 @@ async def test_exam_snapshot_projects_question_index_without_answer_material() -
         "paper_library:library-1",
         "paper:paper-1",
     )
-    assert "EVERY" in snapshot.instructions
+    assert "voice surface" in snapshot.instructions
     assert "speaks while you are vocalizing" in snapshot.instructions
     assert "short exam answers" in snapshot.instructions
-    assert "Barge-in is NEVER permission" in snapshot.instructions
+    assert "never judge answers" in snapshot.instructions
     assert "delegation" in snapshot.instructions.lower()
     serialized = "\n".join(item["text"] for item in snapshot.initial_items)
     assert "Calculus exams" in serialized
     assert "Midterm A" in serialized
     assert "Exam barge-in policy" in serialized
-    assert "Delegate it exactly once" in serialized
+    assert "Delegate it" in serialized
     assert "2 questions numbered 1 through 2" in serialized
     assert "Secret question stem" not in serialized
     assert "correct_answer" not in serialized
