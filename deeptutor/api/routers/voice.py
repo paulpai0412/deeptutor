@@ -610,6 +610,8 @@ async def _serve_codex_realtime(ws: WebSocket) -> None:
                 session_store,
                 context_request,
             )
+        if context_snapshot is None:
+            raise RealtimeVoiceProviderError("Realtime Voice context was not prepared.")
         provider = CodexOAuthRealtimeProvider()
         call = await provider.create_call(
             offer_sdp,
@@ -620,6 +622,12 @@ async def _serve_codex_realtime(ws: WebSocket) -> None:
             initial_items=context_snapshot.initial_items,
         )
         session = await provider.connect_sideband(call)
+        logger.info(
+            "Realtime Voice provider session ready: session=%s capability=%s exam=%s",
+            context_snapshot.session_id,
+            context_snapshot.capability,
+            context_snapshot.exam_mode,
+        )
         # The SDP answer and content-free session metadata are public to the
         # browser. OAuth, the call id, and the full context snapshot stay server-side.
         await send(
@@ -633,6 +641,7 @@ async def _serve_codex_realtime(ws: WebSocket) -> None:
         await send({"type": "state", "state": "connected"})
         await send({"type": "state", "state": "listening"})
     except RealtimeContextError as exc:
+        logger.warning("Realtime Voice session setup failed (context): %s", exc)
         await send(
             {
                 "type": "error",
@@ -643,6 +652,7 @@ async def _serve_codex_realtime(ws: WebSocket) -> None:
         await close_socket(1011)
         return
     except RealtimeVoiceProviderError as exc:
+        logger.warning("Realtime Voice session setup failed (provider): %s", exc)
         await send(
             {
                 "type": "error",
@@ -656,6 +666,7 @@ async def _serve_codex_realtime(ws: WebSocket) -> None:
     async def forward_provider_events() -> None:
         nonlocal closed
         assert session is not None
+        provider_stream_active = False
         try:
             async for provider_event in session.events():
                 if provider_event.get("type") == "error":
@@ -684,6 +695,9 @@ async def _serve_codex_realtime(ws: WebSocket) -> None:
                         error.get("param") if isinstance(error, dict) else None,
                         error_message,
                     )
+                if not provider_stream_active:
+                    provider_stream_active = True
+                    logger.info("Realtime Voice provider stream active")
                 for normalized in normalize_codex_event(provider_event):
                     event_type = normalized.get("type")
                     if event_type == "handoff":
