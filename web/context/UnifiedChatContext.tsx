@@ -29,7 +29,11 @@ import {
 } from "@/lib/session-api";
 import { normalizeMarkdownForDisplay } from "@/lib/markdown-display";
 import { normalizeMessageContent } from "@/lib/message-content";
-import { buildVisiblePath, tipMessageId } from "@/lib/message-branches";
+import {
+  buildVisiblePath,
+  resolveOutgoingParentIds,
+  tipMessageId,
+} from "@/lib/message-branches";
 import { reconcileTurnIds } from "@/lib/turn-reconcile";
 import {
   isNarrationMarker,
@@ -80,6 +84,10 @@ export interface SendMessageOptions {
    *  sibling under this parent rather than appended to the session tail.
    *  ``null`` means "explicitly attach to the session root". */
   parentMessageId?: number | null;
+  /** Let the server append after its latest persisted message instead of
+   *  trusting a possibly stale client tip. Used by Realtime Voice after
+   *  cooperative cancellation saves the interrupted assistant response. */
+  appendToLatest?: boolean;
 }
 
 export interface StartedTurn {
@@ -1567,16 +1575,11 @@ export function UnifiedChatProvider({
         session.selectedBranches,
       ).messages;
       const tipId = tipMessageId(visible);
-      const localParentId =
-        options?.parentMessageId !== undefined
-          ? options.parentMessageId
-          : tipId;
-      const wireParentId: number | null | undefined =
-        options?.parentMessageId !== undefined
-          ? options.parentMessageId
-          : tipId !== null && tipId > 0
-            ? tipId
-            : undefined;
+      const { localParentId, wireParentId } = resolveOutgoingParentIds(
+        tipId,
+        options?.parentMessageId,
+        options?.appendToLatest === true,
+      );
       if (options?.displayUserMessage !== false) {
         dispatch({
           type: "ADD_USER_MSG",
@@ -1630,12 +1633,9 @@ export function UnifiedChatProvider({
         ...(effectiveTurnConfig && Object.keys(effectiveTurnConfig).length > 0
           ? { config: effectiveTurnConfig }
           : {}),
-        // Send ``parent_message_id`` only when we have a real (positive)
-        // server id to chain under, or when the caller explicitly pinned
-        // a parent (incl. ``null`` for editing the session's first
-        // message). When the visible tip is still an optimistic
-        // negative id, omit the key and let the backend auto-append to
-        // the latest persisted row.
+        // Realtime Voice deliberately omits ``parent_message_id`` so the
+        // backend appends after the assistant row saved by cooperative
+        // cancellation instead of trusting React's stale visible tip.
         ...(wireParentId !== undefined
           ? { parent_message_id: wireParentId }
           : {}),

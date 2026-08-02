@@ -4,7 +4,6 @@ import {
   memo,
   useCallback,
   useEffect,
-  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -72,7 +71,10 @@ import ContextReferenceTree, {
   type ContextTreeItem,
 } from "./ContextReferenceTree";
 import { ComposerInput, type ComposerInputHandle } from "./ComposerInput";
-import { useUnifiedChat } from "@/context/UnifiedChatContext";
+import {
+  useUnifiedChat,
+  type SendMessageOptions,
+} from "@/context/UnifiedChatContext";
 import {
   useRealtimeVoiceSession,
   type RealtimeStartedTurn,
@@ -324,6 +326,7 @@ export default memo(function ChatComposer({
   onSend: (
     content: string,
     configOverride?: Record<string, unknown>,
+    options?: SendMessageOptions,
   ) => void | Promise<RealtimeStartedTurn | null | void>;
   onRemoveAttachment: (index: number) => void;
   onPreviewAttachment?: (index: number) => void;
@@ -415,6 +418,7 @@ export default memo(function ChatComposer({
               unifiedChatState.sessionId,
             )
           : undefined,
+        { appendToLatest: true },
       );
     },
     [onSend, quizQuestions, unifiedChatState.sessionId],
