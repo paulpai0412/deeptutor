@@ -6,8 +6,8 @@ import os
 from pathlib import Path
 from types import SimpleNamespace
 
-from pypdf import PdfWriter
-import pytest
+from pypdf import PdfReader, PdfWriter  # type: ignore[import-not-found]
+import pytest  # type: ignore[import-not-found]
 from reportlab.pdfgen import canvas
 
 from deeptutor.services.paper_extraction import extract_paper
@@ -138,6 +138,117 @@ def test_paper_extraction_uses_snapshotted_parser_engine(
     assert record.status == "ready_with_warnings"
     assert parser.calls[0][1]["engine"] == "text_only"
     assert service.get_paper(paper.paper_id).extraction_config["parser_engine"] == "text_only"
+
+
+def test_legacy_doc_is_converted_to_pdf_before_parsing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    service = PaperLibraryService(tmp_path / "papers")
+    source = (
+        Path(__file__).parents[1]
+        / "fixtures"
+        / "paper_library"
+        / "legacy-question.doc"
+    )
+    paper = service.add_pdf(
+        source.name,
+        source.read_bytes(),
+        extraction_config={"parser_engine": "pymupdf4llm"},
+    )
+    parser = FakeParser(ParsedDocument(markdown="Question 1", engine="pymupdf4llm"))
+    monkeypatch.setattr("deeptutor.services.paper_extraction.get_parse_service", lambda: parser)
+
+    def fake_convert(source_path: Path, output_dir: Path) -> Path:
+        assert source_path.suffix == ".doc"
+        converted = output_dir / "converted.pdf"
+        converted.write_bytes(_text_pdf_bytes())
+        return converted
+
+    monkeypatch.setattr(
+        "deeptutor.services.paper_extraction._convert_legacy_doc_to_pdf", fake_convert
+    )
+
+    async def fake_llm(**_) -> str:
+        return '{"complete": true, "questions": [{"question_number": "1", "question_text": "Converted", "question_type": "choice", "options": {"A": "Yes", "B": "No"}, "answer": "A"}]}'
+
+    record = asyncio.run(
+        extract_paper(service, paper.paper_id, llm_call=fake_llm, llm_config=_config())
+    )
+
+    parsed_path, parse_kwargs = parser.calls[0]
+    assert parsed_path.suffix == ".pdf"
+    assert not parsed_path.exists()
+    assert parse_kwargs["engine"] == "pymupdf4llm"
+    assert record.status == "ready"
+    assert record.parser_engine == "pymupdf4llm"
+
+
+def test_legacy_doc_converter_uses_isolated_headless_libreoffice(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from deeptutor.services import paper_extraction
+
+    source = tmp_path / "試卷_(教).doc"
+    source.write_bytes(b"legacy Word document")
+    output_dir = tmp_path / "output"
+    calls: list[tuple[list[str], dict]] = []
+
+    def fake_run(command: list[str], **kwargs):
+        calls.append((command, kwargs))
+        (output_dir / "converted.pdf").write_bytes(_pdf_bytes())
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(paper_extraction.shutil, "which", lambda _: "/usr/bin/soffice")
+    monkeypatch.setattr(paper_extraction.subprocess, "run", fake_run)
+    monkeypatch.setenv("DEEPTUTOR_TEST_SECRET", "must-not-leak")
+
+    converted = paper_extraction._convert_legacy_doc_to_pdf(source, output_dir)
+
+    command, kwargs = calls[0]
+    assert converted == output_dir / "converted.pdf"
+    assert "--headless" in command
+    assert command[-1] == str(source.resolve())
+    assert kwargs["timeout"] == 120
+    assert "DEEPTUTOR_TEST_SECRET" not in kwargs["env"]
+
+
+def test_legacy_doc_converter_requires_libreoffice(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from deeptutor.services import paper_extraction
+
+    monkeypatch.setattr(paper_extraction.shutil, "which", lambda _: None)
+
+    with pytest.raises(paper_extraction.PaperExtractionError, match="requires LibreOffice"):
+        paper_extraction._convert_legacy_doc_to_pdf(tmp_path / "paper.doc", tmp_path / "out")
+
+
+def test_real_legacy_doc_conversion_preserves_images_for_deeptutor_parsing(
+    tmp_path: Path,
+) -> None:
+    from deeptutor.services import paper_extraction
+    from deeptutor.services.parsing.service import ParseService
+
+    pytest.importorskip("pymupdf4llm")
+    if not (paper_extraction.shutil.which("soffice") or paper_extraction.shutil.which("libreoffice")):
+        pytest.skip("LibreOffice is not installed")
+
+    source = (
+        Path(__file__).parents[1]
+        / "fixtures"
+        / "paper_library"
+        / "legacy-question.doc"
+    )
+    pdf = paper_extraction._convert_legacy_doc_to_pdf(source, tmp_path / "converted")
+    reader = PdfReader(pdf)
+    parsed = ParseService(cache_root=tmp_path / "parse-cache").parse(
+        pdf, engine="pymupdf4llm"
+    )
+
+    assert sum(len(page.images) for page in reader.pages) >= 1
+    assert parsed.markdown.strip()
+    assert parsed.asset_dir is not None
+    assert any(parsed.asset_dir.iterdir())
 
 
 def test_fixed_image_pdf_fixture_does_not_infer_unreferenced_images(tmp_path: Path) -> None:
@@ -450,12 +561,15 @@ def test_scan_pdf_without_text_layer_becomes_failed_and_keeps_source(tmp_path: P
 
     from deeptutor.services.paper_extraction import extract_paper
 
+    async def fake_llm(**_) -> str:
+        return "never called"
+
     record = asyncio.run(
         extract_paper(
             service,
             paper.paper_id,
             parser=parser,
-            llm_call=lambda **_: "never called",
+            llm_call=fake_llm,
             llm_config=_config(),
         )
     )
@@ -522,7 +636,7 @@ def test_multi_select_is_preserved_for_manual_review(tmp_path: Path) -> None:
 
     question = service.get_questions(paper.paper_id)[0]
     assert record.status == "ready_with_warnings"
-    assert question["is_multi_select"] is True
+    assert question["is_multi_select"]
     assert question["answer"] == "A,C"
     assert any("manual review" in warning for warning in question["warnings"])
 

@@ -4,16 +4,19 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Awaitable, Callable
+import os
 from pathlib import Path
+import shutil
+import subprocess
+import tempfile
 from typing import Any
 import uuid
 
 from deeptutor.api.utils.task_id_manager import TaskIDManager
 from deeptutor.api.utils.task_log_stream import capture_task_logs, get_task_stream_manager
-from deeptutor.services.config import get_agent_params
+from deeptutor.services.config import get_agent_params, resolve_llm_runtime_config
 from deeptutor.services.llm.capabilities import supports_vision
 from deeptutor.services.llm.config import LLMConfig, get_llm_config
-from deeptutor.services.config import resolve_llm_runtime_config
 from deeptutor.services.parsing import get_parse_service
 from deeptutor.services.parsing.types import ParsedDocument, ParserError
 from deeptutor.tools.question.question_extractor import extract_questions_with_llm
@@ -46,6 +49,66 @@ _MULTI_SELECT_TYPES = {"multi_select", "multiple_select", "checkbox", "check_box
 
 class PaperExtractionError(RuntimeError):
     """Raised when a paper cannot produce a usable extraction result."""
+
+
+def _convert_legacy_doc_to_pdf(source_path: Path, output_dir: Path) -> Path:
+    executable = shutil.which("soffice") or shutil.which("libreoffice")
+    if executable is None:
+        raise PaperExtractionError(
+            "Legacy Word (.doc) conversion requires LibreOffice. Install LibreOffice and retry."
+        )
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+    profile_dir = output_dir / "libreoffice-profile"
+    profile_dir.mkdir()
+    environment = {
+        "HOME": str(output_dir),
+        "LANG": os.environ.get("LANG", "C.UTF-8"),
+        "LC_ALL": os.environ.get("LC_ALL", "C.UTF-8"),
+        "PATH": os.environ.get("PATH", os.defpath),
+        "SAL_USE_VCLPLUGIN": "svp",
+        "TMPDIR": str(output_dir),
+    }
+    command = [
+        executable,
+        f"-env:UserInstallation={profile_dir.resolve().as_uri()}",
+        "--headless",
+        "--nologo",
+        "--nodefault",
+        "--nolockcheck",
+        "--nofirststartwizard",
+        "--norestore",
+        "--convert-to",
+        "pdf",
+        "--outdir",
+        str(output_dir),
+        str(source_path.resolve()),
+    ]
+    try:
+        result = subprocess.run(
+            command,
+            cwd=output_dir,
+            env=environment,
+            capture_output=True,
+            text=True,
+            timeout=120,
+            check=False,
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise PaperExtractionError("Word-to-PDF conversion timed out after 120 seconds.") from exc
+    except OSError as exc:
+        raise PaperExtractionError(f"Could not start LibreOffice: {exc}") from exc
+
+    details = (result.stderr or result.stdout).strip()
+    if result.returncode != 0:
+        suffix = f": {details}" if details else "."
+        raise PaperExtractionError(f"LibreOffice could not convert the Word document{suffix}")
+
+    pdf_files = [path for path in output_dir.glob("*.pdf") if path.is_file()]
+    if len(pdf_files) != 1 or pdf_files[0].stat().st_size == 0:
+        suffix = f": {details}" if details else "."
+        raise PaperExtractionError(f"LibreOffice did not produce a usable PDF{suffix}")
+    return pdf_files[0]
 
 
 ProgressCallback = Callable[[str, int, str], None]
@@ -103,7 +166,6 @@ async def extract_paper(
     staging_dir = None
     try:
         with capture_task_logs(task_id):
-            progress("processing", 10, "Parsing PDF text layer.")
             parser_instance = parser or get_parse_service()
             parse_kwargs: dict[str, Any] = {
                 "on_output": lambda line: progress("processing", 20, str(line)),
@@ -111,11 +173,29 @@ async def extract_paper(
             parser_engine = str(extraction_config.get("parser_engine") or "").strip()
             if parser is None and parser_engine:
                 parse_kwargs["engine"] = parser_engine
-            parsed = await asyncio.to_thread(
-                parser_instance.parse,
-                service.source_path(paper_id),
-                **parse_kwargs,
-            )
+
+            source_path = service.source_path(paper_id)
+            conversion_dir: tempfile.TemporaryDirectory[str] | None = None
+            try:
+                parse_path = source_path
+                if source_path.suffix.lower() == ".doc":
+                    progress("processing", 10, "Converting Word document to PDF.")
+                    conversion_dir = tempfile.TemporaryDirectory(prefix="deeptutor-paper-")
+                    parse_path = await asyncio.to_thread(
+                        _convert_legacy_doc_to_pdf,
+                        source_path,
+                        Path(conversion_dir.name),
+                    )
+                else:
+                    progress("processing", 10, "Parsing PDF text layer.")
+                parsed = await asyncio.to_thread(
+                    parser_instance.parse,
+                    parse_path,
+                    **parse_kwargs,
+                )
+            finally:
+                if conversion_dir is not None:
+                    conversion_dir.cleanup()
             if not isinstance(parsed, ParsedDocument):
                 raise PaperExtractionError("Document parser returned an invalid result.")
             # Parse assets live in the content-addressed cache. Copy them into
@@ -161,7 +241,7 @@ async def extract_paper(
                 ),
             )
             if not questions:
-                raise PaperExtractionError("No usable questions were extracted from this PDF.")
+                raise PaperExtractionError("No usable questions were extracted from this paper.")
             if not bool(raw_result.get("complete", True)):
                 warnings.append("The primary LLM response did not cover the complete document.")
             if invalid_count:

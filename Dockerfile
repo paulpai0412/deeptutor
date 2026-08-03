@@ -136,6 +136,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libsm6 \
     libxext6 \
     libxrender1 \
+    libreoffice-writer \
+    fonts-noto-cjk \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy Node.js from node-runtime stage (platform-matched binary)

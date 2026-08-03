@@ -16,8 +16,8 @@ import { DEFAULT_UPLOAD_POLICY, validateFiles } from '@/lib/knowledge-helpers'
 
 const PAPER_UPLOAD_POLICY: KnowledgeUploadPolicy = {
   ...DEFAULT_UPLOAD_POLICY,
-  extensions: ['.pdf'],
-  accept: '.pdf,application/pdf',
+  extensions: ['.pdf', '.doc'],
+  accept: '.pdf,.doc,application/pdf,application/msword',
 }
 
 function uploadStatusLabel(status: string, t: (key: string) => string): string {
@@ -59,8 +59,8 @@ export default function PaperLibraryUploadSection({
   const paperPolicy = useMemo<KnowledgeUploadPolicy>(
     () => ({
       ...uploadPolicy,
-      extensions: ['.pdf'],
-      accept: '.pdf,application/pdf',
+      extensions: ['.pdf', '.doc'],
+      accept: '.pdf,.doc,application/pdf,application/msword',
     }),
     [uploadPolicy]
   )
@@ -125,7 +125,7 @@ export default function PaperLibraryUploadSection({
           <div>
             <h2 className="text-[14px] font-semibold text-[var(--foreground)]">{t('Add files')}</h2>
             <p className="mt-1 text-[12px] leading-relaxed text-[var(--muted-foreground)]">
-              {t('Upload independent PDF files for Exams.')}
+              {t('Upload PDF or Word (.doc) files for Exams.')}
             </p>
           </div>
           <Upload className="h-4 w-4 text-[var(--muted-foreground)]" />

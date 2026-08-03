@@ -1173,7 +1173,7 @@
   "Saved Questions": "收藏題目",
   "Paper Library": "考卷庫",
   "Add files": "新增檔案",
-  "Upload independent PDF files for Exams.": "上傳獨立的 PDF 檔案，用於考試。",
+  "Upload PDF or Word (.doc) files for Exams.": "上傳 PDF 或 Word（.doc）檔案，用於考試。",
   "{{count}} files uploaded; {{rejected}} rejected": "{{count}} 個檔案已上傳；{{rejected}} 個已拒絕",
   "{{count}} files uploaded": "{{count}} 個檔案已上傳",
   "Search files...": "搜尋檔案……",
