@@ -898,6 +898,8 @@ export default function QuizViewer({
 
   if (!q) return null
 
+  const optionImageUrls = new Set(Object.values(q.source_option_images ?? {}).flat())
+  const stemSourceImages = (q.source_images ?? []).filter(image => !optionImageUrls.has(image))
   const currentEntryId = entryIds[questionKey]
   const currentBookmarked = bookmarked[questionKey] ?? false
   const showCategoryDropdown = categoryDropdownKey === questionKey
@@ -1130,9 +1132,9 @@ export default function QuizViewer({
           />
         </div>
 
-        {q.source_images && q.source_images.length > 0 && (
+        {stemSourceImages.length > 0 && (
           <div className="mb-3 grid gap-2 sm:grid-cols-2">
-            {q.source_images.map((image, imageIndex) => {
+            {stemSourceImages.map((image, imageIndex) => {
               const src = resolveImageSrc(image)
               if (!src) return null
               return (
@@ -1214,8 +1216,24 @@ export default function QuizViewer({
                   >
                     {showFeedback && isCorrectOption ? <Check size={11} /> : key}
                   </span>
-                  <div className="min-w-0 leading-relaxed">
-                    <MarkdownRenderer content={text} variant="compact" enableMath />
+                  <div className="min-w-0 flex-1 leading-relaxed">
+                    {text && <MarkdownRenderer content={text} variant="compact" enableMath />}
+                    {(q.source_option_images?.[key] ?? []).length > 0 && (
+                      <div className="mt-2 grid gap-2 sm:grid-cols-2">
+                        {(q.source_option_images?.[key] ?? []).map((image, imageIndex) => {
+                          const src = resolveImageSrc(image)
+                          if (!src) return null
+                          return (
+                            <img
+                              key={`${key}-${image}-${imageIndex}`}
+                              src={src}
+                              alt={`${t('Option')} ${key}`}
+                              className="max-h-48 w-full rounded-md border border-[var(--border)] bg-[var(--background)] object-contain"
+                            />
+                          )
+                        })}
+                      </div>
+                    )}
                   </div>
                 </button>
               )

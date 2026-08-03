@@ -707,6 +707,7 @@ class PaperLibraryService:
             {
                 **question,
                 "images": _sanitize_asset_references(question.get("images", [])),
+                "option_images": _sanitize_option_images(question.get("option_images", {})),
             }
             for question in questions
             if isinstance(question, dict)
@@ -761,6 +762,7 @@ class PaperLibraryService:
             {
                 **question,
                 "images": _sanitize_asset_references(question.get("images", [])),
+                "option_images": _sanitize_option_images(question.get("option_images", {})),
             }
             for question in questions
             if isinstance(question, dict)
@@ -931,6 +933,9 @@ class PaperLibraryService:
                 }
                 if normalized_images is not None:
                     updated_question["images"] = normalized_images
+                    updated_question["option_images"] = _filter_option_images(
+                        question.get("option_images", {}), set(normalized_images)
+                    )
                     claimed = set(normalized_images)
                     for other_index, other_question in enumerate(questions):
                         if other_index == index:
@@ -945,6 +950,10 @@ class PaperLibraryService:
                             questions[other_index] = {
                                 **other_question,
                                 "images": remaining_images,
+                                "option_images": _filter_option_images(
+                                    other_question.get("option_images", {}),
+                                    set(remaining_images),
+                                ),
                             }
                 questions[index] = updated_question
                 atomic_write_json(
@@ -1287,6 +1296,25 @@ def _normalized_folder_paths(values: list[Any]) -> list[str]:
         if path and not _folder_exists(result, path):
             result.append(path)
     return result
+
+
+def _sanitize_option_images(value: Any) -> dict[str, list[str]]:
+    if not isinstance(value, dict):
+        return {}
+    return {
+        label: references
+        for raw_label, raw_references in value.items()
+        if (label := str(raw_label).strip())
+        and (references := _sanitize_asset_references(raw_references))
+    }
+
+
+def _filter_option_images(value: Any, allowed: set[str]) -> dict[str, list[str]]:
+    return {
+        label: [image for image in images if image in allowed]
+        for label, images in _sanitize_option_images(value).items()
+        if any(image in allowed for image in images)
+    }
 
 
 def _sanitize_asset_references(value: Any) -> list[str]:

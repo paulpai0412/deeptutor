@@ -24,5 +24,5 @@ test('submitted quiz can launch the full solve capability with question images',
   assert.match(solveHandler, /capability: 'deep_solve'/)
   assert.match(solveHandler, /source_image_attachments/)
   assert.match(solveHandler, /source_images/)
-  assert.match(followupSource, /capability: input\.capability \?\? "deep_question"/)
+  assert.match(followupSource, /capability: input\.capability \?\? ['"]deep_question['"]/)
 })

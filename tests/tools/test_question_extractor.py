@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 import sys
 import types
+from typing import Any
 
 
 def _load_question_extractor_module():
@@ -19,7 +20,7 @@ def _load_question_extractor_module():
     def prepare_multimodal_messages(messages, attachments, **_kwargs):
         content = messages[-1].get("content", "")
         if isinstance(content, str):
-            content = [{"type": "text", "text": content}]
+            content: list[dict[str, Any]] = [{"type": "text", "text": content}]
         for attachment in attachments:
             content.append(
                 {
@@ -75,11 +76,19 @@ def _load_question_extractor_module():
 
 def test_vision_primary_receives_all_persisted_images(tmp_path: Path) -> None:
     question_extractor = _load_question_extractor_module()
-    question_extractor.supports_vision = lambda *_args, **_kwargs: True
-    question_extractor.parse_json_response = lambda value, **_kwargs: json.loads(value)
+    setattr(question_extractor, "supports_vision", lambda *_args, **_kwargs: True)
+
+    def parse_json(value, **_kwargs):
+        try:
+            return json.loads(value)
+        except json.JSONDecodeError:
+            return {}
+
+    setattr(question_extractor, "parse_json_response", parse_json)
     images_dir = tmp_path / "images"
     images_dir.mkdir()
     (images_dir / "figure.png").write_bytes(b"fixture-image")
+    (images_dir / "__page_context_001.png").write_bytes(b"full-page-image")
     captured: dict = {}
 
     async def fake_llm(**kwargs):
@@ -104,9 +113,23 @@ def test_vision_primary_receives_all_persisted_images(tmp_path: Path) -> None:
         for item in captured["messages"][-1]["content"]
         if item.get("type") == "image_url"
     ]
-    assert len(image_parts) == 1
-    assert "Zml4dHVyZS1pbWFnZQ==" in image_parts[0]["image_url"]["url"]
-    assert result["questions"][0]["question_number"] == "1"
+    assert len(image_parts) == 2
+    assert any("Zml4dHVyZS1pbWFnZQ==" in part["image_url"]["url"] for part in image_parts)
+    labels = [
+        item.get("text", "")
+        for item in captured["messages"][-1]["content"]
+        if item.get("type") == "text"
+    ]
+    assert "Image file: figure.png" in labels
+    assert "Image file: __page_context_001.png" in labels
+    assert "Full-page layout context images" in captured["prompt"]
+    assert "__page_context_001.png" in captured["prompt"]
+    assert "Assignable extracted image files" in captured["prompt"]
+    assert "KaTeX-compatible LaTeX" in captured["system_prompt"]
+    assert "page image is the source of truth" in captured["system_prompt"]
+    assert "standalone numbers as plain text" in captured["system_prompt"]
+    expected_question_number = "1"
+    assert result["questions"][0]["question_number"] == expected_question_number
 
 
 def test_load_parsed_paper_supports_nested_hybrid_auto_output(tmp_path: Path) -> None:

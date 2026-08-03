@@ -11,7 +11,7 @@ from dataclasses import replace
 from types import SimpleNamespace
 from typing import Any
 
-import pytest
+import pytest  # type: ignore[import-not-found]
 
 from deeptutor.agents.question.capability import DeepQuestionCapability, ExamCapability
 from deeptutor.core.context import UnifiedContext
@@ -47,6 +47,7 @@ class _FakePaperService:
             "answer": "B",
             "page": 3,
             "images": ["page-3.png"],
+            "option_images": {"A": ["page-3.png"]},
         },
         {
             "question_id": "stable-q-1",
@@ -102,11 +103,24 @@ async def test_original_paper_emits_all_questions_in_stored_order_without_genera
     async def _snapshot(**kwargs: Any) -> dict[str, Any]:
         questions = []
         for question in kwargs["questions"]:
+            images = [
+                {
+                    "url": f"/api/attachments/{name}",
+                    "source_name": name,
+                    "filename": name,
+                }
+                for name in question.get("images", [])
+            ]
+            by_name = {image["source_name"]: image for image in images}
             questions.append(
                 {
                     **question,
                     "is_multi_select": bool(question.get("is_multi_select", False)),
-                    "images": [],
+                    "images": images,
+                    "option_images": {
+                        label: [by_name[name] for name in names]
+                        for label, names in question.get("option_images", {}).items()
+                    },
                 }
             )
         return {
@@ -163,6 +177,9 @@ async def test_original_paper_emits_all_questions_in_stored_order_without_genera
     ]
     assert all(event.metadata["source_type"] == "original_paper" for event in question_events)
     assert all(event.metadata["qa_pair"]["snapshot_id"] == "snapshot-1" for event in question_events)
+    assert question_events[0].metadata["qa_pair"]["source_option_images"] == {
+        "A": ["/api/attachments/page-3.png"]
+    }
     assert not pipeline_called
 
     result = next(event for event in events if event.type is StreamEventType.RESULT)

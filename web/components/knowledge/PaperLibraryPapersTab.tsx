@@ -24,6 +24,7 @@ import {
   getPaperLibraryPaper,
   listPaperLibraryContents,
   movePaper,
+  paperPreviewTextPath,
   paperSourcePath,
   renameLibraryPaper,
   retryLibraryPaper,
@@ -1031,6 +1032,9 @@ function PaperPreview({
         ? 'application/msword'
         : 'application/pdf',
       url: paperSourcePath(paper.paper_id),
+      extractedTextUrl: paper.original_filename.toLowerCase().endsWith('.doc')
+        ? paperPreviewTextPath(paper.paper_id)
+        : undefined,
       id: paper.paper_id,
     }
   }, [paper])

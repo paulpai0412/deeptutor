@@ -155,12 +155,18 @@ def test_question_image_references_cannot_persist_paths_or_base64(
                 "question_text": "See figure",
                 "question_type": "written",
                 "images": ["/private/cache/figure.png", "data:image/png;base64,AAAA", "figure.png"],
+                "option_images": {
+                    "A": ["/private/cache/figure.png", "figure.png"],
+                    "B": ["data:image/png;base64,AAAA"],
+                },
             }
         ],
         status="ready",
     )
 
-    assert paper_library.get_questions(paper.paper_id)[0]["images"] == ["figure.png"]
+    question = paper_library.get_questions(paper.paper_id)[0]
+    assert question["images"] == ["figure.png"]
+    assert question["option_images"] == {"A": ["figure.png"]}
 
 
 def test_persisted_assets_are_relative_and_path_safe(paper_library: PaperLibraryService, tmp_path: Path) -> None:

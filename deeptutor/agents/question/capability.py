@@ -10,9 +10,9 @@ Routes one user turn through the right quiz-generation path:
 
 from __future__ import annotations
 
-from dataclasses import replace
 import asyncio
 import base64
+from dataclasses import replace
 import tempfile
 from typing import Any
 
@@ -25,11 +25,18 @@ from deeptutor.core.trace import merge_trace_metadata
 from deeptutor.i18n import StatusI18n
 from deeptutor.runtime.request_contracts import get_capability_request_schema
 
-
 _ORIGINAL_PAPER_STATUSES = frozenset({"ready", "ready_with_warnings", "partial"})
 _ORIGINAL_QUESTION_TYPES = frozenset(
     {"choice", "concept", "fill_in_blank", "short_answer", "written", "coding"}
 )
+
+
+def _positive_int(value: Any, default: int) -> int:
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return default
+    return parsed if parsed > 0 else default
 
 
 class DeepQuestionCapability(BaseCapability):
@@ -107,13 +114,13 @@ class DeepQuestionCapability(BaseCapability):
             return
 
         topic = str(overrides.get("topic") or context.user_message or "").strip()
-        num_questions = int(overrides.get("num_questions", 1) or 1)
+        num_questions = _positive_int(overrides.get("num_questions"), 1)
         difficulty = str(overrides.get("difficulty", "") or "")
         raw_types = overrides.get("question_types") or []
         question_types = list(raw_types) if isinstance(raw_types, list) else []
         raw_counts = overrides.get("per_type_counts") or {}
         per_type_counts = (
-            {str(k): int(v) for k, v in raw_counts.items() if isinstance(v, int) and v > 0}
+            {str(k): v for k, v in raw_counts.items() if isinstance(v, int) and v > 0}
             if isinstance(raw_counts, dict)
             else {}
         )
@@ -199,7 +206,7 @@ class DeepQuestionCapability(BaseCapability):
         session_id = str(context.session_id or "").strip()
         store = get_sqlite_session_store() if session_id else None
         question_set = await resolve_latest_question_set(store, session_id) if store else None
-        if question_set is None:
+        if store is None or question_set is None:
             await stream.error(
                 "No exam or quiz is in progress for this session. Start one first.",
                 source=self.name,
@@ -405,6 +412,7 @@ class DeepQuestionCapability(BaseCapability):
             answer = raw_question.get("answer", "")
             options = raw_question.get("options")
             images = raw_question.get("images")
+            option_images = raw_question.get("option_images", {})
             missing = [
                 name
                 for name, value in (
@@ -432,6 +440,14 @@ class DeepQuestionCapability(BaseCapability):
             if not isinstance(images, list) or any(not isinstance(image, str) for image in images):
                 invalid_questions.append(f"#{ordinal}: images are not a string list")
                 continue
+            if not isinstance(option_images, dict) or any(
+                not isinstance(label, str)
+                or not isinstance(names, list)
+                or any(not isinstance(name, str) or name not in images for name in names)
+                for label, names in option_images.items()
+            ):
+                invalid_questions.append(f"#{ordinal}: option images are not a valid map")
+                continue
             if not isinstance(answer, str):
                 invalid_questions.append(f"#{ordinal}: answer is not text")
                 continue
@@ -440,16 +456,17 @@ class DeepQuestionCapability(BaseCapability):
                 invalid_questions.append(f"#{ordinal}: difficulty is not text")
                 continue
 
-            question_number = question_number.strip()
-            question_id = question_id.strip()
-            question_text = question_text.strip()
-            question_type = raw_type.strip().lower()
+            question_number = str(question_number).strip()
+            question_id = str(question_id).strip()
+            question_text = str(question_text).strip()
+            question_type = str(raw_type).strip().lower()
             images = list(images)
             question_source = {
                 **source_metadata,
                 "question_number": question_number,
                 "page": raw_question.get("page"),
                 "images": images,
+                "option_images": option_images,
                 "source_question_id": raw_question.get("source_question_id"),
             }
             pairs.append(
@@ -470,6 +487,7 @@ class DeepQuestionCapability(BaseCapability):
                     "source_question_number": question_number,
                     "source_page": raw_question.get("page"),
                     "source_images": images,
+                    "source_option_images": option_images,
                     "source": question_source,
                 }
             )
@@ -526,11 +544,17 @@ class DeepQuestionCapability(BaseCapability):
         snapshot_questions = snapshot["questions"]
         for pair, snapshot_question in zip(pairs, snapshot_questions, strict=True):
             image_records = snapshot_question["images"]
+            option_image_records = snapshot_question.get("option_images", {})
             pair["snapshot_id"] = snapshot["snapshot_id"]
             pair["is_multi_select"] = snapshot_question["is_multi_select"]
             pair["source_images"] = [record["url"] for record in image_records]
             pair["source_image_attachments"] = image_records
+            pair["source_option_images"] = {
+                label: [record["url"] for record in records]
+                for label, records in option_image_records.items()
+            }
             pair["source"]["images"] = image_records
+            pair["source"]["option_images"] = option_image_records
             pair["source"]["snapshot_id"] = snapshot["snapshot_id"]
 
         source_metadata = {
@@ -638,7 +662,7 @@ class DeepQuestionCapability(BaseCapability):
         if i18n is None:
             i18n = StatusI18n(self.name, context.language, module="question")
         paper_path = str(overrides.get("paper_path", "") or "").strip()
-        max_questions = int(overrides.get("max_questions", 10) or 10)
+        max_questions = _positive_int(overrides.get("max_questions"), 10)
         pdf_attachment = next(
             (
                 attachment

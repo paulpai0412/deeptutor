@@ -293,6 +293,7 @@ export function PaperReview({
               images: question.images,
             }
             const saving = savingQuestionId === question.question_id
+            const mappedOptionImages = new Set(Object.values(question.option_images ?? {}).flat())
             return (
               <li
                 key={question.question_id}
@@ -323,7 +324,7 @@ export function PaperReview({
                 </div>
 
                 <div className="mt-3 text-[13px] leading-relaxed text-[var(--foreground)]">
-                  <MarkdownRenderer content={question.question_text} variant="compact" />
+                  <MarkdownRenderer content={question.question_text} variant="compact" enableMath />
                 </div>
 
                 {Object.keys(question.options).length > 0 && (
@@ -331,17 +332,39 @@ export function PaperReview({
                     {Object.entries(question.options).map(([key, value]) => (
                       <div key={key} className="flex gap-2">
                         <dt className="font-semibold text-[var(--muted-foreground)]">{key}.</dt>
-                        <dd className="text-[var(--foreground)]">
-                          <MarkdownRenderer content={value} variant="compact" />
+                        <dd className="min-w-0 flex-1 text-[var(--foreground)]">
+                          {value && (
+                            <MarkdownRenderer content={value} variant="compact" enableMath />
+                          )}
+                          {(question.option_images?.[key] ?? []).length > 0 && (
+                            <div className="mt-2 grid gap-2 sm:grid-cols-2">
+                              {(question.option_images?.[key] ?? []).map(image => (
+                                <div
+                                  key={`${key}-${image}`}
+                                  className="relative h-32 rounded-md border border-[var(--border)] bg-[var(--background)]"
+                                >
+                                  <Image
+                                    src={apiUrl(paperAssetPath(paper.paper_id, image))}
+                                    alt={`${t('Option')} ${key}`}
+                                    fill
+                                    unoptimized
+                                    className="object-contain"
+                                  />
+                                </div>
+                              ))}
+                            </div>
+                          )}
                         </dd>
                       </div>
                     ))}
                   </dl>
                 )}
 
-                {draft.images.length > 0 && (
+                {draft.images.some(image => !mappedOptionImages.has(image)) && (
                   <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-                    {draft.images.map(image => renderImage(image, question.question_id))}
+                    {draft.images
+                      .filter(image => !mappedOptionImages.has(image))
+                      .map(image => renderImage(image, question.question_id))}
                   </div>
                 )}
 

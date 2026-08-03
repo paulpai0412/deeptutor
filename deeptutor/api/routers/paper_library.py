@@ -16,8 +16,12 @@ from fastapi import (  # type: ignore[import-not-found]
     Query,
     UploadFile,
 )
-from fastapi.responses import FileResponse, StreamingResponse  # type: ignore[import-not-found]
-from pydantic import BaseModel, Field
+from fastapi.responses import (  # type: ignore[import-not-found]
+    FileResponse,
+    PlainTextResponse,
+    StreamingResponse,
+)
+from pydantic import BaseModel, Field  # type: ignore[import-not-found]
 
 from deeptutor.api.utils.task_id_manager import TaskIDManager
 from deeptutor.api.utils.task_log_stream import get_task_stream_manager
@@ -27,7 +31,6 @@ from deeptutor.multi_user.paths import user_context
 from deeptutor.services.config import get_model_catalog_service
 from deeptutor.services.model_selection.llm import LLMSelection, list_llm_options
 from deeptutor.services.paper_extraction import extract_paper
-from deeptutor.services.parsing.engines.factory import KNOWN_ENGINES, is_engine_available, list_engines
 from deeptutor.services.paper_library import (
     PaperBusyError,
     PaperLibrary,
@@ -35,6 +38,16 @@ from deeptutor.services.paper_library import (
     PaperLibraryService,
     PaperValidationError,
     normalize_folder_path,
+)
+from deeptutor.services.parsing.engines.factory import (
+    KNOWN_ENGINES,
+    is_engine_available,
+    list_engines,
+)
+from deeptutor.utils.document_extractor import (
+    MAX_EXTRACTED_CHARS_PER_DOC,
+    DocumentExtractionError,
+    extract_text_from_path,
 )
 from deeptutor.utils.document_validator import DocumentValidator
 
@@ -77,6 +90,7 @@ class PaperQuestion(BaseModel):
     difficulty: str | None = None
     answer: str = ""
     images: list[str] = Field(default_factory=list)
+    option_images: dict[str, list[str]] = Field(default_factory=dict)
     page: int | None = None
     is_multi_select: bool = False
     source_question_type: str | None = None
@@ -710,6 +724,24 @@ async def open_paper_source(paper_id: str):
         filename=record.original_filename,
         content_disposition_type="inline",
     )
+
+
+@router.get("/{paper_id}/preview-text")
+async def preview_paper_text(paper_id: str):
+    """Serve extracted text for formats browsers cannot preview natively."""
+    service = get_paper_library_service()
+    try:
+        path = service.source_path(paper_id)
+        text = extract_text_from_path(
+            path,
+            max_bytes=DocumentValidator.MAX_FILE_SIZE,
+            max_chars=MAX_EXTRACTED_CHARS_PER_DOC,
+        )
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="Paper not found") from exc
+    except DocumentExtractionError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return PlainTextResponse(text, media_type="text/plain; charset=utf-8")
 
 
 @router.get("/{paper_id}", response_model=PaperDetail)

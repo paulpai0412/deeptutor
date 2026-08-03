@@ -45,6 +45,7 @@ _TYPE_ALIASES = {
     "programming": "coding",
 }
 _MULTI_SELECT_TYPES = {"multi_select", "multiple_select", "checkbox", "check_box"}
+_IMAGE_SUFFIXES = frozenset({".bmp", ".gif", ".jpeg", ".jpg", ".png", ".tif", ".tiff", ".webp"})
 
 
 class PaperExtractionError(RuntimeError):
@@ -111,6 +112,48 @@ def _convert_legacy_doc_to_pdf(source_path: Path, output_dir: Path) -> Path:
     return pdf_files[0]
 
 
+def _build_doc_visual_context(
+    pdf_path: Path, extracted_assets: Path | None, output_dir: Path
+) -> Path | None:
+    """Combine extracted crops with full-page renders for visual transcription."""
+    try:
+        import pymupdf  # type: ignore[import-not-found]
+    except ImportError:
+        return extracted_assets
+
+    context_dir = output_dir / "vision-context"
+    context_dir.mkdir(parents=True, exist_ok=True)
+    rendered = False
+    try:
+        with pymupdf.open(pdf_path) as document:
+            for page_index, page in enumerate(document):
+                pixmap = page.get_pixmap(matrix=pymupdf.Matrix(1.5, 1.5), alpha=False)
+                pixmap.save(context_dir / f"__page_context_{page_index + 1:03d}.png")
+                rendered = True
+    except (OSError, RuntimeError):
+        try:
+            shutil.rmtree(context_dir)
+        except OSError:
+            pass
+        return extracted_assets
+
+    if not rendered:
+        try:
+            shutil.rmtree(context_dir)
+        except OSError:
+            pass
+        return extracted_assets
+    if extracted_assets is not None and extracted_assets.is_dir():
+        for source in extracted_assets.rglob("*"):
+            if not source.is_file() or source.suffix.lower() not in _IMAGE_SUFFIXES:
+                continue
+            relative = source.relative_to(extracted_assets)
+            target = context_dir / relative
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(source, target)
+    return context_dir
+
+
 ProgressCallback = Callable[[str, int, str], None]
 LLMCallable = Callable[..., Awaitable[str]]
 
@@ -164,6 +207,8 @@ async def extract_paper(
             progress_callback(stage, percent, message)
 
     staging_dir = None
+    conversion_dir: tempfile.TemporaryDirectory[str] | None = None
+    visual_context_dir: tempfile.TemporaryDirectory[str] | None = None
     try:
         with capture_task_logs(task_id):
             parser_instance = parser or get_parse_service()
@@ -175,27 +220,33 @@ async def extract_paper(
                 parse_kwargs["engine"] = parser_engine
 
             source_path = service.source_path(paper_id)
-            conversion_dir: tempfile.TemporaryDirectory[str] | None = None
-            try:
-                parse_path = source_path
-                if source_path.suffix.lower() == ".doc":
-                    progress("processing", 10, "Converting Word document to PDF.")
-                    conversion_dir = tempfile.TemporaryDirectory(prefix="deeptutor-paper-")
-                    parse_path = await asyncio.to_thread(
-                        _convert_legacy_doc_to_pdf,
-                        source_path,
-                        Path(conversion_dir.name),
-                    )
-                else:
-                    progress("processing", 10, "Parsing PDF text layer.")
-                parsed = await asyncio.to_thread(
-                    parser_instance.parse,
-                    parse_path,
-                    **parse_kwargs,
+            parse_path = source_path
+            if source_path.suffix.lower() == ".doc":
+                progress("processing", 10, "Converting Word document to PDF.")
+                conversion_dir = tempfile.TemporaryDirectory(prefix="deeptutor-paper-")
+                parse_path = await asyncio.to_thread(
+                    _convert_legacy_doc_to_pdf,
+                    source_path,
+                    Path(conversion_dir.name),
                 )
-            finally:
-                if conversion_dir is not None:
-                    conversion_dir.cleanup()
+            else:
+                progress("processing", 10, "Parsing PDF text layer.")
+            parsed = await asyncio.to_thread(
+                parser_instance.parse,
+                parse_path,
+                **parse_kwargs,
+            )
+            llm_asset_dir = parsed.asset_dir
+            if parse_path.suffix.lower() == ".pdf":
+                visual_context_dir = tempfile.TemporaryDirectory(
+                    prefix="deeptutor-paper-vision-"
+                )
+                llm_asset_dir = await asyncio.to_thread(
+                    _build_doc_visual_context,
+                    parse_path,
+                    parsed.asset_dir,
+                    Path(visual_context_dir.name),
+                )
             if not isinstance(parsed, ParsedDocument):
                 raise PaperExtractionError("Document parser returned an invalid result.")
             # Parse assets live in the content-addressed cache. Copy them into
@@ -217,7 +268,7 @@ async def extract_paper(
                 extract_questions_with_llm,
                 parsed.markdown,
                 parsed.blocks,
-                parsed.asset_dir,
+                llm_asset_dir,
                 str(getattr(config, "api_key", "")),
                 str(getattr(config, "base_url", "") or ""),
                 str(config.model),
@@ -272,6 +323,11 @@ async def extract_paper(
         task_manager.update_task_status(task_id, "error", paper_id=paper_id, error=error)
         task_stream.emit_failed(task_id, error)
         return record
+    finally:
+        if visual_context_dir is not None:
+            visual_context_dir.cleanup()
+        if conversion_dir is not None:
+            conversion_dir.cleanup()
 
 
 def _llm_config_from_snapshot(extraction_config: dict[str, Any]) -> LLMConfig:
@@ -432,6 +488,38 @@ def _normalize_question(
         elif image_name not in images:
             images.append(image_name)
 
+    confidence = raw_question.get("image_confidence", raw_question.get("visual_confidence"))
+    try:
+        confidence_value = float(confidence) if confidence is not None else None
+    except (TypeError, ValueError):
+        confidence_value = None
+    option_images: dict[str, list[str]] = {}
+    raw_option_images = raw_question.get("option_images", {})
+    if isinstance(raw_option_images, dict):
+        if raw_option_images and (confidence_value is None or confidence_value < 0.85):
+            warnings.append("Option-image mapping confidence is below 0.85; review it manually.")
+        else:
+            for raw_label, raw_references in raw_option_images.items():
+                label = str(raw_label).strip()
+                references = (
+                    [raw_references] if isinstance(raw_references, str) else raw_references
+                )
+                if not label or not isinstance(references, list):
+                    continue
+                matched: list[str] = []
+                for reference in references:
+                    image_name = _resolve_asset_name(reference, available_assets)
+                    if image_name is None:
+                        warnings.append(
+                            f"Option {label} image reference '{str(reference).strip()}' was not found in paper assets."
+                        )
+                    elif image_name not in matched:
+                        matched.append(image_name)
+                        if image_name not in images:
+                            images.append(image_name)
+                if matched:
+                    option_images[label] = matched
+
     visual_warnings = raw_question.get("image_warnings", raw_question.get("visual_warnings", []))
     if isinstance(visual_warnings, str):
         visual_warnings = [visual_warnings]
@@ -444,12 +532,8 @@ def _normalize_question(
         or (isinstance(visual_verified, bool) and not visual_verified)
     ):
         warnings.append("Visual meaning could not be verified automatically; review the image manually.")
-    confidence = raw_question.get("image_confidence", raw_question.get("visual_confidence"))
-    try:
-        if confidence is not None and float(confidence) < 0.7:
-            warnings.append("Visual meaning confidence is low; review the image manually.")
-    except (TypeError, ValueError):
-        pass
+    if confidence_value is not None and confidence_value < 0.85:
+        warnings.append("Visual meaning confidence is low; review the image manually.")
 
     normalized: dict[str, Any] = {
         "question_id": str(uuid.uuid4()),
@@ -460,6 +544,7 @@ def _normalize_question(
         "difficulty": difficulty,
         "answer": answer,
         "images": images,
+        "option_images": option_images,
         "page": page,
         "is_multi_select": is_multi_select,
         "source_question_type": raw_type,

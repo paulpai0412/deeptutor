@@ -244,11 +244,35 @@ def test_real_legacy_doc_conversion_preserves_images_for_deeptutor_parsing(
     parsed = ParseService(cache_root=tmp_path / "parse-cache").parse(
         pdf, engine="pymupdf4llm"
     )
+    context_dir = paper_extraction._build_doc_visual_context(
+        pdf, parsed.asset_dir, tmp_path / "context"
+    )
 
     assert sum(len(page.images) for page in reader.pages) >= 1
     assert parsed.markdown.strip()
     assert parsed.asset_dir is not None
     assert any(parsed.asset_dir.iterdir())
+    assert context_dir is not None
+    assert list(context_dir.glob("__page_context_*.png"))
+    assert any(path.name.startswith("legacy-question.pdf-") for path in context_dir.iterdir())
+
+
+def test_low_confidence_option_image_mapping_is_not_persisted() -> None:
+    from deeptutor.services.paper_extraction import _normalize_question
+
+    question, warnings = _normalize_question(
+        {
+            "question_number": "1",
+            "question_text": "Choose the diagram",
+            "option_images": {"A": ["a.png"]},
+            "image_confidence": 0.6,
+        },
+        available_assets=["a.png"],
+    )
+
+    assert question is not None
+    assert question["option_images"] == {}
+    assert any("below 0.85" in warning for warning in warnings)
 
 
 def test_fixed_image_pdf_fixture_does_not_infer_unreferenced_images(tmp_path: Path) -> None:
@@ -265,7 +289,7 @@ def test_fixed_image_pdf_fixture_does_not_infer_unreferenced_images(tmp_path: Pa
             return parse_service.parse(source_path, engine="pymupdf4llm", **kwargs)
 
     async def fake_llm(**kwargs) -> str:
-        assert "Available image files:" in kwargs["prompt"]
+        assert "Assignable extracted image files:" in kwargs["prompt"]
         assert "messages" not in kwargs
         return (
             '{"complete": true, "questions": [{"question_number": "1", '
@@ -297,13 +321,14 @@ def test_fixed_image_pdf_fixture_does_not_infer_unreferenced_images(tmp_path: Pa
     assert len(image_files) == 1
     questions = service.get_questions(paper.paper_id)
     assert questions[0]["images"] == []
-    assert questions[0]["page"] == 1
+    expected_page = 1
+    assert questions[0]["page"] == expected_page
     assert any(
         "No image asset could be confidently associated" in warning
         for warning in questions[0]["warnings"]
     )
     assert any(
-        "Vision is unavailable; image associations were not inferred" in warning
+        "Vision" in warning and "unavailable; image associations were not inferred" in warning
         for warning in record.warnings
     )
     assert any("could not be confidently associated" in warning for warning in record.warnings)
@@ -333,7 +358,7 @@ def test_extraction_keeps_only_explicit_image_associations(tmp_path: Path) -> No
             '{"complete": true, "questions": ['
             '{"question_number": "1", "question_text": "First"},'
             '{"question_number": "2", "question_text": "Second"},'
-            '{"question_number": "3", "question_text": "See the map", "images": ["map.png"]}'
+            '{"question_number": "3", "question_text": "See the map", "images": [], "option_images": {"A": ["map.png"]}, "image_confidence": 0.95}'
             ']}'
         )
 
@@ -354,6 +379,7 @@ def test_extraction_keeps_only_explicit_image_associations(tmp_path: Path) -> No
     assert questions["1"]["images"] == []
     assert questions["2"]["images"] == []
     assert questions["3"]["images"] == ["map.png"]
+    assert questions["3"]["option_images"] == {"A": ["map.png"]}
     assert all(
         "Image association was inferred" not in warning
         for question in questions.values()
@@ -467,6 +493,7 @@ def test_text_layer_fixture_uses_parse_service_and_persists_questions(tmp_path: 
 
     async def fake_llm(**kwargs) -> str:
         assert "Question 1" in kwargs["prompt"]
+        assert "__page_context_001.png" in kwargs["prompt"]
         return '{"complete": true, "questions": [{"question_number": "1", "question_text": "What is two plus two?", "question_type": "short_answer", "answer": "4"}]}'
 
     class TextLayerParser:
@@ -487,6 +514,7 @@ def test_text_layer_fixture_uses_parse_service_and_persists_questions(tmp_path: 
 
     assert record.status == "ready"
     assert service.get_questions(paper.paper_id)[0]["answer"] == "4"
+    assert not list(service.asset_dir(paper.paper_id).glob("__page_context_*.png"))
 
 
 @pytest.mark.skipif(

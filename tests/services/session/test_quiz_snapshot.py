@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
+import pytest  # type: ignore[import-not-found]
 
 from deeptutor.services.paper_library import PaperLibraryService
 from deeptutor.services.session.quiz_snapshot import (
@@ -11,7 +11,6 @@ from deeptutor.services.session.quiz_snapshot import (
 )
 from deeptutor.services.session.sqlite_store import SQLiteSessionStore
 from deeptutor.services.storage.attachment_store import LocalDiskAttachmentStore
-
 from tests.services.test_paper_library import PDF_BYTES
 
 
@@ -36,6 +35,7 @@ def _ready_paper(tmp_path: Path) -> tuple[PaperLibraryService, str]:
                 "page": 2,
                 "is_multi_select": False,
                 "images": ["figure.png"],
+                "option_images": {"A": ["figure.png"]},
                 "warnings": [],
             }
         ],
@@ -73,6 +73,7 @@ async def test_snapshot_copies_question_images_and_survives_paper_delete(tmp_pat
     image = snapshot["questions"][0]["images"][0]
     assert image["url"].startswith("/api/attachments/")
     assert image["source_name"] == "figure.png"
+    assert snapshot["questions"][0]["option_images"]["A"] == [image]
     stored_path = attachments.resolve_path(
         session_id="session-1",
         attachment_id=image["attachment_id"],

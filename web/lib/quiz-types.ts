@@ -2,133 +2,134 @@
  * Shared types for Quiz Generation (deep_question capability).
  */
 
-import {
-  type NormalizedQuizQuestionType,
-  normalizeQuizQuestionType,
-} from "./quiz-question-type";
+import { type NormalizedQuizQuestionType, normalizeQuizQuestionType } from './quiz-question-type'
 
-export type DeepQuestionMode = "custom" | "mimic" | "original_paper";
+export type DeepQuestionMode = 'custom' | 'mimic' | 'original_paper'
 
 export interface DeepQuestionFormConfig {
-  mode: DeepQuestionMode;
-  topic: string;
-  num_questions: number;
-  difficulty: string;
+  mode: DeepQuestionMode
+  topic: string
+  num_questions: number
+  difficulty: string
   /**
    * Multi-select allowed-types whitelist. Empty list = "auto" (planner
    * picks any type per question). When ≥1 type is selected, the planner
    * is restricted to those types.
    */
-  question_types: NormalizedQuizQuestionType[];
+  question_types: NormalizedQuizQuestionType[]
   /**
    * Per-type quantity targets (sums to num_questions when non-empty).
    * Only populated when ≥2 types are selected and the user has tweaked
    * the ratio bar; empty means "distribute evenly across allowed types".
    */
-  per_type_counts: Partial<Record<NormalizedQuizQuestionType, number>>;
-  paper_path: string;
+  per_type_counts: Partial<Record<NormalizedQuizQuestionType, number>>
+  paper_path: string
   /** Opaque Paper Library ID used only by Original Paper/Exam mode. */
-  paper_id: string;
+  paper_id: string
   /** UI-only library scope; never sent in the public Exam request. */
-  paper_library_id?: string;
-  max_questions: number;
+  paper_library_id?: string
+  max_questions: number
 }
 
 export const DEFAULT_QUIZ_CONFIG: DeepQuestionFormConfig = {
-  mode: "custom",
-  topic: "",
+  mode: 'custom',
+  topic: '',
   num_questions: 3,
-  difficulty: "auto",
+  difficulty: 'auto',
   question_types: [],
   per_type_counts: {},
-  paper_path: "",
-  paper_id: "",
-  paper_library_id: "",
+  paper_path: '',
+  paper_id: '',
+  paper_library_id: '',
   max_questions: 10,
-};
+}
 
 /** Restore fields added to quiz config after older localStorage entries. */
 export function normalizeQuizConfig(
-  config: Partial<DeepQuestionFormConfig> | null | undefined,
+  config: Partial<DeepQuestionFormConfig> | null | undefined
 ): DeepQuestionFormConfig {
-  const stored = config ?? {};
+  const stored = config ?? {}
   return {
     ...DEFAULT_QUIZ_CONFIG,
     ...stored,
-    topic: typeof stored.topic === "string" ? stored.topic : "",
-    difficulty:
-      typeof stored.difficulty === "string" ? stored.difficulty : "auto",
-    question_types: Array.isArray(stored.question_types)
-      ? stored.question_types
-      : [],
+    topic: typeof stored.topic === 'string' ? stored.topic : '',
+    difficulty: typeof stored.difficulty === 'string' ? stored.difficulty : 'auto',
+    question_types: Array.isArray(stored.question_types) ? stored.question_types : [],
     per_type_counts:
       stored.per_type_counts &&
-      typeof stored.per_type_counts === "object" &&
+      typeof stored.per_type_counts === 'object' &&
       !Array.isArray(stored.per_type_counts)
         ? stored.per_type_counts
         : {},
-    paper_path: typeof stored.paper_path === "string" ? stored.paper_path : "",
-    paper_id: typeof stored.paper_id === "string" ? stored.paper_id : "",
-    paper_library_id:
-      typeof stored.paper_library_id === "string" ? stored.paper_library_id : "",
-  };
+    paper_path: typeof stored.paper_path === 'string' ? stored.paper_path : '',
+    paper_id: typeof stored.paper_id === 'string' ? stored.paper_id : '',
+    paper_library_id: typeof stored.paper_library_id === 'string' ? stored.paper_library_id : '',
+  }
 }
 
 export interface QuizQuestion {
-  question_id: string;
-  question: string;
-  question_type: NormalizedQuizQuestionType;
-  options?: Record<string, string>;
-  correct_answer: string;
-  explanation: string;
-  difficulty?: string;
-  concentration?: string;
-  knowledge_context?: string;
-  source_type?: string;
-  paper_library_id?: string;
-  paper_library_name?: string;
-  paper_id?: string;
-  paper_display_name?: string;
-  source_question_number?: string;
-  source_page?: number | null;
-  source_images?: string[];
+  question_id: string
+  question: string
+  question_type: NormalizedQuizQuestionType
+  options?: Record<string, string>
+  correct_answer: string
+  explanation: string
+  difficulty?: string
+  concentration?: string
+  knowledge_context?: string
+  source_type?: string
+  paper_library_id?: string
+  paper_library_name?: string
+  paper_id?: string
+  paper_display_name?: string
+  source_question_number?: string
+  source_page?: number | null
+  source_images?: string[]
+  source_option_images?: Record<string, string[]>
   source_image_attachments?: Array<{
-    attachment_id?: string;
-    url?: string;
-    filename?: string;
-    mime_type?: string;
-    source_name?: string;
-  }>;
-  is_multi_select?: boolean;
-  snapshot_id?: string;
-  source?: Record<string, unknown>;
+    attachment_id?: string
+    url?: string
+    filename?: string
+    mime_type?: string
+    source_name?: string
+  }>
+  is_multi_select?: boolean
+  snapshot_id?: string
+  source?: Record<string, unknown>
+}
+
+function normalizeStringArrayMap(value: unknown): Record<string, string[]> | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined
+  const entries = Object.entries(value).flatMap(([key, raw]) => {
+    if (!key.trim() || !Array.isArray(raw)) return []
+    const images = raw.map(image => String(image)).filter(Boolean)
+    return images.length > 0 ? [[key, images] as const] : []
+  })
+  return entries.length > 0 ? Object.fromEntries(entries) : undefined
 }
 
 /** Return the non-empty answer choices in display order for a quiz question. */
 export function getQuizQuestionOptions(
-  question: Pick<QuizQuestion, "options">,
+  question: Pick<QuizQuestion, 'options'>
 ): Array<[string, string]> {
   return Object.entries(question.options ?? {}).filter(
-    ([key, value]) =>
-      key.trim().length > 0 &&
-      typeof value === "string" &&
-      value.trim().length > 0,
-  );
+    ([key, value]) => key.trim().length > 0 && typeof value === 'string' && value.trim().length > 0
+  )
 }
 
 export interface QuizFollowupContext {
-  parent_quiz_session_id?: string;
-  question_id: string;
-  question: string;
-  question_type: QuizQuestion["question_type"];
-  options?: Record<string, string>;
-  correct_answer: string;
-  explanation: string;
-  difficulty?: string;
-  concentration?: string;
-  knowledge_context?: string;
-  user_answer?: string;
-  is_correct?: boolean;
+  parent_quiz_session_id?: string
+  question_id: string
+  question: string
+  question_type: QuizQuestion['question_type']
+  options?: Record<string, string>
+  correct_answer: string
+  explanation: string
+  difficulty?: string
+  concentration?: string
+  knowledge_context?: string
+  user_answer?: string
+  is_correct?: boolean
   /**
    * Filenames of the images the learner attached as their answer. Image
    * bytes ride on the first follow-up message as regular attachments so
@@ -136,9 +137,9 @@ export interface QuizFollowupContext {
    * system prompt mention them explicitly so the LLM knows the attached
    * images are the learner's answer, not unrelated context.
    */
-  user_answer_image_filenames?: string[];
+  user_answer_image_filenames?: string[]
   /** Latest AI judgment text for this question, when one has been run. */
-  ai_judgment?: string;
+  ai_judgment?: string
 }
 
 /**
@@ -157,39 +158,33 @@ export interface QuizFollowupContext {
  */
 export function extractStreamingQuizQuestions(
   events: Array<{
-    type?: string;
-    metadata?: Record<string, unknown> | undefined;
-  }>,
+    type?: string
+    metadata?: Record<string, unknown> | undefined
+  }>
 ): QuizQuestion[] | null {
-  if (!Array.isArray(events) || events.length === 0) return null;
-  const byId = new Map<string, { idx: number; qa: QuizQuestion }>();
+  if (!Array.isArray(events) || events.length === 0) return null
+  const byId = new Map<string, { idx: number; qa: QuizQuestion }>()
   for (const event of events) {
-    if (event.type !== "content") continue;
-    const meta = (event.metadata ?? {}) as Record<string, unknown>;
-    if (meta.call_kind !== "quiz_question_emitted") continue;
-    const qa = meta.qa_pair as Record<string, unknown> | undefined;
-    if (!qa || typeof qa !== "object" || !qa.question) continue;
-    const idx = Number(meta.question_index);
+    if (event.type !== 'content') continue
+    const meta = (event.metadata ?? {}) as Record<string, unknown>
+    if (meta.call_kind !== 'quiz_question_emitted') continue
+    const qa = meta.qa_pair as Record<string, unknown> | undefined
+    if (!qa || typeof qa !== 'object' || !qa.question) continue
+    const idx = Number(meta.question_index)
     const question: QuizQuestion = {
-      question_id: String(qa.question_id ?? ""),
-      question: String(qa.question ?? ""),
+      question_id: String(qa.question_id ?? ''),
+      question: String(qa.question ?? ''),
       question_type: normalizeQuizQuestionType(qa.question_type),
       options: qa.options as Record<string, string> | undefined,
-      correct_answer: String(qa.correct_answer ?? ""),
-      explanation: String(qa.explanation ?? ""),
+      correct_answer: String(qa.correct_answer ?? ''),
+      explanation: String(qa.explanation ?? ''),
       difficulty: qa.difficulty ? String(qa.difficulty) : undefined,
       concentration: qa.concentration ? String(qa.concentration) : undefined,
       source_type: qa.source_type ? String(qa.source_type) : undefined,
-      paper_library_id: qa.paper_library_id
-        ? String(qa.paper_library_id)
-        : undefined,
-      paper_library_name: qa.paper_library_name
-        ? String(qa.paper_library_name)
-        : undefined,
+      paper_library_id: qa.paper_library_id ? String(qa.paper_library_id) : undefined,
+      paper_library_name: qa.paper_library_name ? String(qa.paper_library_name) : undefined,
       paper_id: qa.paper_id ? String(qa.paper_id) : undefined,
-      paper_display_name: qa.paper_display_name
-        ? String(qa.paper_display_name)
-        : undefined,
+      paper_display_name: qa.paper_display_name ? String(qa.paper_display_name) : undefined,
       source_question_number: qa.source_question_number
         ? String(qa.source_question_number)
         : undefined,
@@ -198,31 +193,31 @@ export function extractStreamingQuizQuestions(
           ? undefined
           : Number(qa.source_page),
       source_images: Array.isArray(qa.source_images)
-        ? qa.source_images.map((image) => String(image))
+        ? qa.source_images.map(image => String(image))
         : undefined,
+      source_option_images: normalizeStringArrayMap(qa.source_option_images),
       source_image_attachments: Array.isArray(qa.source_image_attachments)
-        ? qa.source_image_attachments.filter(
-            (image): image is Record<string, unknown> =>
-              Boolean(image && typeof image === "object"),
+        ? qa.source_image_attachments.filter((image): image is Record<string, unknown> =>
+            Boolean(image && typeof image === 'object')
           )
         : undefined,
       is_multi_select: Boolean(qa.is_multi_select),
       snapshot_id: qa.snapshot_id ? String(qa.snapshot_id) : undefined,
       source:
-        qa.source && typeof qa.source === "object"
+        qa.source && typeof qa.source === 'object'
           ? (qa.source as Record<string, unknown>)
           : undefined,
-    };
-    const key = question.question_id || String(idx);
+    }
+    const key = question.question_id || String(idx)
     byId.set(key, {
       idx: Number.isFinite(idx) ? idx : byId.size,
       qa: question,
-    });
+    })
   }
-  if (byId.size === 0) return null;
+  if (byId.size === 0) return null
   return Array.from(byId.values())
     .sort((a, b) => a.idx - b.idx)
-    .map((entry) => entry.qa);
+    .map(entry => entry.qa)
 }
 
 /**
@@ -241,14 +236,12 @@ export function extractStreamingQuizQuestions(
  * reads or writes), so they can never inherit another turn's answers.
  */
 export function extractQuizTurnId(
-  events: Array<{ type?: string; turn_id?: string }> | undefined,
+  events: Array<{ type?: string; turn_id?: string }> | undefined
 ): string | null {
-  if (!Array.isArray(events)) return null;
-  const result = events.find(
-    (event) => event.type === "result" && event.turn_id,
-  );
-  if (result?.turn_id) return result.turn_id;
-  return events.find((event) => event.turn_id)?.turn_id ?? null;
+  if (!Array.isArray(events)) return null
+  const result = events.find(event => event.type === 'result' && event.turn_id)
+  if (result?.turn_id) return result.turn_id
+  return events.find(event => event.turn_id)?.turn_id ?? null
 }
 
 /**
@@ -256,44 +249,38 @@ export function extractQuizTurnId(
  * the deep_question capability.
  */
 export function extractQuizQuestions(
-  resultMetadata: Record<string, unknown> | undefined,
+  resultMetadata: Record<string, unknown> | undefined
 ): QuizQuestion[] | null {
-  if (!resultMetadata) return null;
-  const summary = resultMetadata.summary as Record<string, unknown> | undefined;
-  if (!summary) return null;
-  const results = summary.results as Array<Record<string, unknown>> | undefined;
-  if (!Array.isArray(results) || results.length === 0) return null;
+  if (!resultMetadata) return null
+  const summary = resultMetadata.summary as Record<string, unknown> | undefined
+  if (!summary) return null
+  const results = summary.results as Array<Record<string, unknown>> | undefined
+  if (!Array.isArray(results) || results.length === 0) return null
 
-  const parsed: Array<QuizQuestion | null> = results.map((item) => {
-    const qa = (item.qa_pair ?? item) as Record<string, unknown>;
-    if (!qa.question) return null;
+  const parsed: Array<QuizQuestion | null> = results.map(item => {
+    const qa = (item.qa_pair ?? item) as Record<string, unknown>
+    if (!qa.question) return null
     const question: QuizQuestion = {
-      question_id: String(qa.question_id ?? ""),
-      question: String(qa.question ?? ""),
+      question_id: String(qa.question_id ?? ''),
+      question: String(qa.question ?? ''),
       question_type: normalizeQuizQuestionType(qa.question_type),
       options: qa.options as Record<string, string> | undefined,
-      correct_answer: String(qa.correct_answer ?? ""),
-      explanation: String(qa.explanation ?? ""),
+      correct_answer: String(qa.correct_answer ?? ''),
+      explanation: String(qa.explanation ?? ''),
       difficulty: qa.difficulty ? String(qa.difficulty) : undefined,
       concentration: qa.concentration ? String(qa.concentration) : undefined,
       knowledge_context:
         qa.metadata &&
-        typeof qa.metadata === "object" &&
-        "knowledge_context" in qa.metadata &&
+        typeof qa.metadata === 'object' &&
+        'knowledge_context' in qa.metadata &&
         qa.metadata.knowledge_context
           ? String(qa.metadata.knowledge_context)
           : undefined,
       source_type: qa.source_type ? String(qa.source_type) : undefined,
-      paper_library_id: qa.paper_library_id
-        ? String(qa.paper_library_id)
-        : undefined,
-      paper_library_name: qa.paper_library_name
-        ? String(qa.paper_library_name)
-        : undefined,
+      paper_library_id: qa.paper_library_id ? String(qa.paper_library_id) : undefined,
+      paper_library_name: qa.paper_library_name ? String(qa.paper_library_name) : undefined,
       paper_id: qa.paper_id ? String(qa.paper_id) : undefined,
-      paper_display_name: qa.paper_display_name
-        ? String(qa.paper_display_name)
-        : undefined,
+      paper_display_name: qa.paper_display_name ? String(qa.paper_display_name) : undefined,
       source_question_number: qa.source_question_number
         ? String(qa.source_question_number)
         : undefined,
@@ -302,109 +289,97 @@ export function extractQuizQuestions(
           ? undefined
           : Number(qa.source_page),
       source_images: Array.isArray(qa.source_images)
-        ? qa.source_images.map((image) => String(image))
+        ? qa.source_images.map(image => String(image))
         : undefined,
+      source_option_images: normalizeStringArrayMap(qa.source_option_images),
       source_image_attachments: Array.isArray(qa.source_image_attachments)
-        ? qa.source_image_attachments.filter(
-            (image): image is Record<string, unknown> =>
-              Boolean(image && typeof image === "object"),
+        ? qa.source_image_attachments.filter((image): image is Record<string, unknown> =>
+            Boolean(image && typeof image === 'object')
           )
         : undefined,
       is_multi_select: Boolean(qa.is_multi_select),
       snapshot_id: qa.snapshot_id ? String(qa.snapshot_id) : undefined,
       source:
-        qa.source && typeof qa.source === "object"
+        qa.source && typeof qa.source === 'object'
           ? (qa.source as Record<string, unknown>)
           : undefined,
-    };
-    return question;
-  });
+    }
+    return question
+  })
 
-  return parsed.filter(
-    (question): question is QuizQuestion => question !== null,
-  );
+  return parsed.filter((question): question is QuizQuestion => question !== null)
 }
 
 export function extractQuizQuestionsFromEvents(
   events: Array<{
-    type?: string;
-    metadata?: Record<string, unknown> | undefined;
-  }>,
+    type?: string
+    metadata?: Record<string, unknown> | undefined
+  }>
 ): QuizQuestion[] | null {
-  const result = [...events]
-    .reverse()
-    .find((event) => event.type === "result");
-  return (
-    extractQuizQuestions(result?.metadata) ??
-    extractStreamingQuizQuestions(events)
-  );
+  const result = [...events].reverse().find(event => event.type === 'result')
+  return extractQuizQuestions(result?.metadata) ?? extractStreamingQuizQuestions(events)
 }
 
 const ENGLISH_ORDINALS = [
-  "first",
-  "second",
-  "third",
-  "fourth",
-  "fifth",
-  "sixth",
-  "seventh",
-  "eighth",
-  "ninth",
-  "tenth",
-] as const;
-const CHINESE_DIGITS = "一二三四五六七八九";
+  'first',
+  'second',
+  'third',
+  'fourth',
+  'fifth',
+  'sixth',
+  'seventh',
+  'eighth',
+  'ninth',
+  'tenth',
+] as const
+const CHINESE_DIGITS = '一二三四五六七八九'
 
 function chineseOrdinal(value: number): string {
-  if (value < 10) return CHINESE_DIGITS[value - 1] ?? String(value);
-  if (value === 10) return "十";
-  if (value < 20) return `十${CHINESE_DIGITS[value - 11] ?? ""}`;
+  if (value < 10) return CHINESE_DIGITS[value - 1] ?? String(value)
+  if (value === 10) return '十'
+  if (value < 20) return `十${CHINESE_DIGITS[value - 11] ?? ''}`
   if (value < 100) {
-    const tens = CHINESE_DIGITS[Math.floor(value / 10) - 1] ?? "";
-    const ones = value % 10;
-    return `${tens}十${ones ? CHINESE_DIGITS[ones - 1] : ""}`;
+    const tens = CHINESE_DIGITS[Math.floor(value / 10) - 1] ?? ''
+    const ones = value % 10
+    return `${tens}十${ones ? CHINESE_DIGITS[ones - 1] : ''}`
   }
-  return String(value);
+  return String(value)
 }
 
 /** Resolve an explicit question ordinal; answer-disclosure remains LLM policy. */
 export function findReferencedQuizQuestion(
   text: string,
-  questions: QuizQuestion[],
+  questions: QuizQuestion[]
 ): QuizQuestion | null {
-  const normalized = text.toLocaleLowerCase();
-  const compact = normalized.replace(/\s+/g, "");
+  const normalized = text.toLocaleLowerCase()
+  const compact = normalized.replace(/\s+/g, '')
   for (let index = 0; index < questions.length; index += 1) {
-    const ordinal = index + 1;
-    const chinese = chineseOrdinal(ordinal);
+    const ordinal = index + 1
+    const chinese = chineseOrdinal(ordinal)
     const hasChineseReference =
       compact.includes(`第${ordinal}題`) ||
       compact.includes(`第${ordinal}题`) ||
-      Boolean(
-        chinese &&
-          (compact.includes(`第${chinese}題`) ||
-            compact.includes(`第${chinese}题`)),
-      );
-    const hasNumericReference = new RegExp(
-      `\\b(?:question|q)\\s*#?\\s*${ordinal}\\b`,
-      "i",
-    ).test(normalized);
-    const english = ENGLISH_ORDINALS[index];
+      Boolean(chinese && (compact.includes(`第${chinese}題`) || compact.includes(`第${chinese}题`)))
+    const hasNumericReference = new RegExp(`\\b(?:question|q)\\s*#?\\s*${ordinal}\\b`, 'i').test(
+      normalized
+    )
+    const english = ENGLISH_ORDINALS[index]
     if (
       hasChineseReference ||
       hasNumericReference ||
       Boolean(english && normalized.includes(`${english} question`))
     ) {
-      return questions[index];
+      return questions[index]
     }
   }
-  return null;
+  return null
 }
 
 export interface QuizFollowupExtras {
   /** Filenames of the learner's image answers (bytes ride on first msg). */
-  userAnswerImageFilenames?: string[] | null;
+  userAnswerImageFilenames?: string[] | null
   /** Last AI-judgment text for this question, if the learner ran it. */
-  aiJudgment?: string | null;
+  aiJudgment?: string | null
 }
 
 export function buildQuizFollowupConfig(
@@ -412,11 +387,11 @@ export function buildQuizFollowupConfig(
   userAnswer: string,
   isCorrect: boolean | null,
   parentQuizSessionId?: string | null,
-  extras?: QuizFollowupExtras,
+  extras?: QuizFollowupExtras
 ): Record<string, unknown> {
   const filenames = (extras?.userAnswerImageFilenames ?? [])
-    .map((name) => (typeof name === "string" ? name.trim() : ""))
-    .filter((name) => name.length > 0);
+    .map(name => (typeof name === 'string' ? name.trim() : ''))
+    .filter(name => name.length > 0)
   const context: QuizFollowupContext = {
     question_id: question.question_id,
     question: question.question,
@@ -428,32 +403,31 @@ export function buildQuizFollowupConfig(
     concentration: question.concentration,
     knowledge_context: question.knowledge_context,
     user_answer: userAnswer || undefined,
-    is_correct: typeof isCorrect === "boolean" ? isCorrect : undefined,
+    is_correct: typeof isCorrect === 'boolean' ? isCorrect : undefined,
     parent_quiz_session_id: parentQuizSessionId || undefined,
     user_answer_image_filenames: filenames.length > 0 ? filenames : undefined,
     ai_judgment: extras?.aiJudgment?.trim() || undefined,
-  };
+  }
 
   return {
     ...(question.paper_id ? { paper_id: question.paper_id } : {}),
     followup_question_context: context,
-  };
+  }
 }
 
 function titleCase(value: string): string {
-  if (!value) return "";
-  return value.charAt(0).toUpperCase() + value.slice(1);
+  if (!value) return ''
+  return value.charAt(0).toUpperCase() + value.slice(1)
 }
 
-export const QUIZ_TYPE_LABEL_KEYS: Record<NormalizedQuizQuestionType, string> =
-  {
-    choice: "Multiple Choice",
-    concept: "Concept Question",
-    fill_in_blank: "Fill in the Blank",
-    short_answer: "Short Answer",
-    written: "Essay",
-    coding: "Coding",
-  };
+export const QUIZ_TYPE_LABEL_KEYS: Record<NormalizedQuizQuestionType, string> = {
+  choice: 'Multiple Choice',
+  concept: 'Concept Question',
+  fill_in_blank: 'Fill in the Blank',
+  short_answer: 'Short Answer',
+  written: 'Essay',
+  coding: 'Coding',
+}
 
 /**
  * One-line summary of the quiz form, shown next to the collapsed `Settings`
@@ -462,34 +436,28 @@ export const QUIZ_TYPE_LABEL_KEYS: Record<NormalizedQuizQuestionType, string> =
  */
 export function summarizeQuizConfig(
   cfg: DeepQuestionFormConfig,
-  translate?: (key: string) => string,
+  translate?: (key: string) => string
 ): string {
-  const tr = translate ?? ((s: string) => s);
-  if (cfg.mode === "original_paper") {
-    return [tr("Original Paper"), cfg.paper_id.trim() || tr("no paper")].join(
-      " · ",
-    );
+  const tr = translate ?? ((s: string) => s)
+  if (cfg.mode === 'original_paper') {
+    return [tr('Original Paper'), cfg.paper_id.trim() || tr('no paper')].join(' · ')
   }
-  if (cfg.mode === "mimic") {
-    const target = cfg.paper_path.trim() || tr("no paper");
-    return [
-      tr("Mimic Paper"),
-      target,
-      `${tr("Max")} ${cfg.max_questions}`,
-    ].join(" · ");
+  if (cfg.mode === 'mimic') {
+    const target = cfg.paper_path.trim() || tr('no paper')
+    return [tr('Mimic Paper'), target, `${tr('Max')} ${cfg.max_questions}`].join(' · ')
   }
   const typeSummary =
     cfg.question_types.length === 0
-      ? tr("Auto")
+      ? tr('Auto')
       : cfg.question_types.length === 1
         ? tr(QUIZ_TYPE_LABEL_KEYS[cfg.question_types[0]])
-        : `${cfg.question_types.length} ${tr("types")}`;
+        : `${cfg.question_types.length} ${tr('types')}`
   return [
-    tr("Custom"),
-    `${cfg.num_questions} ${tr("questions")}`,
-    tr(titleCase(cfg.difficulty || "auto")),
+    tr('Custom'),
+    `${cfg.num_questions} ${tr('questions')}`,
+    tr(titleCase(cfg.difficulty || 'auto')),
     typeSummary,
-  ].join(" · ");
+  ].join(' · ')
 }
 
 /**
@@ -503,11 +471,11 @@ export function resolveExamWSConfig({
   examActive,
   quizConfig,
 }: {
-  examActive: boolean;
-  quizConfig: DeepQuestionFormConfig;
+  examActive: boolean
+  quizConfig: DeepQuestionFormConfig
 }): Record<string, unknown> {
-  if (examActive) return { mode: "proctor" };
-  return buildQuizWSConfig({ ...quizConfig, mode: "original_paper" });
+  if (examActive) return { mode: 'proctor' }
+  return buildQuizWSConfig({ ...quizConfig, mode: 'original_paper' })
 }
 
 /**
@@ -519,32 +487,30 @@ export function resolveQuizWSConfig({
   quizActive,
   quizConfig,
 }: {
-  quizActive: boolean;
-  quizConfig: DeepQuestionFormConfig;
+  quizActive: boolean
+  quizConfig: DeepQuestionFormConfig
 }): Record<string, unknown> {
-  if (quizActive) return { mode: "proctor" };
-  return buildQuizWSConfig(quizConfig);
+  if (quizActive) return { mode: 'proctor' }
+  return buildQuizWSConfig(quizConfig)
 }
 
 /**
  * Build the `config` payload to send over WebSocket for a quiz generation
  * request.
  */
-export function buildQuizWSConfig(
-  cfg: DeepQuestionFormConfig,
-): Record<string, unknown> {
-  if (cfg.mode === "original_paper") {
+export function buildQuizWSConfig(cfg: DeepQuestionFormConfig): Record<string, unknown> {
+  if (cfg.mode === 'original_paper') {
     return {
-      mode: "original_paper",
+      mode: 'original_paper',
       paper_id: cfg.paper_id.trim(),
-    };
+    }
   }
-  if (cfg.mode === "mimic") {
+  if (cfg.mode === 'mimic') {
     return {
-      mode: "mimic",
+      mode: 'mimic',
       paper_path: cfg.paper_path.trim(),
       max_questions: cfg.max_questions,
-    };
+    }
   }
   // Only forward per-type counts when >=2 types are selected AND the user
   // actually populated counts that sum to num_questions. Otherwise let
@@ -552,13 +518,12 @@ export function buildQuizWSConfig(
   const countsValid =
     cfg.question_types.length >= 2 &&
     Object.keys(cfg.per_type_counts).length > 0 &&
-    Object.values(cfg.per_type_counts).reduce((sum, v) => sum + (v || 0), 0) ===
-      cfg.num_questions;
+    Object.values(cfg.per_type_counts).reduce((sum, v) => sum + (v || 0), 0) === cfg.num_questions
   return {
-    mode: "custom",
+    mode: 'custom',
     num_questions: cfg.num_questions,
-    difficulty: cfg.difficulty === "auto" ? "" : cfg.difficulty,
+    difficulty: cfg.difficulty === 'auto' ? '' : cfg.difficulty,
     question_types: cfg.question_types,
     per_type_counts: countsValid ? cfg.per_type_counts : {},
-  };
+  }
 }

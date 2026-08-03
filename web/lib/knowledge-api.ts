@@ -144,6 +144,7 @@ export interface PaperLibraryQuestion {
   difficulty?: string | null
   answer: string
   images: string[]
+  option_images: Record<string, string[]>
   page?: number | null
   is_multi_select: boolean
   source_question_type?: string | null
@@ -573,6 +574,10 @@ export async function uploadPaperLibrary(files: File[]): Promise<PaperUploadResp
 
 export function paperSourcePath(paperId: string): string {
   return `${PAPER_LIBRARY_PATH}/${encodeURIComponent(paperId)}/source`
+}
+
+export function paperPreviewTextPath(paperId: string): string {
+  return `${PAPER_LIBRARY_PATH}/${encodeURIComponent(paperId)}/preview-text`
 }
 
 export function paperAssetPath(paperId: string, filename: string): string {

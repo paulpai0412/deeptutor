@@ -85,6 +85,21 @@ async def create_original_paper_snapshot(
                 raise QuizSnapshotError(
                     f"Question {question_id} has invalid image references."
                 )
+            raw_option_images = question.get("option_images", {})
+            if not isinstance(raw_option_images, dict):
+                raise QuizSnapshotError(
+                    f"Question {question_id} has invalid option-image references."
+                )
+            option_images: dict[str, list[str]] = {}
+            for raw_label, raw_names in raw_option_images.items():
+                label = str(raw_label).strip()
+                if not label or not isinstance(raw_names, list) or any(
+                    not isinstance(name, str) or name not in raw_images for name in raw_names
+                ):
+                    raise QuizSnapshotError(
+                        f"Question {question_id} has invalid option-image references."
+                    )
+                option_images[label] = list(raw_names)
 
             image_records: list[dict[str, str]] = []
             for image_index, image_name in enumerate(raw_images):
@@ -132,6 +147,13 @@ async def create_original_paper_snapshot(
                     }
                 )
 
+            image_records_by_source = {
+                record["source_name"]: record for record in image_records
+            }
+            option_image_records = {
+                label: [image_records_by_source[name] for name in names]
+                for label, names in option_images.items()
+            }
             snapshot_question = {
                 "question_id": question_id,
                 "question_number": str(question.get("question_number") or ""),
@@ -146,6 +168,7 @@ async def create_original_paper_snapshot(
                 "source_question_id": question.get("source_question_id"),
                 "warnings": list(question.get("warnings") or []),
                 "images": image_records,
+                "option_images": option_image_records,
             }
             snapshot_questions.append(snapshot_question)
 

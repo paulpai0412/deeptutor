@@ -191,6 +191,11 @@ def test_upload_and_read_legacy_word_source(client: TestClient) -> None:
     assert source.headers["content-type"].startswith("application/msword")
     assert source.content == DOC_BYTES
 
+    preview = client.get(f"/api/v1/papers/{paper['paper_id']}/preview-text")
+    assert preview.status_code == 200
+    assert "Which answer is correct?" in preview.text
+    assert "A. One" in preview.text
+
 
 def test_library_paper_rename_move_and_delete_api(client: TestClient) -> None:
     first = client.post("/api/v1/papers/libraries", json={"name": "First"}).json()

@@ -85,16 +85,21 @@ def load_parsed_paper(paper_dir: Path) -> tuple[str | None, list[dict] | None, P
     md_file = md_files[0]
     print(f"📄 Found markdown file: {md_file.name}")
 
-    with open(md_file, encoding="utf-8") as f:
-        markdown_content = f.read()
+    try:
+        markdown_content = md_file.read_text(encoding="utf-8")
+    except OSError as exc:
+        print(f"✗ Error: Could not read markdown file: {exc}")
+        return None, None, auto_dir / "images"
 
     json_files = list(auto_dir.glob("*_content_list.json"))
     content_list = None
     if json_files:
         json_file = json_files[0]
         print(f"📋 Found content_list file: {json_file.name}")
-        with open(json_file, encoding="utf-8") as f:
-            content_list = json.load(f)
+        try:
+            content_list = json.loads(json_file.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            print(f"⚠️ Warning: Could not read content_list file: {exc}")
     else:
         print("⚠️ Warning: content_list.json file not found, will use markdown content only")
 
@@ -155,6 +160,8 @@ def extract_questions_with_llm(
             if path.is_file() and path.suffix.lower() in _IMAGE_SUFFIXES
         ]
     image_list = [path.relative_to(images_dir).as_posix() for path in image_files] if images_dir else []
+    page_context_images = [name for name in image_list if Path(name).name.startswith("__page_context_")]
+    assignable_images = [name for name in image_list if name not in page_context_images]
 
     system_prompt = """You are a professional exam paper analysis assistant. Your task is to extract all question information from the provided exam paper content.
 
@@ -185,7 +192,10 @@ Please return results in JSON format as follows:
             "question_type": "choice",
             "difficulty": "medium",
             "answer": "B",
-            "images": ["image_001.jpg", "image_002.jpg"]
+            "images": ["image_001.jpg", "image_002.jpg"],
+            "option_images": {"A": ["image_001.jpg"], "B": ["image_002.jpg"]},
+            "image_confidence": 0.94,
+            "image_warnings": []
         },
         {
             "question_number": "2",
@@ -207,11 +217,19 @@ Important Notes:
 5. "difficulty" MUST be exactly one of: easy, medium, hard, or null when unknown
 6. If no answer key is explicit in the paper, set "answer" to "" and do not infer one
 7. If a question has no associated images, set images field to empty array []
-8. Image file names should be actual existing file names
-9. Preserve source page when available as an integer "page" field
-10. Return top-level "complete": true only when the full document was covered; include a top-level "warnings" array for omissions or uncertainty
-11. Ensure the returned format is valid JSON
-12. Never infer an image association from question order, page order, or image count. If the relationship is uncertain, return an empty images array.
+8. Image file names must come from the assignable image list. Files named __page_context_* are layout evidence only and MUST NOT be returned in images or option_images.
+9. Preserve source page when available as an integer "page" field.
+10. Return top-level "complete": true only when the full document was covered; include a top-level "warnings" array for omissions or uncertainty.
+11. Ensure the returned format is valid JSON.
+12. Image filenames source.pdf-{zero_based_page}-{image_index}.png identify the source page; for example source.pdf-0-* belongs to page 1.
+13. Reconstruct question boundaries and visible A/B/C/D labels from __page_context_* full-page images before assigning extracted crops.
+14. For image-only choices, return option_images as an option-label-to-file-list object. The question-level images field must be the union of stem images and every option_images value.
+15. Require at least two independent signals for automatic matching: a visible option label, spatial proximity on the full page, matching nearby text/caption, distinctive diagram content, or an unambiguous option grid.
+16. Page or image order may support a match but must never be the sole evidence. Set image_confidence from 0 to 1; below 0.85, leave the uncertain mapping empty and explain why in image_warnings.
+17. Use full-page visual evidence to recover questions or option labels missing from Markdown, while preserving the printed wording exactly.
+18. When parsed text conflicts with visible mathematical notation or spatial layout, the page image is the source of truth.
+19. In question_text, options, and worked answers, transcribe structured mathematical expressions as KaTeX-compatible LaTeX: use $...$ inline and $$...$$ for display math, but keep prose and standalone numbers as plain text. Escape LaTeX backslashes so the response remains valid JSON.
+20. Preserve superscripts, subscripts, fractions, roots, grouping, operators, and equation structure. Never flatten positional notation into adjacent or bracketed plain text.
 """
 
     document_content = (
@@ -225,8 +243,11 @@ Important Notes:
 Parsed document blocks (when available):
 {parsed_blocks}
 
-Available image files:
-{json.dumps(image_list, ensure_ascii=False, indent=2)}
+Full-page layout context images (evidence only; never return these filenames):
+{json.dumps(page_context_images, ensure_ascii=False, indent=2)}
+
+Assignable extracted image files:
+{json.dumps(assignable_images, ensure_ascii=False, indent=2)}
 
 Please analyze the complete document above, extract all question information, and return in JSON format.
 """
@@ -255,7 +276,7 @@ Please analyze the complete document above, extract all question information, an
     image_warnings: list[str] = []
     if image_files and supports_vision(binding, model):
         attachments = []
-        for image_file in image_files:
+        for image_index, image_file in enumerate(image_files):
             try:
                 encoded = base64.b64encode(image_file.read_bytes()).decode("ascii")
             except OSError as exc:
@@ -267,7 +288,7 @@ Please analyze the complete document above, extract all question information, an
                 SimpleNamespace(
                     type="image",
                     base64=encoded,
-                    filename=image_file.name,
+                    filename=image_list[image_index],
                     mime_type=_image_mime_type(image_file),
                 )
             )
@@ -282,7 +303,9 @@ Please analyze the complete document above, extract all question information, an
                 binding=binding,
                 model=model,
             )
-            llm_kwargs["messages"] = result.messages
+            llm_kwargs["messages"] = _label_multimodal_images(
+                result.messages, [attachment.filename for attachment in attachments]
+            )
             if result.url_images_dropped:
                 image_warnings.append(
                     f"{result.url_images_dropped} image(s) could not be sent to the vision model."
@@ -361,6 +384,24 @@ Please analyze the complete document above, extract all question information, an
     return questions
 
 
+def _label_multimodal_images(
+    messages: list[dict[str, Any]], filenames: list[str]
+) -> list[dict[str, Any]]:
+    if not messages or not isinstance(messages[-1].get("content"), list):
+        return messages
+    content = messages[-1]["content"]
+    text_parts = [part for part in content if part.get("type") == "text"]
+    image_parts = [part for part in content if part.get("type") != "text"]
+    if len(image_parts) != len(filenames):
+        return messages
+    labeled = list(text_parts)
+    for filename, image_part in zip(filenames, image_parts, strict=True):
+        labeled.append({"type": "text", "text": f"Image file: {filename}"})
+        labeled.append(image_part)
+    messages[-1] = {**messages[-1], "content": labeled}
+    return messages
+
+
 def _portable_content_blocks(content_list: list[dict] | None) -> list[dict]:
     """Keep parser blocks useful to the model without leaking cache paths."""
     if not isinstance(content_list, list):
@@ -404,7 +445,10 @@ def save_questions_json(questions: list[dict[str, Any]], output_dir: Path, paper
     Returns:
         Saved file path
     """
-    output_dir.mkdir(parents=True, exist_ok=True)
+    try:
+        output_dir.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        raise RuntimeError(f"Could not create question output directory: {exc}") from exc
 
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
 
@@ -416,8 +460,12 @@ def save_questions_json(questions: list[dict[str, Any]], output_dir: Path, paper
     }
 
     output_file = output_dir / f"{paper_name}_{timestamp}_questions.json"
-    with open(output_file, "w", encoding="utf-8") as f:
-        json.dump(output_data, f, ensure_ascii=False, indent=2)
+    try:
+        output_file.write_text(
+            json.dumps(output_data, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
+    except OSError as exc:
+        raise RuntimeError(f"Could not save extracted questions: {exc}") from exc
 
     print(f"💾 Question information saved to: {output_file.name}")
 
@@ -441,14 +489,14 @@ def extract_questions_from_paper(paper_dir: str, output_dir: str | None = None) 
     Returns:
         Whether extraction was successful
     """
-    paper_dir = Path(paper_dir).resolve()
-    if not paper_dir.exists():
-        print(f"✗ Error: Directory does not exist: {paper_dir}")
+    paper_path = Path(paper_dir).resolve()
+    if not paper_path.exists():
+        print(f"✗ Error: Directory does not exist: {paper_path}")
         return False
 
-    print(f"📁 Paper directory: {paper_dir}")
+    print(f"📁 Paper directory: {paper_path}")
 
-    markdown_content, content_list, images_dir = load_parsed_paper(paper_dir)
+    markdown_content, content_list, images_dir = load_parsed_paper(paper_path)
 
     if not markdown_content:
         print("✗ Error: Unable to load paper content")
@@ -466,23 +514,19 @@ def extract_questions_from_paper(paper_dir: str, output_dir: str | None = None) 
         content_list=content_list,
         images_dir=images_dir,
         api_key=llm_config.api_key,
-        base_url=llm_config.base_url,
+        base_url=llm_config.base_url or "",
         model=llm_config.model,
         api_version=getattr(llm_config, "api_version", None),
         binding=getattr(llm_config, "binding", None),
     )
 
-    if not questions:
+    if not isinstance(questions, list) or not questions:
         print("⚠️ Warning: No questions extracted")
         return False
 
-    if output_dir is None:
-        output_dir = paper_dir
-    else:
-        output_dir = Path(output_dir)
-
-    paper_name = paper_dir.name
-    output_file = save_questions_json(questions, output_dir, paper_name)
+    output_path = paper_path if output_dir is None else Path(output_dir)
+    paper_name = paper_path.name
+    output_file = save_questions_json(questions, output_path, paper_name)
 
     print("\n✓ Question extraction completed!")
     print(f"📄 View results: {output_file}")
