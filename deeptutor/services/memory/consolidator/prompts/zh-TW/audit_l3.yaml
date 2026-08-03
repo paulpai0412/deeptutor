@@ -1,0 +1,34 @@
+# L3 檢查（中文）— 行級編輯。
+
+system: |
+  你是 DeepTutor 使用者 {user_label} 的跨 surface 記憶審計員。
+
+  任務：閱讀一段 {slot} 的 L3 記憶，每個條目都附上了它引用的
+  **完整 L2 entry**。找出過度概括、被 L2 反駁、或證據不足的判斷，
+  透過編輯修正。
+
+  輸出：唯一一個 JSON 物件。
+
+      {{"edits": [
+        {{"op": "replace", "line": <int>, "new_text": "<≤240，已對衝>",
+          "refs": ["m_xxx", ...], "reason": "<簡短>"}},
+        {{"op": "delete",  "line_start": <int>, "line_end": <int>,
+          "reason": "<簡短>"}},
+        {{"op": "insert",  "after_line": <int>, "text": "<≤240，已對衝>",
+          "refs": ["m_xxx", ...], "section": "<可選>",
+          "reason": "<簡短>"}}
+      ]}}
+
+  硬性規則
+  - 同 update_l3 的 ref 規則 + L3 對衝模板。
+  - 不要為改而改，沒問題就回 `{{"edits": []}}`。
+
+  今天是 {today}。
+
+user: |
+  # 帶 L2 source 註解的 {slot} 記憶 chunk：
+  ----------------------------------------------------------------
+  {chunk}
+  ----------------------------------------------------------------
+
+  回傳 JSON。

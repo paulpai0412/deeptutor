@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 from pathlib import Path
 
-import pytest
+import pytest  # type: ignore[import-not-found]
 
 from deeptutor.services.rag.file_routing import (
     DocumentType,
@@ -24,6 +24,7 @@ class TestExtensionClassification:
             ("data.json", DocumentType.TEXT),
             ("script.py", DocumentType.TEXT),
             ("config.yaml", DocumentType.TEXT),
+            ("legacy.doc", DocumentType.DOCX),
             ("paper.docx", DocumentType.DOCX),
             ("sheet.xlsx", DocumentType.SPREADSHEET),
             ("deck.pptx", DocumentType.PRESENTATION),
@@ -81,6 +82,7 @@ class TestSupportedExtensionsAndGlobs:
     def test_get_supported_extensions_covers_pdf_and_text(self) -> None:
         exts = FileTypeRouter.get_supported_extensions()
         assert ".pdf" in exts
+        assert ".doc" in exts
         assert ".docx" in exts
         assert ".xlsx" in exts
         assert ".pptx" in exts
@@ -125,6 +127,7 @@ class TestQuickHelpers:
         assert FileTypeRouter.needs_parser("paper.pdf") is True
 
     def test_needs_parser_for_office_documents(self) -> None:
+        assert FileTypeRouter.needs_parser("legacy.doc") is True
         assert FileTypeRouter.needs_parser("paper.docx") is True
         assert FileTypeRouter.needs_parser("sheet.xlsx") is True
         assert FileTypeRouter.needs_parser("deck.pptx") is True

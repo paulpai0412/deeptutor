@@ -36,7 +36,7 @@ import uuid
 
 logger = logging.getLogger(__name__)
 
-RunMode = Literal["update", "audit", "dedup"]
+RunMode = Literal["update", "audit", "dedup", "merge"]
 RunStatus = Literal["queued", "running", "cancelled", "done", "error"]
 
 _MAX_EVENTS_PER_RUN = 2000
@@ -275,7 +275,7 @@ class RunManager:
             await runner(on_event)
             if run.status == "running":
                 run.status = "done"
-        except asyncio.CancelledError:
+        except (asyncio.CancelledError,):
             run.status = "cancelled"
             await self._emit(run, {"stage": "cancelled"})
         except Exception as exc:  # noqa: BLE001

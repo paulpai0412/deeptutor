@@ -55,20 +55,16 @@ def load_prompt_hints(tool_name: str, language: str = "en") -> ToolPromptHints:
     normalized_language = _normalize_language(language)
     base_dir = Path(__file__).parent / "hints"
     candidates = [base_dir / normalized_language / f"{tool_name}.yaml"]
-    if normalized_language == "zh-TW":
-        candidates.append(base_dir / "zh" / f"{tool_name}.yaml")
     if normalized_language != "en":
         candidates.append(base_dir / "en" / f"{tool_name}.yaml")
 
     for path in candidates:
         if not path.is_file():
             continue
-        with open(path, encoding="utf-8") as file:
-            data = yaml.safe_load(file) or {}
-        if normalized_language == "zh-TW":
-            from deeptutor.i18n.zh_tw import convert_nested
-
-            data = convert_nested(data)
+        try:
+            data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+        except (OSError, yaml.YAMLError):
+            continue
         aliases = [
             ToolAlias(
                 name=str(item.get("name", "")).strip(),

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -389,6 +390,20 @@ def test_serialize_imported_transcript_zh_labels_and_framing() -> None:
     assert "第三方" in out or "不是你" in out
 
 
+def test_serialize_imported_transcript_zh_tw_uses_traditional_framing() -> None:
+    meta = {
+        "session_id": "imported_codex_x",
+        "preferences": {"import": {"source": "codex"}},
+    }
+    out = serialize_referenced_transcript(
+        meta, [{"role": "user", "content": "問題"}], language="zh-TW"
+    )
+
+    assert "使用者與外部 AI 助理" in out
+    assert "## 使用者" in out
+    assert "用户" not in out
+
+
 def test_serialize_native_referenced_transcript_frames_as_separate() -> None:
     """A referenced *native* session keeps the Assistant label but is framed
     as a separate conversation, not the current one."""
@@ -449,9 +464,7 @@ class _FakePartnerManager:
         return list(self._messages)
 
     def load_config(self, pid):
-        cfg = type("Cfg", (), {})()
-        cfg.name = self._name
-        return cfg
+        return SimpleNamespace(name=self._name)
 
 
 def _patch_partner(monkeypatch, manager, *, is_admin=True):

@@ -4,14 +4,14 @@ Tools API Router
 
 Read-only listing of the chat agent's built-in tools, used by the Settings UI
 to render the "Tools" sub-page. Returns each tool's definition (name,
-description, parameters) alongside its bilingual prompt hints, so the frontend
+description, parameters) alongside its localized prompt hints, so the frontend
 can show authoritative copy without duplicating the catalog.
 """
 
 from __future__ import annotations
 
 import logging
-from typing import Any, Literal
+from typing import Any
 
 from fastapi import APIRouter
 from pydantic import BaseModel
@@ -61,9 +61,9 @@ class ToolHintsPayload(BaseModel):
 class BuiltinToolPayload(BaseModel):
     name: str
     description: str
-    description_i18n: dict[Literal["en", "zh"], str] = {}
+    description_i18n: dict[str, str] = {}
     parameters: list[ToolParameterPayload]
-    hints: dict[Literal["en", "zh"], ToolHintsPayload]
+    hints: dict[str, ToolHintsPayload]
     aliases: list[str] = []
     # True iff the user is allowed to switch this tool on/off from the
     # /settings/tools UI. Locked-on tools (auto-mounted by the chat
@@ -157,6 +157,7 @@ def _build_tool_payload(
         hints={
             "en": _serialise_hints(tool.get_prompt_hints(language="en")),
             "zh": _serialise_hints(tool.get_prompt_hints(language="zh")),
+            "zh-TW": _serialise_hints(tool.get_prompt_hints(language="zh-TW")),
         },
         aliases=_collect_aliases_for(name),
         toggleable=toggleable,

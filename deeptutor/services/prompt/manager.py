@@ -21,7 +21,7 @@ class PromptManager:
 
     # Language fallback chain: if primary language not found, try alternatives
     LANGUAGE_FALLBACKS = {
-        "zh-TW": ["zh-TW", "zh", "cn", "en"],
+        "zh-TW": ["zh-TW", "en"],
         "zh": ["zh", "cn", "en"],
         "en": ["en", "zh", "cn"],
     }
@@ -65,7 +65,7 @@ class PromptManager:
         Args:
             module_name: Module name (research, solve, question, co_writer)
             agent_name: Agent name (filename without .yaml)
-            language: Language code ('zh' or 'en')
+            language: Language code ('en', 'zh', or 'zh-TW')
             subdirectory: Optional subdirectory (e.g., 'solve_loop' for solve module)
 
         Returns:
@@ -110,10 +110,6 @@ class PromptManager:
                     try:
                         with open(prompt_file, encoding="utf-8") as f:
                             loaded = yaml.safe_load(f) or {}
-                        if lang_code == "zh-TW":
-                            from deeptutor.i18n.zh_tw import convert_nested
-
-                            return convert_nested(loaded)
                         return loaded
                     except Exception as e:
                         print(f"Warning: Failed to load {prompt_file}: {e}")

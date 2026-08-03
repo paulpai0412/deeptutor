@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import base64
 import io
+from pathlib import Path
 
-from docx import Document as DocxDocument
+from docx import Document as DocxDocument  # type: ignore[import-not-found]
 from openpyxl import Workbook
 from pptx import Presentation
 from pptx.util import Inches
@@ -42,6 +43,8 @@ def _make_docx(paragraphs: list[str]) -> bytes:
 def _make_xlsx(sheets: dict[str, list[list[object]]]) -> bytes:
     wb = Workbook()
     default = wb.active
+    if default is None:
+        raise RuntimeError("Workbook did not create a default worksheet")
     first = True
     for name, rows in sheets.items():
         ws = default if first else wb.create_sheet()
@@ -74,6 +77,7 @@ def _make_pptx(slides_text: list[list[str]]) -> bytes:
 class TestIsDocumentExtension:
     def test_office(self) -> None:
         assert is_document_extension("foo.pdf")
+        assert is_document_extension("legacy.DOC")
         assert is_document_extension("foo.DOCX")
         assert is_document_extension("report.xlsx")
         assert is_document_extension("deck.pptx")
@@ -99,6 +103,21 @@ class TestIsDocumentExtension:
 # ---------------------------------------------------------------------------
 # extract_text_from_bytes — happy paths
 # ---------------------------------------------------------------------------
+
+
+class TestExtractDoc:
+    def test_legacy_word_text(self) -> None:
+        data = (
+            Path(__file__).parents[1]
+            / "fixtures"
+            / "paper_library"
+            / "legacy-question.doc"
+        ).read_bytes()
+
+        text = extract_text_from_bytes("exam.doc", data)
+
+        assert "Which answer is correct?" in text
+        assert "A. One" in text
 
 
 class TestExtractDocx:

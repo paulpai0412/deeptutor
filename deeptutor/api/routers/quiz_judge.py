@@ -16,6 +16,7 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
 from deeptutor.services.config import PROJECT_ROOT, load_config_with_main, parse_language
 from deeptutor.services.llm import stream as llm_stream
+from deeptutor.services.prompt.language import append_language_directive
 from deeptutor.services.settings.interface_settings import get_ui_language
 from deeptutor.utils.error_utils import format_exception_message
 
@@ -36,6 +37,16 @@ _JUDGE_SYSTEM_PROMPTS = {
         "- 直接以学习者的作答为对象，不要泛泛而谈。\n"
         "- 全程使用中文。"
     ),
+    "zh-TW": (
+        "你是一名嚴謹且鼓勵學習者的助教，正在批改一道測驗題。"
+        "請根據題目、參考答案與解析，針對學習者的作答給出判定與回饋。\n\n"
+        "回答要求：\n"
+        "- 先用一行明確結論：✅ 正確 / ⚠️ 部分正確 / ❌ 不正確，並簡短說明關鍵判定依據。\n"
+        "- 接著逐項列出：哪些地方答對、哪些地方錯誤或缺漏，以及應如何修正。\n"
+        "- 若題目本身有多種合理答案，請肯定學習者合理的部分。\n"
+        "- 直接針對學習者的作答，不要泛泛而談。\n"
+        "- 全程使用繁體中文（臺灣）。"
+    ),
     "en": (
         "You are a rigorous yet encouraging teaching assistant grading a learner's quiz answer. "
         "Use the question, reference answer, and explanation to deliver a targeted assessment.\n\n"
@@ -47,6 +58,12 @@ _JUDGE_SYSTEM_PROMPTS = {
         "- Speak directly to the learner's submission — do not give a generic lecture.\n"
         "- Reply in English."
     ),
+}
+
+_JUDGE_NO_ANSWER = {
+    "en": "No answer to judge — submit a typed answer or attach an image.",
+    "zh": "没有可供评判的答案——请先输入答案或附加图片。",
+    "zh-TW": "沒有可供評判的答案——請先輸入答案或附加圖片。",
 }
 
 
@@ -69,7 +86,38 @@ def _build_judge_user_prompt(
             options_block = "\n".join(f"  {k}. {v}" for k, v in options.items())
         except Exception:
             options_block = ""
-    if language.startswith("zh"):
+    if language == "zh-TW":
+        parts = [
+            f"題目類型：{question_type or 'unknown'}",
+            f"題幹：\n{question}",
+        ]
+        if options_block:
+            parts.append(f"選項：\n{options_block}")
+        if correct_answer:
+            parts.append(f"參考答案：\n{correct_answer}")
+        if explanation:
+            parts.append(f"參考解析：\n{explanation}")
+        parts.append(
+            "學習者作答：\n"
+            + (
+                user_answer.strip()
+                if user_answer and user_answer.strip()
+                else "（僅提交圖片，沒有文字作答）"
+            )
+        )
+        if question_image_count:
+            parts.append(
+                f"題目另含 {question_image_count} 張圖片，請將圖片視為題意的一部分。"
+            )
+        if image_count:
+            count_text = (
+                f"學習者另附 {image_count} 張圖片作為答案內容"
+                if image_count > 1
+                else "學習者另附一張圖片作為答案內容"
+            )
+            parts.append(f"{count_text}，請連同圖片中的文字、公式或草圖一併判定。")
+        parts.append("請針對這位學習者的具體作答給出 AI 評判。")
+    elif language.startswith("zh"):
         parts = [
             f"题目类型：{question_type or 'unknown'}",
             f"题干：\n{question}",
@@ -240,11 +288,11 @@ async def websocket_quiz_judge(websocket: WebSocket):
         {"type": "done"}
         {"type": "error", "content": "..."}
     """
-    from deeptutor.api.routers.auth import ws_auth_failed, ws_require_auth
+    from deeptutor.api.routers.auth import is_ws_auth_token, ws_require_auth
     from deeptutor.multi_user.context import reset_current_user
 
     user_token = await ws_require_auth(websocket)
-    if user_token is ws_auth_failed:
+    if not is_ws_auth_token(user_token):
         return
 
     await websocket.accept()
@@ -383,16 +431,10 @@ async def websocket_quiz_judge(websocket: WebSocket):
     has_image = bool(all_image_records)
 
     options_value = data.get("options") if isinstance(data.get("options"), dict) else None
-    system_prompt = _JUDGE_SYSTEM_PROMPTS.get(
-        "zh" if requested_language.startswith("zh") else "en",
-        _JUDGE_SYSTEM_PROMPTS["en"],
+    system_prompt = append_language_directive(
+        _JUDGE_SYSTEM_PROMPTS.get(requested_language, _JUDGE_SYSTEM_PROMPTS["en"]),
+        requested_language,
     )
-    traditionalize = None
-    if requested_language == "zh-TW":
-        from deeptutor.i18n.zh_tw import to_traditional_chinese
-
-        traditionalize = to_traditional_chinese
-        system_prompt = traditionalize(system_prompt)
     user_prompt = _build_judge_user_prompt(
         language=requested_language,
         question=question_text,
@@ -405,17 +447,13 @@ async def websocket_quiz_judge(websocket: WebSocket):
         image_count=len(image_records),
         question_image_count=len(question_image_records),
     )
-    if traditionalize is not None:
-        user_prompt = traditionalize(user_prompt)
-
     if not (user_answer.strip() or image_records):
         await safe_send(
             {
                 "type": "error",
-                "content": (
-                    "沒有可供評判的答案——請先輸入答案或附加圖片。"
-                    if traditionalize is not None
-                    else "No answer to judge — submit a typed answer or attach an image."
+                "content": _JUDGE_NO_ANSWER.get(
+                    requested_language,
+                    _JUDGE_NO_ANSWER["en"],
                 ),
             }
         )
@@ -471,8 +509,7 @@ async def websocket_quiz_judge(websocket: WebSocket):
         ):
             if not chunk:
                 continue
-            visible_chunk = traditionalize(chunk) if traditionalize is not None else chunk
-            if not await safe_send({"type": "text", "content": visible_chunk}):
+            if not await safe_send({"type": "text", "content": chunk}):
                 break
         await safe_send({"type": "done"})
     except WebSocketDisconnect:

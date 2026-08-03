@@ -1,1291 +1,1170 @@
-import { apiFetch, apiUrl } from "@/lib/api";
-import { invalidateClientCache, withClientCache } from "@/lib/client-cache";
+import { apiFetch, apiUrl } from '@/lib/api'
+import { invalidateClientCache, withClientCache } from '@/lib/client-cache'
 
-const KNOWLEDGE_CACHE_PREFIX = "knowledge:";
+const KNOWLEDGE_CACHE_PREFIX = 'knowledge:'
 
 export interface KnowledgeBaseSummary {
-  id?: string;
-  name: string;
-  is_default?: boolean;
-  status?: string;
-  path?: string;
-  metadata?: Record<string, unknown>;
-  progress?: Record<string, unknown>;
-  statistics?: Record<string, unknown>;
-  source?: "admin" | "user";
-  assigned?: boolean;
-  read_only?: boolean;
-  provenance_label?: string;
-  available?: boolean;
+  id?: string
+  name: string
+  is_default?: boolean
+  status?: string
+  path?: string
+  metadata?: Record<string, unknown>
+  progress?: Record<string, unknown>
+  statistics?: Record<string, unknown>
+  source?: 'admin' | 'user'
+  assigned?: boolean
+  read_only?: boolean
+  provenance_label?: string
+  available?: boolean
 }
 
 export interface RagProviderSummary {
-  id: string;
-  name: string;
-  description: string;
+  id: string
+  name: string
+  description: string
   /** Whether the engine is ready to use (e.g. its API key is set). */
-  configured?: boolean;
+  configured?: boolean
   /** Whether the engine needs an API key configured before use. */
-  requires_api_key?: boolean;
+  requires_api_key?: boolean
   /** Retrieval modes this engine supports (empty for mode-less engines). */
-  modes?: string[];
+  modes?: string[]
   /** The active default retrieval mode for this engine. */
-  default_mode?: string;
+  default_mode?: string
   /** Whether an existing index for this engine can be linked in place. */
-  linkable?: boolean;
+  linkable?: boolean
 }
 
 export interface PageIndexConfig {
-  api_base_url: string;
-  api_key_set: boolean;
-  configured: boolean;
+  api_base_url: string
+  api_key_set: boolean
+  configured: boolean
 }
 
 export interface LlamaIndexConfig {
-  version: number;
+  version: number
   /** "hybrid" (BM25 + vector fusion) or "vector" only. */
-  retrieval_profile: "hybrid" | "vector";
+  retrieval_profile: 'hybrid' | 'vector'
   /** Default number of chunks a query returns. */
-  top_k: number;
-  vector_top_k_multiplier: number;
-  bm25_top_k_multiplier: number;
+  top_k: number
+  vector_top_k_multiplier: number
+  bm25_top_k_multiplier: number
   /** Chunk geometry — applies to documents indexed after the change. */
-  chunk_size: number;
-  chunk_overlap: number;
+  chunk_size: number
+  chunk_overlap: number
 }
 
 export interface GraphRagConfig {
-  version: number;
-  response_type: string;
-  community_level: number;
-  dynamic_community_selection: boolean;
+  version: number
+  response_type: string
+  community_level: number
+  dynamic_community_selection: boolean
 }
 
 export interface LightRagConfig {
-  version: number;
-  top_k: number;
-  response_type: string;
+  version: number
+  top_k: number
+  response_type: string
 }
 
 export interface PreflightCheck {
-  key: string;
-  label: string;
-  ok: boolean;
-  detail: string;
+  key: string
+  label: string
+  ok: boolean
+  detail: string
   /** Optional checks don't gate overall readiness (e.g. BM25, vision). */
-  optional: boolean;
+  optional: boolean
 }
 
 export interface EnginePreflight {
-  ok: boolean;
-  checks: PreflightCheck[];
+  ok: boolean
+  checks: PreflightCheck[]
 }
 
 export interface ModelOption {
-  profile_id: string;
-  profile_name: string;
-  model_id: string;
-  label: string;
-  model: string;
-  detail: string;
+  profile_id: string
+  profile_name: string
+  model_id: string
+  label: string
+  model: string
+  detail: string
 }
 
 export interface ModelKindOptions {
-  active: { profile_id: string | null; model_id: string | null };
-  options: ModelOption[];
+  active: { profile_id: string | null; model_id: string | null }
+  options: ModelOption[]
 }
 
 /** Map of service kind ("llm" | "embedding") → its options + active selection. */
-export type ModelOptionsByKind = Record<string, ModelKindOptions>;
+export type ModelOptionsByKind = Record<string, ModelKindOptions>
 
 export interface KnowledgeUploadPolicy {
-  extensions: string[];
-  accept: string;
-  max_file_size_bytes: number;
+  extensions: string[]
+  accept: string
+  max_file_size_bytes: number
 }
 
 export interface PaperLibrarySummary {
-  library_id: string;
-  name: string;
-  description?: string;
-  settings?: Record<string, unknown>;
-  folders?: string[];
-  created_at?: string;
-  updated_at?: string;
-  paper_count: number;
+  library_id: string
+  name: string
+  description?: string
+  settings?: Record<string, unknown>
+  folders?: string[]
+  created_at?: string
+  updated_at?: string
+  paper_count: number
 }
 
 export interface PaperLibraryRecord {
-  paper_id: string;
-  display_name: string;
-  original_filename: string;
-  source_hash: string;
-  status: string;
-  question_count: number;
-  warning_count: number;
-  created_at: string;
-  updated_at: string;
-  error?: string;
-  warnings?: string[];
-  progress?: { stage?: string; message?: string; percent?: number; task_id?: string };
-  task_id?: string;
-  parser_engine?: string;
-  library_id?: string;
-  folder_path?: string;
-  extraction_config?: Record<string, unknown>;
+  paper_id: string
+  display_name: string
+  original_filename: string
+  source_hash: string
+  status: string
+  question_count: number
+  warning_count: number
+  created_at: string
+  updated_at: string
+  error?: string
+  warnings?: string[]
+  progress?: { stage?: string; message?: string; percent?: number; task_id?: string }
+  task_id?: string
+  parser_engine?: string
+  library_id?: string
+  folder_path?: string
+  extraction_config?: Record<string, unknown>
 }
 
 export interface PaperLibraryQuestion {
-  question_id: string;
-  question_number: string;
-  question_text: string;
-  options: Record<string, string>;
-  question_type: string;
-  difficulty?: string | null;
-  answer: string;
-  images: string[];
-  page?: number | null;
-  is_multi_select: boolean;
-  source_question_type?: string | null;
-  warnings: string[];
-  source_question_id?: string | null;
+  question_id: string
+  question_number: string
+  question_text: string
+  options: Record<string, string>
+  question_type: string
+  difficulty?: string | null
+  answer: string
+  images: string[]
+  page?: number | null
+  is_multi_select: boolean
+  source_question_type?: string | null
+  warnings: string[]
+  source_question_id?: string | null
 }
 
 export interface PaperLibraryDetail extends PaperLibraryRecord {
-  questions: PaperLibraryQuestion[];  assets: string[];
+  questions: PaperLibraryQuestion[]
+  assets: string[]
 }
 
 export interface PaperPaperListResponse {
-  papers: PaperLibraryRecord[];
-  folders?: string[];
+  papers: PaperLibraryRecord[]
+  folders?: string[]
 }
 
 export interface PaperLibraryContents {
-  papers: PaperLibraryRecord[];
-  folders: string[];
+  papers: PaperLibraryRecord[]
+  folders: string[]
 }
 
 export interface PaperUploadResponse {
-  papers: PaperLibraryRecord[];
-  rejected: Array<{ filename: string; error: string }>;
-  batch_id?: string;
+  papers: PaperLibraryRecord[]
+  rejected: Array<{ filename: string; error: string }>
+  batch_id?: string
 }
 
 export interface PaperLibraryListResponse {
-  libraries: PaperLibrarySummary[];
+  libraries: PaperLibrarySummary[]
 }
 
 export interface PaperLibraryOptions {
   llm: {
-    active: { profile_id: string; model_id: string } | null;
+    active: { profile_id: string; model_id: string } | null
     options: Array<{
-      profile_id: string;
-      model_id: string;
-      profile_name: string;
-      model_name: string;
-      model: string;
-      provider?: string;
-      provider_label?: string;
-    }>;
-  };
+      profile_id: string
+      model_id: string
+      profile_name: string
+      model_name: string
+      model: string
+      provider?: string
+      provider_label?: string
+    }>
+  }
   parsers: Array<{
-    id: string;
-    name: string;
-    description: string;
-    available: boolean;
-  }>;
-  failure_policies: Array<{ id: string; label: string }>;
-  llm_required: boolean;
+    id: string
+    name: string
+    description: string
+    available: boolean
+  }>
+  failure_policies: Array<{ id: string; label: string }>
+  llm_required: boolean
 }
 
 export async function getPaperLibraryOptions(): Promise<PaperLibraryOptions> {
-  const response = await apiFetch(
-    apiUrl(`${PAPER_LIBRARY_PATH}/libraries/options`),
-    { cache: "no-store" },
-  );
+  const response = await apiFetch(apiUrl(`${PAPER_LIBRARY_PATH}/libraries/options`), {
+    cache: 'no-store',
+  })
   if (!response.ok) {
-    throw new Error(await readErrorDetail(response, "Failed to load Paper Library options"));
+    throw new Error(await readErrorDetail(response, 'Failed to load Paper Library options'))
   }
-  return (await response.json()) as PaperLibraryOptions;
+  return (await response.json()) as PaperLibraryOptions
 }
 
 export async function listPaperLibraries(options?: {
-  force?: boolean;
+  force?: boolean
 }): Promise<PaperLibrarySummary[]> {
   return withClientCache<PaperLibrarySummary[]>(
     `${PAPER_LIBRARY_PREFIX}libraries`,
     async () => {
-      const response = await apiFetch(
-        apiUrl(`${PAPER_LIBRARY_PATH}/libraries`),
-        { cache: "no-store" },
-      );
+      const response = await apiFetch(apiUrl(`${PAPER_LIBRARY_PATH}/libraries`), {
+        cache: 'no-store',
+      })
       if (!response.ok) {
-        throw new Error(await readErrorDetail(response, "Failed to list Paper Libraries"));
+        throw new Error(await readErrorDetail(response, 'Failed to list Paper Libraries'))
       }
-      const data = (await response.json()) as PaperLibraryListResponse;
-      return Array.isArray(data?.libraries) ? data.libraries : [];
+      const data = (await response.json()) as PaperLibraryListResponse
+      return Array.isArray(data?.libraries) ? data.libraries : []
     },
-    { force: options?.force, ttlMs: 5_000 },
-  );
+    { force: options?.force, ttlMs: 5_000 }
+  )
 }
 
 export async function createPaperLibrary(payload: {
-  name: string;
-  description?: string;
-  settings?: Record<string, unknown>;
+  name: string
+  description?: string
+  settings?: Record<string, unknown>
 }): Promise<PaperLibrarySummary> {
   const response = await apiFetch(apiUrl(`${PAPER_LIBRARY_PATH}/libraries`), {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),
-  });
+  })
   if (!response.ok) {
-    throw new Error(await readErrorDetail(response, "Failed to create Paper Library"));
+    throw new Error(await readErrorDetail(response, 'Failed to create Paper Library'))
   }
-  invalidateClientCache(PAPER_LIBRARY_PREFIX);
-  return (await response.json()) as PaperLibrarySummary;
+  invalidateClientCache(PAPER_LIBRARY_PREFIX)
+  return (await response.json()) as PaperLibrarySummary
 }
 
 export async function updatePaperLibrary(
   libraryId: string,
   payload: {
-    name?: string;
-    description?: string;
-    settings?: Record<string, unknown>;
-  },
+    name?: string
+    description?: string
+    settings?: Record<string, unknown>
+  }
 ): Promise<PaperLibrarySummary> {
   const response = await apiFetch(
     apiUrl(`${PAPER_LIBRARY_PATH}/libraries/${encodeURIComponent(libraryId)}`),
     {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
-    },
-  );
+    }
+  )
   if (!response.ok) {
-    throw new Error(await readErrorDetail(response, "Failed to update Paper Library"));
+    throw new Error(await readErrorDetail(response, 'Failed to update Paper Library'))
   }
-  invalidateClientCache(PAPER_LIBRARY_PREFIX);
-  return (await response.json()) as PaperLibrarySummary;
+  invalidateClientCache(PAPER_LIBRARY_PREFIX)
+  return (await response.json()) as PaperLibrarySummary
 }
 
 export async function deletePaperLibrary(libraryId: string): Promise<void> {
   const response = await apiFetch(
     apiUrl(`${PAPER_LIBRARY_PATH}/libraries/${encodeURIComponent(libraryId)}`),
-    { method: "DELETE" },
-  );
+    { method: 'DELETE' }
+  )
   if (!response.ok) {
-    throw new Error(await readErrorDetail(response, "Failed to delete Paper Library"));
+    throw new Error(await readErrorDetail(response, 'Failed to delete Paper Library'))
   }
-  invalidateClientCache(PAPER_LIBRARY_PREFIX);
+  invalidateClientCache(PAPER_LIBRARY_PREFIX)
 }
 
 export async function listPaperLibraryContents(
   libraryId: string,
-  options?: { search?: string; status?: string; folderPath?: string },
+  options?: { search?: string; status?: string; folderPath?: string }
 ): Promise<PaperLibraryContents> {
-  const params = new URLSearchParams();
-  if (options?.search?.trim()) params.set("search", options.search.trim());
-  if (options?.status?.trim()) params.set("status", options.status.trim());
+  const params = new URLSearchParams()
+  if (options?.search?.trim()) params.set('search', options.search.trim())
+  if (options?.status?.trim()) params.set('status', options.status.trim())
   if (options?.folderPath !== undefined) {
-    params.set("folder_path", options.folderPath);
+    params.set('folder_path', options.folderPath)
   }
-  const suffix = params.toString() ? `?${params.toString()}` : "";
+  const suffix = params.toString() ? `?${params.toString()}` : ''
   const response = await apiFetch(
-    apiUrl(
-      `${PAPER_LIBRARY_PATH}/libraries/${encodeURIComponent(libraryId)}/papers${suffix}`,
-    ),
-    { cache: "no-store" },
-  );
+    apiUrl(`${PAPER_LIBRARY_PATH}/libraries/${encodeURIComponent(libraryId)}/papers${suffix}`),
+    { cache: 'no-store' }
+  )
   if (!response.ok) {
-    throw new Error(await readErrorDetail(response, "Failed to list library papers"));
+    throw new Error(await readErrorDetail(response, 'Failed to list library papers'))
   }
-  const data = (await response.json()) as PaperPaperListResponse;
+  const data = (await response.json()) as PaperPaperListResponse
   return {
     papers: Array.isArray(data?.papers) ? data.papers : [],
     folders: Array.isArray(data?.folders) ? data.folders : [],
-  };
+  }
 }
 
 export async function listLibraryPapers(
   libraryId: string,
-  options?: { search?: string; status?: string },
+  options?: { search?: string; status?: string }
 ): Promise<PaperLibraryRecord[]> {
-  const contents = await listPaperLibraryContents(libraryId, options);
-  return contents.papers;
+  const contents = await listPaperLibraryContents(libraryId, options)
+  return contents.papers
 }
 
-export async function listPaperLibraryFolders(
-  libraryId: string,
-): Promise<string[]> {
+export async function listPaperLibraryFolders(libraryId: string): Promise<string[]> {
   const response = await apiFetch(
     apiUrl(`${PAPER_LIBRARY_PATH}/libraries/${encodeURIComponent(libraryId)}/folders`),
-    { cache: "no-store" },
-  );
+    { cache: 'no-store' }
+  )
   if (!response.ok) {
-    throw new Error(await readErrorDetail(response, "Failed to list Paper Folders"));
+    throw new Error(await readErrorDetail(response, 'Failed to list Paper Folders'))
   }
-  const data = (await response.json()) as { folders?: string[] };
-  return Array.isArray(data?.folders) ? data.folders : [];
+  const data = (await response.json()) as { folders?: string[] }
+  return Array.isArray(data?.folders) ? data.folders : []
 }
 
 export async function createPaperFolder(
   libraryId: string,
   name: string,
-  parentPath = "",
+  parentPath = ''
 ): Promise<string> {
   const response = await apiFetch(
     apiUrl(`${PAPER_LIBRARY_PATH}/libraries/${encodeURIComponent(libraryId)}/folders`),
     {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ name, parent_path: parentPath }),
-    },
-  );
+    }
+  )
   if (!response.ok) {
-    throw new Error(await readErrorDetail(response, "Failed to create Paper Folder"));
+    throw new Error(await readErrorDetail(response, 'Failed to create Paper Folder'))
   }
-  invalidateClientCache(PAPER_LIBRARY_PREFIX);
-  const data = (await response.json()) as { path: string };
-  return data.path;
+  invalidateClientCache(PAPER_LIBRARY_PREFIX)
+  const data = (await response.json()) as { path: string }
+  return data.path
 }
 
 function appendPaperFilesWithPaths(form: FormData, files: File[]): void {
-  files.forEach((file) => {
-    form.append("files", file);
-    form.append("rel_paths", file.webkitRelativePath || "");
-  });
+  files.forEach(file => {
+    form.append('files', file)
+    form.append('rel_paths', file.webkitRelativePath || '')
+  })
 }
 
 export async function uploadPaperLibraryToLibrary(
   libraryId: string,
-  files: File[],
+  files: File[]
 ): Promise<PaperUploadResponse> {
-  const form = new FormData();
-  appendPaperFilesWithPaths(form, files);
+  const form = new FormData()
+  appendPaperFilesWithPaths(form, files)
   const response = await apiFetch(
     apiUrl(`${PAPER_LIBRARY_PATH}/libraries/${encodeURIComponent(libraryId)}/upload`),
-    { method: "POST", body: form },
-  );
+    { method: 'POST', body: form }
+  )
   if (!response.ok) {
-    throw new Error(await readErrorDetail(response, "Failed to upload papers"));
+    throw new Error(await readErrorDetail(response, 'Failed to upload papers'))
   }
-  invalidateClientCache(PAPER_LIBRARY_PREFIX);
-  return (await response.json()) as PaperUploadResponse;
+  invalidateClientCache(PAPER_LIBRARY_PREFIX)
+  return (await response.json()) as PaperUploadResponse
 }
 
 export interface KnowledgeBaseFile {
   /** POSIX path relative to the KB's raw/ root (may include folders). */
-  name: string;
+  name: string
   /** "folder" entries are organizational only; default "file". */
-  type?: "file" | "folder";
-  size?: number;
-  modified?: number;
-  mime_type?: string | null;
+  type?: 'file' | 'folder'
+  size?: number
+  modified?: number
+  mime_type?: string | null
 }
 
-const IMAGE_UPLOAD_EXTENSIONS = [
-  ".bmp",
-  ".gif",
-  ".jpeg",
-  ".jpg",
-  ".png",
-  ".tif",
-  ".tiff",
-  ".webp",
-];
+const IMAGE_UPLOAD_EXTENSIONS = ['.bmp', '.gif', '.jpeg', '.jpg', '.png', '.tif', '.tiff', '.webp']
 
 const IMAGE_UPLOAD_MIME_TYPES = [
-  "image/bmp",
-  "image/gif",
-  "image/jpeg",
-  "image/png",
-  "image/tiff",
-  "image/webp",
-];
+  'image/bmp',
+  'image/gif',
+  'image/jpeg',
+  'image/png',
+  'image/tiff',
+  'image/webp',
+]
 
 function normalizeUploadPolicy(data: unknown): KnowledgeUploadPolicy {
-  const payload = data as Partial<KnowledgeUploadPolicy> | null | undefined;
+  const payload = data as Partial<KnowledgeUploadPolicy> | null | undefined
   const extensions = Array.from(
     new Set([
       ...(Array.isArray(payload?.extensions) ? payload.extensions : []),
       ...IMAGE_UPLOAD_EXTENSIONS,
-    ]),
-  ).sort();
+    ])
+  ).sort()
   const serverAccept =
-    typeof payload?.accept === "string"
+    typeof payload?.accept === 'string'
       ? payload.accept
-          .split(",")
-          .map((item) => item.trim())
+          .split(',')
+          .map(item => item.trim())
           .filter(Boolean)
-      : [];
+      : []
   const accept = Array.from(
-    new Set([...serverAccept, ...extensions, ...IMAGE_UPLOAD_MIME_TYPES]),
-  ).join(",");
+    new Set([...serverAccept, ...extensions, ...IMAGE_UPLOAD_MIME_TYPES])
+  ).join(',')
 
   return {
     extensions,
     accept,
     max_file_size_bytes:
-      typeof payload?.max_file_size_bytes === "number"
+      typeof payload?.max_file_size_bytes === 'number'
         ? payload.max_file_size_bytes
         : 200 * 1024 * 1024,
-  };
+  }
 }
 
 export async function listKnowledgeBases(options?: { force?: boolean }) {
   return withClientCache<KnowledgeBaseSummary[]>(
     `${KNOWLEDGE_CACHE_PREFIX}list`,
     async () => {
-      const response = await apiFetch(apiUrl("/api/v1/knowledge/list"), {
-        cache: "no-store",
-      });
-      const data = await response.json();
+      const response = await apiFetch(apiUrl('/api/v1/knowledge/list'), {
+        cache: 'no-store',
+      })
+      const data = await response.json()
       return Array.isArray(data)
         ? data
         : Array.isArray(data?.knowledge_bases)
           ? data.knowledge_bases
-          : [];
+          : []
     },
     {
       force: options?.force,
-    },
-  );
+    }
+  )
 }
 
 export async function listRagProviders(options?: { force?: boolean }) {
   return withClientCache<RagProviderSummary[]>(
     `${KNOWLEDGE_CACHE_PREFIX}providers`,
     async () => {
-      const response = await apiFetch(
-        apiUrl("/api/v1/knowledge/rag-providers"),
-        {
-          cache: "no-store",
-        },
-      );
-      const data = await response.json();
-      return Array.isArray(data?.providers) ? data.providers : [];
+      const response = await apiFetch(apiUrl('/api/v1/knowledge/rag-providers'), {
+        cache: 'no-store',
+      })
+      const data = await response.json()
+      return Array.isArray(data?.providers) ? data.providers : []
     },
     {
       force: options?.force,
-    },
-  );
+    }
+  )
 }
 
 export async function getKnowledgeUploadPolicy(options?: { force?: boolean }) {
   return withClientCache<KnowledgeUploadPolicy>(
     `${KNOWLEDGE_CACHE_PREFIX}upload-policy`,
     async () => {
-      const response = await apiFetch(
-        apiUrl("/api/v1/knowledge/supported-file-types"),
-        {
-          cache: "no-store",
-        },
-      );
-      const data = await response.json();
-      return normalizeUploadPolicy(data);
+      const response = await apiFetch(apiUrl('/api/v1/knowledge/supported-file-types'), {
+        cache: 'no-store',
+      })
+      const data = await response.json()
+      return normalizeUploadPolicy(data)
     },
     {
       force: options?.force,
-    },
-  );
+    }
+  )
 }
 
 export function invalidateKnowledgeCaches() {
-  invalidateClientCache(KNOWLEDGE_CACHE_PREFIX);
+  invalidateClientCache(KNOWLEDGE_CACHE_PREFIX)
 }
 
-const PAPER_LIBRARY_PREFIX = "paper-library:";
-const PAPER_LIBRARY_PATH = "/api/v1/papers";
+const PAPER_LIBRARY_PREFIX = 'paper-library:'
+const PAPER_LIBRARY_PATH = '/api/v1/papers'
 
 export async function listPaperLibrary(options?: {
-  search?: string;
-  status?: string;
+  search?: string
+  status?: string
 }): Promise<PaperLibraryRecord[]> {
-  const params = new URLSearchParams();
-  if (options?.search?.trim()) params.set("search", options.search.trim());
-  if (options?.status?.trim()) params.set("status", options.status.trim());
-  const suffix = params.toString() ? `?${params.toString()}` : "";
+  const params = new URLSearchParams()
+  if (options?.search?.trim()) params.set('search', options.search.trim())
+  if (options?.status?.trim()) params.set('status', options.status.trim())
+  const suffix = params.toString() ? `?${params.toString()}` : ''
   return withClientCache<PaperLibraryRecord[]>(
     `${PAPER_LIBRARY_PREFIX}list:${suffix}`,
     async () => {
-      const response = await apiFetch(
-        apiUrl(`${PAPER_LIBRARY_PATH}${suffix}`),
-        { cache: "no-store" },
-      );
+      const response = await apiFetch(apiUrl(`${PAPER_LIBRARY_PATH}${suffix}`), {
+        cache: 'no-store',
+      })
       if (!response.ok) {
-        throw new Error(
-          await readErrorDetail(response, "Failed to list papers"),
-        );
+        throw new Error(await readErrorDetail(response, 'Failed to list papers'))
       }
-      const data = (await response.json()) as PaperPaperListResponse;
-      return Array.isArray(data?.papers) ? data.papers : [];
+      const data = (await response.json()) as PaperPaperListResponse
+      return Array.isArray(data?.papers) ? data.papers : []
     },
-    { force: true, ttlMs: 5_000 },
-  );
+    { force: true, ttlMs: 5_000 }
+  )
 }
 
-export async function getPaperLibraryPaper(
-  paperId: string,
-): Promise<PaperLibraryDetail> {
-  const response = await apiFetch(
-    apiUrl(`${PAPER_LIBRARY_PATH}/${encodeURIComponent(paperId)}`),
-    { cache: "no-store" },
-  );
+export async function getPaperLibraryPaper(paperId: string): Promise<PaperLibraryDetail> {
+  const response = await apiFetch(apiUrl(`${PAPER_LIBRARY_PATH}/${encodeURIComponent(paperId)}`), {
+    cache: 'no-store',
+  })
   if (!response.ok) {
-    throw new Error(await readErrorDetail(response, "Failed to load paper"));
+    throw new Error(await readErrorDetail(response, 'Failed to load paper'))
   }
-  return (await response.json()) as PaperLibraryDetail;
+  return (await response.json()) as PaperLibraryDetail
 }
 
 export async function updatePaperQuestion(
   paperId: string,
   questionId: string,
-  payload: { question_number: string; answer: string; images?: string[] },
+  payload: { question_number: string; answer: string; images?: string[] }
 ): Promise<PaperLibraryQuestion> {
   const response = await apiFetch(
     apiUrl(
-      `${PAPER_LIBRARY_PATH}/${encodeURIComponent(paperId)}/questions/${encodeURIComponent(questionId)}`,
+      `${PAPER_LIBRARY_PATH}/${encodeURIComponent(paperId)}/questions/${encodeURIComponent(questionId)}`
     ),
     {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
-    },
-  );
+    }
+  )
   if (!response.ok) {
-    throw new Error(await readErrorDetail(response, "Failed to update question"));
+    throw new Error(await readErrorDetail(response, 'Failed to update question'))
   }
-  invalidateClientCache(PAPER_LIBRARY_PREFIX);
-  return (await response.json()) as PaperLibraryQuestion;
+  invalidateClientCache(PAPER_LIBRARY_PREFIX)
+  return (await response.json()) as PaperLibraryQuestion
 }
 
 export async function updateLibraryPaperQuestion(
   libraryId: string,
   paperId: string,
   questionId: string,
-  payload: { question_number: string; answer: string; images?: string[] },
+  payload: { question_number: string; answer: string; images?: string[] }
 ): Promise<PaperLibraryQuestion> {
   const response = await apiFetch(
     apiUrl(
-      `${PAPER_LIBRARY_PATH}/libraries/${encodeURIComponent(libraryId)}/papers/${encodeURIComponent(paperId)}/questions/${encodeURIComponent(questionId)}`,
+      `${PAPER_LIBRARY_PATH}/libraries/${encodeURIComponent(libraryId)}/papers/${encodeURIComponent(paperId)}/questions/${encodeURIComponent(questionId)}`
     ),
     {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
-    },
-  );
+    }
+  )
   if (!response.ok) {
-    throw new Error(await readErrorDetail(response, "Failed to update question"));
+    throw new Error(await readErrorDetail(response, 'Failed to update question'))
   }
-  invalidateClientCache(PAPER_LIBRARY_PREFIX);
-  return (await response.json()) as PaperLibraryQuestion;
+  invalidateClientCache(PAPER_LIBRARY_PREFIX)
+  return (await response.json()) as PaperLibraryQuestion
 }
 
-export async function uploadPaperLibrary(
-  files: File[],
-): Promise<PaperUploadResponse> {
-  const form = new FormData();
-  appendPaperFilesWithPaths(form, files);
-  const response = await apiFetch(
-    apiUrl(`${PAPER_LIBRARY_PATH}/upload`),
-    { method: "POST", body: form },
-  );
+export async function uploadPaperLibrary(files: File[]): Promise<PaperUploadResponse> {
+  const form = new FormData()
+  appendPaperFilesWithPaths(form, files)
+  const response = await apiFetch(apiUrl(`${PAPER_LIBRARY_PATH}/upload`), {
+    method: 'POST',
+    body: form,
+  })
   if (!response.ok) {
-    throw new Error(await readErrorDetail(response, "Failed to upload papers"));
+    throw new Error(await readErrorDetail(response, 'Failed to upload papers'))
   }
-  invalidateClientCache(PAPER_LIBRARY_PREFIX);
-  return (await response.json()) as PaperUploadResponse;
+  invalidateClientCache(PAPER_LIBRARY_PREFIX)
+  return (await response.json()) as PaperUploadResponse
 }
 
 export function paperSourcePath(paperId: string): string {
-  return `${PAPER_LIBRARY_PATH}/${encodeURIComponent(paperId)}/source`;
+  return `${PAPER_LIBRARY_PATH}/${encodeURIComponent(paperId)}/source`
 }
 
 export function paperAssetPath(paperId: string, filename: string): string {
   const encodedName = filename
-    .split("/")
+    .split('/')
     .filter(Boolean)
-    .map((segment) => encodeURIComponent(segment))
-    .join("/");
-  return `${PAPER_LIBRARY_PATH}/${encodeURIComponent(paperId)}/assets/${encodedName}`;
+    .map(segment => encodeURIComponent(segment))
+    .join('/')
+  return `${PAPER_LIBRARY_PATH}/${encodeURIComponent(paperId)}/assets/${encodedName}`
 }
 
 export async function renameLibraryPaper(
   libraryId: string,
   paperId: string,
-  displayName: string,
+  displayName: string
 ): Promise<PaperLibraryRecord> {
   const response = await apiFetch(
     apiUrl(
-      `${PAPER_LIBRARY_PATH}/libraries/${encodeURIComponent(libraryId)}/papers/${encodeURIComponent(paperId)}`,
+      `${PAPER_LIBRARY_PATH}/libraries/${encodeURIComponent(libraryId)}/papers/${encodeURIComponent(paperId)}`
     ),
     {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ display_name: displayName }),
-    },
-  );
+    }
+  )
   if (!response.ok) {
-    throw new Error(await readErrorDetail(response, "Failed to rename paper"));
+    throw new Error(await readErrorDetail(response, 'Failed to rename paper'))
   }
-  invalidateClientCache(PAPER_LIBRARY_PREFIX);
-  return (await response.json()) as PaperLibraryRecord;
+  invalidateClientCache(PAPER_LIBRARY_PREFIX)
+  return (await response.json()) as PaperLibraryRecord
 }
 
 export async function movePaper(
   libraryId: string,
   paperId: string,
   targetLibraryId: string,
-  targetFolderPath = "",
+  targetFolderPath = ''
 ): Promise<PaperLibraryRecord> {
   const response = await apiFetch(
     apiUrl(
-      `${PAPER_LIBRARY_PATH}/libraries/${encodeURIComponent(libraryId)}/papers/${encodeURIComponent(paperId)}/move`,
+      `${PAPER_LIBRARY_PATH}/libraries/${encodeURIComponent(libraryId)}/papers/${encodeURIComponent(paperId)}/move`
     ),
     {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         target_library_id: targetLibraryId,
         target_folder_path: targetFolderPath,
       }),
-    },
-  );
+    }
+  )
   if (!response.ok) {
-    throw new Error(await readErrorDetail(response, "Failed to move paper"));
+    throw new Error(await readErrorDetail(response, 'Failed to move paper'))
   }
-  invalidateClientCache(PAPER_LIBRARY_PREFIX);
-  return (await response.json()) as PaperLibraryRecord;
+  invalidateClientCache(PAPER_LIBRARY_PREFIX)
+  return (await response.json()) as PaperLibraryRecord
 }
 
-export async function deleteLibraryPaper(
-  libraryId: string,
-  paperId: string,
-): Promise<void> {
+export async function deleteLibraryPaper(libraryId: string, paperId: string): Promise<void> {
   const response = await apiFetch(
     apiUrl(
-      `${PAPER_LIBRARY_PATH}/libraries/${encodeURIComponent(libraryId)}/papers/${encodeURIComponent(paperId)}`,
+      `${PAPER_LIBRARY_PATH}/libraries/${encodeURIComponent(libraryId)}/papers/${encodeURIComponent(paperId)}`
     ),
-    { method: "DELETE" },
-  );
+    { method: 'DELETE' }
+  )
   if (!response.ok) {
-    throw new Error(await readErrorDetail(response, "Failed to delete paper"));
+    throw new Error(await readErrorDetail(response, 'Failed to delete paper'))
   }
-  invalidateClientCache(PAPER_LIBRARY_PREFIX);
+  invalidateClientCache(PAPER_LIBRARY_PREFIX)
 }
 
 export async function retryLibraryPaper(
   libraryId: string,
-  paperId: string,
+  paperId: string
 ): Promise<PaperLibraryRecord> {
   const response = await apiFetch(
     apiUrl(
-      `${PAPER_LIBRARY_PATH}/libraries/${encodeURIComponent(libraryId)}/papers/${encodeURIComponent(paperId)}/retry`,
+      `${PAPER_LIBRARY_PATH}/libraries/${encodeURIComponent(libraryId)}/papers/${encodeURIComponent(paperId)}/retry`
     ),
-    { method: "POST" },
-  );
+    { method: 'POST' }
+  )
   if (!response.ok) {
-    throw new Error(await readErrorDetail(response, "Failed to retry paper extraction"));
+    throw new Error(await readErrorDetail(response, 'Failed to retry paper extraction'))
   }
-  invalidateClientCache(PAPER_LIBRARY_PREFIX);
-  return (await response.json()) as PaperLibraryRecord;
+  invalidateClientCache(PAPER_LIBRARY_PREFIX)
+  return (await response.json()) as PaperLibraryRecord
 }
 
-export async function retryPaper(
-  paperId: string,
-): Promise<PaperLibraryRecord> {
+export async function retryPaper(paperId: string): Promise<PaperLibraryRecord> {
   const response = await apiFetch(
     apiUrl(`${PAPER_LIBRARY_PATH}/${encodeURIComponent(paperId)}/retry`),
-    { method: "POST" },
-  );
+    { method: 'POST' }
+  )
   if (!response.ok) {
-    throw new Error(await readErrorDetail(response, "Failed to retry paper extraction"));
+    throw new Error(await readErrorDetail(response, 'Failed to retry paper extraction'))
   }
-  invalidateClientCache(PAPER_LIBRARY_PREFIX);
-  return (await response.json()) as PaperLibraryRecord;
+  invalidateClientCache(PAPER_LIBRARY_PREFIX)
+  return (await response.json()) as PaperLibraryRecord
 }
 
 export async function deletePaper(paperId: string): Promise<void> {
-  const response = await apiFetch(
-    apiUrl(`${PAPER_LIBRARY_PATH}/${encodeURIComponent(paperId)}`),
-    { method: "DELETE" },
-  );
+  const response = await apiFetch(apiUrl(`${PAPER_LIBRARY_PATH}/${encodeURIComponent(paperId)}`), {
+    method: 'DELETE',
+  })
   if (!response.ok) {
-    throw new Error(await readErrorDetail(response, "Failed to delete paper"));
+    throw new Error(await readErrorDetail(response, 'Failed to delete paper'))
   }
-  invalidateClientCache(PAPER_LIBRARY_PREFIX);
+  invalidateClientCache(PAPER_LIBRARY_PREFIX)
 }
 
 export async function renamePaper(
   paperId: string,
-  displayName: string,
+  displayName: string
 ): Promise<PaperLibraryRecord> {
-  const response = await apiFetch(
-    apiUrl(`${PAPER_LIBRARY_PATH}/${encodeURIComponent(paperId)}`),
-    {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ display_name: displayName }),
-    },
-  );
+  const response = await apiFetch(apiUrl(`${PAPER_LIBRARY_PATH}/${encodeURIComponent(paperId)}`), {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ display_name: displayName }),
+  })
   if (!response.ok) {
-    throw new Error(await readErrorDetail(response, "Failed to rename paper"));
+    throw new Error(await readErrorDetail(response, 'Failed to rename paper'))
   }
-  invalidateClientCache(PAPER_LIBRARY_PREFIX);
-  return (await response.json()) as PaperLibraryRecord;
+  invalidateClientCache(PAPER_LIBRARY_PREFIX)
+  return (await response.json()) as PaperLibraryRecord
 }
 
-const PAGEINDEX_CONFIG_PATH =
-  "/api/v1/knowledge/rag-pipelines/pageindex/config";
+const PAGEINDEX_CONFIG_PATH = '/api/v1/knowledge/rag-pipelines/pageindex/config'
 
-export async function getPageIndexConfig(options?: {
-  force?: boolean;
-}): Promise<PageIndexConfig> {
+export async function getPageIndexConfig(options?: { force?: boolean }): Promise<PageIndexConfig> {
   return withClientCache<PageIndexConfig>(
     `${KNOWLEDGE_CACHE_PREFIX}pageindex-config`,
     async () => {
       const response = await apiFetch(apiUrl(PAGEINDEX_CONFIG_PATH), {
-        cache: "no-store",
-      });
+        cache: 'no-store',
+      })
       if (!response.ok) {
-        throw new Error(
-          await readErrorDetail(response, "Failed to read PageIndex config"),
-        );
+        throw new Error(await readErrorDetail(response, 'Failed to read PageIndex config'))
       }
-      return (await response.json()) as PageIndexConfig;
+      return (await response.json()) as PageIndexConfig
     },
-    { force: options?.force, ttlMs: 15_000 },
-  );
+    { force: options?.force, ttlMs: 15_000 }
+  )
 }
 
 export async function updatePageIndexConfig(payload: {
   /** Omit to keep the stored key, "" to clear it, any value to replace it. */
-  api_key?: string;
-  api_base_url?: string;
+  api_key?: string
+  api_base_url?: string
 }): Promise<PageIndexConfig> {
   const res = await apiFetch(apiUrl(PAGEINDEX_CONFIG_PATH), {
-    method: "PUT",
-    headers: { "Content-Type": "application/json" },
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),
-  });
+  })
   if (!res.ok) {
-    throw new Error(
-      await readErrorDetail(res, "Failed to update PageIndex config"),
-    );
+    throw new Error(await readErrorDetail(res, 'Failed to update PageIndex config'))
   }
   // The provider list's `configured` flag depends on this; refresh it.
-  invalidateKnowledgeCaches();
-  return (await res.json()) as PageIndexConfig;
+  invalidateKnowledgeCaches()
+  return (await res.json()) as PageIndexConfig
 }
 
-const LLAMAINDEX_CONFIG_PATH =
-  "/api/v1/knowledge/rag-pipelines/llamaindex/config";
+const LLAMAINDEX_CONFIG_PATH = '/api/v1/knowledge/rag-pipelines/llamaindex/config'
 
 export async function getLlamaIndexConfig(options?: {
-  force?: boolean;
+  force?: boolean
 }): Promise<LlamaIndexConfig> {
   return withClientCache<LlamaIndexConfig>(
     `${KNOWLEDGE_CACHE_PREFIX}llamaindex-config`,
     async () => {
       const response = await apiFetch(apiUrl(LLAMAINDEX_CONFIG_PATH), {
-        cache: "no-store",
-      });
+        cache: 'no-store',
+      })
       if (!response.ok) {
-        throw new Error(
-          await readErrorDetail(response, "Failed to read LlamaIndex config"),
-        );
+        throw new Error(await readErrorDetail(response, 'Failed to read LlamaIndex config'))
       }
-      return (await response.json()) as LlamaIndexConfig;
+      return (await response.json()) as LlamaIndexConfig
     },
-    { force: options?.force, ttlMs: 15_000 },
-  );
+    { force: options?.force, ttlMs: 15_000 }
+  )
 }
 
 export async function updateLlamaIndexConfig(
-  payload: Partial<Omit<LlamaIndexConfig, "version">>,
+  payload: Partial<Omit<LlamaIndexConfig, 'version'>>
 ): Promise<LlamaIndexConfig> {
   const res = await apiFetch(apiUrl(LLAMAINDEX_CONFIG_PATH), {
-    method: "PUT",
-    headers: { "Content-Type": "application/json" },
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),
-  });
+  })
   if (!res.ok) {
-    throw new Error(
-      await readErrorDetail(res, "Failed to update LlamaIndex config"),
-    );
+    throw new Error(await readErrorDetail(res, 'Failed to update LlamaIndex config'))
   }
-  invalidateKnowledgeCaches();
-  return (await res.json()) as LlamaIndexConfig;
+  invalidateKnowledgeCaches()
+  return (await res.json()) as LlamaIndexConfig
 }
 
 async function getEngineConfig<T>(
   provider: string,
   cacheKey: string,
-  options?: { force?: boolean },
+  options?: { force?: boolean }
 ): Promise<T> {
   return withClientCache<T>(
     `${KNOWLEDGE_CACHE_PREFIX}${cacheKey}`,
     async () => {
       const response = await apiFetch(
         apiUrl(`/api/v1/knowledge/rag-pipelines/${provider}/config`),
-        { cache: "no-store" },
-      );
+        { cache: 'no-store' }
+      )
       if (!response.ok) {
-        throw new Error(
-          await readErrorDetail(response, `Failed to read ${provider} config`),
-        );
+        throw new Error(await readErrorDetail(response, `Failed to read ${provider} config`))
       }
-      return (await response.json()) as T;
+      return (await response.json()) as T
     },
-    { force: options?.force, ttlMs: 15_000 },
-  );
+    { force: options?.force, ttlMs: 15_000 }
+  )
 }
 
 async function updateEngineConfig<T>(
   provider: string,
-  payload: Record<string, unknown>,
+  payload: Record<string, unknown>
 ): Promise<T> {
-  const res = await apiFetch(
-    apiUrl(`/api/v1/knowledge/rag-pipelines/${provider}/config`),
-    {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-    },
-  );
+  const res = await apiFetch(apiUrl(`/api/v1/knowledge/rag-pipelines/${provider}/config`), {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  })
   if (!res.ok) {
-    throw new Error(
-      await readErrorDetail(res, `Failed to update ${provider} config`),
-    );
+    throw new Error(await readErrorDetail(res, `Failed to update ${provider} config`))
   }
-  invalidateKnowledgeCaches();
-  return (await res.json()) as T;
+  invalidateKnowledgeCaches()
+  return (await res.json()) as T
 }
 
 export const getGraphRagConfig = (options?: { force?: boolean }) =>
-  getEngineConfig<GraphRagConfig>("graphrag", "graphrag-config", options);
-export const updateGraphRagConfig = (
-  payload: Partial<Omit<GraphRagConfig, "version">>,
-) => updateEngineConfig<GraphRagConfig>("graphrag", payload);
+  getEngineConfig<GraphRagConfig>('graphrag', 'graphrag-config', options)
+export const updateGraphRagConfig = (payload: Partial<Omit<GraphRagConfig, 'version'>>) =>
+  updateEngineConfig<GraphRagConfig>('graphrag', payload)
 
 export const getLightRagConfig = (options?: { force?: boolean }) =>
-  getEngineConfig<LightRagConfig>("lightrag", "lightrag-config", options);
-export const updateLightRagConfig = (
-  payload: Partial<Omit<LightRagConfig, "version">>,
-) => updateEngineConfig<LightRagConfig>("lightrag", payload);
+  getEngineConfig<LightRagConfig>('lightrag', 'lightrag-config', options)
+export const updateLightRagConfig = (payload: Partial<Omit<LightRagConfig, 'version'>>) =>
+  updateEngineConfig<LightRagConfig>('lightrag', payload)
 
-export async function getEnginePreflight(
-  provider: string,
-): Promise<EnginePreflight> {
-  const res = await apiFetch(
-    apiUrl(`/api/v1/knowledge/rag-pipelines/${provider}/preflight`),
-    { cache: "no-store" },
-  );
+export async function getEnginePreflight(provider: string): Promise<EnginePreflight> {
+  const res = await apiFetch(apiUrl(`/api/v1/knowledge/rag-pipelines/${provider}/preflight`), {
+    cache: 'no-store',
+  })
   if (!res.ok) {
-    throw new Error(await readErrorDetail(res, "Failed to check environment"));
+    throw new Error(await readErrorDetail(res, 'Failed to check environment'))
   }
-  return (await res.json()) as EnginePreflight;
+  return (await res.json()) as EnginePreflight
 }
 
-export async function getEngineModelOptions(
-  kinds: string[],
-): Promise<ModelOptionsByKind> {
+export async function getEngineModelOptions(kinds: string[]): Promise<ModelOptionsByKind> {
   const res = await apiFetch(
     apiUrl(
-      `/api/v1/knowledge/rag-pipelines/model-options?kinds=${encodeURIComponent(
-        kinds.join(","),
-      )}`,
+      `/api/v1/knowledge/rag-pipelines/model-options?kinds=${encodeURIComponent(kinds.join(','))}`
     ),
-    { cache: "no-store" },
-  );
+    { cache: 'no-store' }
+  )
   if (!res.ok) {
-    throw new Error(await readErrorDetail(res, "Failed to read model options"));
+    throw new Error(await readErrorDetail(res, 'Failed to read model options'))
   }
-  return (await res.json()) as ModelOptionsByKind;
+  return (await res.json()) as ModelOptionsByKind
 }
 
 export async function setEngineActiveModel(
   kind: string,
   profileId: string,
-  modelId: string,
+  modelId: string
 ): Promise<ModelKindOptions> {
-  const res = await apiFetch(
-    apiUrl("/api/v1/knowledge/rag-pipelines/active-model"),
-    {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ kind, profile_id: profileId, model_id: modelId }),
-    },
-  );
+  const res = await apiFetch(apiUrl('/api/v1/knowledge/rag-pipelines/active-model'), {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ kind, profile_id: profileId, model_id: modelId }),
+  })
   if (!res.ok) {
-    throw new Error(await readErrorDetail(res, "Failed to switch model"));
+    throw new Error(await readErrorDetail(res, 'Failed to switch model'))
   }
-  invalidateKnowledgeCaches();
-  return (await res.json()) as ModelKindOptions;
+  invalidateKnowledgeCaches()
+  return (await res.json()) as ModelKindOptions
 }
 
 export async function updateRagProviderMode(
   provider: string,
-  mode: string,
+  mode: string
 ): Promise<{ provider: string; mode: string }> {
   const res = await apiFetch(
-    apiUrl(
-      `/api/v1/knowledge/rag-providers/${encodeURIComponent(provider)}/mode`,
-    ),
+    apiUrl(`/api/v1/knowledge/rag-providers/${encodeURIComponent(provider)}/mode`),
     {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ mode }),
-    },
-  );
+    }
+  )
   if (!res.ok) {
-    throw new Error(
-      await readErrorDetail(res, "Failed to update retrieval mode"),
-    );
+    throw new Error(await readErrorDetail(res, 'Failed to update retrieval mode'))
   }
   // The provider list's `default_mode` depends on this; refresh it.
-  invalidateKnowledgeCaches();
-  return (await res.json()) as { provider: string; mode: string };
+  invalidateKnowledgeCaches()
+  return (await res.json()) as { provider: string; mode: string }
 }
 
-function withDockerUpgradeHint(
-  detail: string,
-  status: number,
-  action: string,
-): string {
-  if (status === 404 && detail.trim().toLowerCase() === "not found") {
-    return `${action} endpoint not found (404). The web UI may be newer than the backend API. If using Docker, pull and recreate the container, then retry.`;
+function withDockerUpgradeHint(detail: string, status: number, action: string): string {
+  if (status === 404 && detail.trim().toLowerCase() === 'not found') {
+    return `${action} endpoint not found (404). The web UI may be newer than the backend API. If using Docker, pull and recreate the container, then retry.`
   }
-  return detail;
+  return detail
 }
 
 export async function listKnowledgeBaseFiles(
   name: string,
-  options?: { force?: boolean },
+  options?: { force?: boolean }
 ): Promise<KnowledgeBaseFile[]> {
   return withClientCache<KnowledgeBaseFile[]>(
     `${KNOWLEDGE_CACHE_PREFIX}files:${name}`,
     async () => {
       const response = await apiFetch(
         apiUrl(`/api/v1/knowledge/${encodeURIComponent(name)}/files`),
-        { cache: "no-store" },
-      );
+        { cache: 'no-store' }
+      )
       if (!response.ok) {
-        const detail = await readErrorDetail(
-          response,
-          `Failed to list files (${response.status})`,
-        );
-        throw new Error(
-          withDockerUpgradeHint(
-            detail,
-            response.status,
-            "Knowledge file listing",
-          ),
-        );
+        const detail = await readErrorDetail(response, `Failed to list files (${response.status})`)
+        throw new Error(withDockerUpgradeHint(detail, response.status, 'Knowledge file listing'))
       }
-      const data = await response.json();
-      return Array.isArray(data?.files) ? data.files : [];
+      const data = await response.json()
+      return Array.isArray(data?.files) ? data.files : []
     },
-    { force: options?.force, ttlMs: 15_000 },
-  );
+    { force: options?.force, ttlMs: 15_000 }
+  )
 }
 
 /** Build the `/api/v1/...` path for a raw KB file (caller can pass to apiUrl()). */
-export function knowledgeBaseFilePath(
-  kbName: string,
-  filename: string,
-): string {
+export function knowledgeBaseFilePath(kbName: string, filename: string): string {
   return `/api/v1/knowledge/${encodeURIComponent(kbName)}/files/${filename
-    .split("/")
+    .split('/')
     .map(encodeURIComponent)
-    .join("/")}`;
+    .join('/')}`
 }
 
 /** Build the `/api/v1/...` path for extracted plain-text preview of a raw KB file. */
-export function knowledgeBaseFilePreviewTextPath(
-  kbName: string,
-  filename: string,
-): string {
+export function knowledgeBaseFilePreviewTextPath(kbName: string, filename: string): string {
   return `/api/v1/knowledge/${encodeURIComponent(kbName)}/file-preview-text/${filename
-    .split("/")
+    .split('/')
     .map(encodeURIComponent)
-    .join("/")}`;
+    .join('/')}`
 }
 
 export interface KnowledgeTaskResponse {
-  task_id?: string;
-  message?: string;
-  noop?: boolean;
+  task_id?: string
+  message?: string
+  noop?: boolean
 }
 
-async function readErrorDetail(
-  res: Response,
-  fallback: string,
-): Promise<string> {
+async function readErrorDetail(res: Response, fallback: string): Promise<string> {
   try {
-    const body = await res.json();
-    if (body?.detail) return String(body.detail);
+    const body = await res.json()
+    if (body?.detail) return String(body.detail)
   } catch {
     // body wasn't JSON; fall through
   }
-  return fallback;
+  return fallback
 }
 
 // A folder upload's File objects carry `webkitRelativePath` (e.g.
 // "Papers/2024/a.pdf"); single-file picks leave it "". We forward it as
 // `rel_paths` so the backend preserves the folder layout under raw/.
 function appendFilesWithPaths(form: FormData, files: File[]): void {
-  files.forEach((file) => {
-    form.append("files", file);
-    form.append("rel_paths", file.webkitRelativePath || "");
-  });
+  files.forEach(file => {
+    form.append('files', file)
+    form.append('rel_paths', file.webkitRelativePath || '')
+  })
 }
 
 export async function createKnowledgeBase(payload: {
-  name: string;
-  provider: string;
-  files: File[];
+  name: string
+  provider: string
+  files: File[]
 }): Promise<KnowledgeTaskResponse> {
-  const form = new FormData();
-  form.append("name", payload.name);
-  form.append("rag_provider", payload.provider);
-  appendFilesWithPaths(form, payload.files);
+  const form = new FormData()
+  form.append('name', payload.name)
+  form.append('rag_provider', payload.provider)
+  appendFilesWithPaths(form, payload.files)
 
-  const res = await apiFetch(apiUrl("/api/v1/knowledge/create"), {
-    method: "POST",
+  const res = await apiFetch(apiUrl('/api/v1/knowledge/create'), {
+    method: 'POST',
     body: form,
-  });
+  })
   if (!res.ok) {
-    throw new Error(
-      await readErrorDetail(res, "Failed to create knowledge base"),
-    );
+    throw new Error(await readErrorDetail(res, 'Failed to create knowledge base'))
   }
-  invalidateKnowledgeCaches();
-  return (await res.json()) as KnowledgeTaskResponse;
+  invalidateKnowledgeCaches()
+  return (await res.json()) as KnowledgeTaskResponse
 }
 
 export async function connectObsidianVault(payload: {
-  name: string;
-  vaultPath: string;
+  name: string
+  vaultPath: string
 }): Promise<{ status: string; name: string; vault_path: string }> {
-  const res = await apiFetch(apiUrl("/api/v1/knowledge/connect-obsidian"), {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
+  const res = await apiFetch(apiUrl('/api/v1/knowledge/connect-obsidian'), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ name: payload.name, vault_path: payload.vaultPath }),
-  });
+  })
   if (!res.ok) {
-    throw new Error(
-      await readErrorDetail(res, "Failed to connect Obsidian vault"),
-    );
+    throw new Error(await readErrorDetail(res, 'Failed to connect Obsidian vault'))
   }
-  invalidateKnowledgeCaches();
+  invalidateKnowledgeCaches()
   return (await res.json()) as {
-    status: string;
-    name: string;
-    vault_path: string;
-  };
+    status: string
+    name: string
+    vault_path: string
+  }
 }
 
 export interface LinkedFolderProbe {
   /** Whether the folder holds a ready index for the chosen engine. */
-  ok: boolean;
-  provider: string;
-  external_path: string;
-  version: string | null;
-  doc_count: number | null;
+  ok: boolean
+  provider: string
+  external_path: string
+  version: string | null
+  doc_count: number | null
   embedding: {
     /** null when compatibility could not be verified. */
-    compatible: boolean | null;
-    index_model: string | null;
-    current_model: string | null;
-  };
-  warnings: string[];
+    compatible: boolean | null
+    index_model: string | null
+    current_model: string | null
+  }
+  warnings: string[]
   /** Set when the folder cannot be linked at all (no index, wrong engine, …). */
-  error: string | null;
+  error: string | null
 }
 
 export async function probeLinkedFolder(payload: {
-  folderPath: string;
-  provider: string;
+  folderPath: string
+  provider: string
 }): Promise<LinkedFolderProbe> {
-  const res = await apiFetch(apiUrl("/api/v1/knowledge/probe-folder"), {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
+  const res = await apiFetch(apiUrl('/api/v1/knowledge/probe-folder'), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       folder_path: payload.folderPath,
       rag_provider: payload.provider,
     }),
-  });
+  })
   if (!res.ok) {
-    throw new Error(await readErrorDetail(res, "Failed to inspect folder"));
+    throw new Error(await readErrorDetail(res, 'Failed to inspect folder'))
   }
-  return (await res.json()) as LinkedFolderProbe;
+  return (await res.json()) as LinkedFolderProbe
 }
 
 export async function connectLinkedFolder(payload: {
-  name: string;
-  folderPath: string;
-  provider: string;
+  name: string
+  folderPath: string
+  provider: string
 }): Promise<{
-  status: string;
-  name: string;
-  external_path: string;
-  rag_provider: string;
-  warnings: string[];
+  status: string
+  name: string
+  external_path: string
+  rag_provider: string
+  warnings: string[]
 }> {
-  const res = await apiFetch(apiUrl("/api/v1/knowledge/connect-folder"), {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
+  const res = await apiFetch(apiUrl('/api/v1/knowledge/connect-folder'), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       name: payload.name,
       folder_path: payload.folderPath,
       rag_provider: payload.provider,
     }),
-  });
+  })
   if (!res.ok) {
-    throw new Error(await readErrorDetail(res, "Failed to link folder"));
+    throw new Error(await readErrorDetail(res, 'Failed to link folder'))
   }
-  invalidateKnowledgeCaches();
+  invalidateKnowledgeCaches()
   return (await res.json()) as {
-    status: string;
-    name: string;
-    external_path: string;
-    rag_provider: string;
-    warnings: string[];
-  };
+    status: string
+    name: string
+    external_path: string
+    rag_provider: string
+    warnings: string[]
+  }
 }
 
 export interface LightRagServerProbe {
   /** Reachable, a LightRAG server, and (if required) the API key is accepted. */
-  ok: boolean;
-  base_url: string;
-  reachable: boolean;
-  auth_required: boolean;
-  auth_ok: boolean;
-  core_version: string | null;
-  api_version: string | null;
+  ok: boolean
+  base_url: string
+  reachable: boolean
+  auth_required: boolean
+  auth_ok: boolean
+  core_version: string | null
+  api_version: string | null
   /** Set when the server can't be connected (unreachable, bad key, …). */
-  error: string | null;
+  error: string | null
 }
 
 export async function probeLightRagServer(payload: {
-  serverUrl: string;
-  apiKey?: string;
+  serverUrl: string
+  apiKey?: string
 }): Promise<LightRagServerProbe> {
-  const res = await apiFetch(
-    apiUrl("/api/v1/knowledge/probe-lightrag-server"),
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        server_url: payload.serverUrl,
-        api_key: payload.apiKey ?? "",
-      }),
-    },
-  );
+  const res = await apiFetch(apiUrl('/api/v1/knowledge/probe-lightrag-server'), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      server_url: payload.serverUrl,
+      api_key: payload.apiKey ?? '',
+    }),
+  })
   if (!res.ok) {
-    throw new Error(
-      await readErrorDetail(res, "Failed to reach LightRAG server"),
-    );
+    throw new Error(await readErrorDetail(res, 'Failed to reach LightRAG server'))
   }
-  return (await res.json()) as LightRagServerProbe;
+  return (await res.json()) as LightRagServerProbe
 }
 
 export async function connectLightRagServer(payload: {
-  name: string;
-  serverUrl: string;
-  apiKey?: string;
-  mode?: string;
+  name: string
+  serverUrl: string
+  apiKey?: string
+  mode?: string
 }): Promise<{
-  status: string;
-  name: string;
-  server_url: string;
-  rag_provider: string;
+  status: string
+  name: string
+  server_url: string
+  rag_provider: string
 }> {
-  const res = await apiFetch(
-    apiUrl("/api/v1/knowledge/connect-lightrag-server"),
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        name: payload.name,
-        server_url: payload.serverUrl,
-        api_key: payload.apiKey ?? "",
-        search_mode: payload.mode ?? "",
-      }),
-    },
-  );
+  const res = await apiFetch(apiUrl('/api/v1/knowledge/connect-lightrag-server'), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      name: payload.name,
+      server_url: payload.serverUrl,
+      api_key: payload.apiKey ?? '',
+      search_mode: payload.mode ?? '',
+    }),
+  })
   if (!res.ok) {
-    throw new Error(
-      await readErrorDetail(res, "Failed to connect LightRAG server"),
-    );
+    throw new Error(await readErrorDetail(res, 'Failed to connect LightRAG server'))
   }
-  invalidateKnowledgeCaches();
+  invalidateKnowledgeCaches()
   return (await res.json()) as {
-    status: string;
-    name: string;
-    server_url: string;
-    rag_provider: string;
-  };
+    status: string
+    name: string
+    server_url: string
+    rag_provider: string
+  }
 }
 
 export async function uploadKnowledgeBaseFiles(
   name: string,
   files: File[],
-  options?: { provider?: string },
+  options?: { provider?: string }
 ): Promise<KnowledgeTaskResponse> {
-  const form = new FormData();
-  appendFilesWithPaths(form, files);
-  if (options?.provider) form.append("rag_provider", options.provider);
+  const form = new FormData()
+  appendFilesWithPaths(form, files)
+  if (options?.provider) form.append('rag_provider', options.provider)
 
-  const res = await apiFetch(
-    apiUrl(`/api/v1/knowledge/${encodeURIComponent(name)}/upload`),
-    { method: "POST", body: form },
-  );
+  const res = await apiFetch(apiUrl(`/api/v1/knowledge/${encodeURIComponent(name)}/upload`), {
+    method: 'POST',
+    body: form,
+  })
   if (!res.ok) {
-    throw new Error(await readErrorDetail(res, "Failed to upload files"));
+    throw new Error(await readErrorDetail(res, 'Failed to upload files'))
   }
-  invalidateKnowledgeCaches();
-  return (await res.json()) as KnowledgeTaskResponse;
+  invalidateKnowledgeCaches()
+  return (await res.json()) as KnowledgeTaskResponse
 }
 
-export async function createKbFolder(
-  name: string,
-  path: string,
-): Promise<void> {
-  const res = await apiFetch(
-    apiUrl(`/api/v1/knowledge/${encodeURIComponent(name)}/folders`),
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ path }),
-    },
-  );
+export async function createKbFolder(name: string, path: string): Promise<void> {
+  const res = await apiFetch(apiUrl(`/api/v1/knowledge/${encodeURIComponent(name)}/folders`), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ path }),
+  })
   if (!res.ok) {
-    throw new Error(await readErrorDetail(res, "Failed to create folder"));
+    throw new Error(await readErrorDetail(res, 'Failed to create folder'))
   }
-  invalidateKnowledgeCaches();
+  invalidateKnowledgeCaches()
 }
 
-export async function moveKbFile(
-  name: string,
-  source: string,
-  destFolder: string,
-): Promise<void> {
-  const res = await apiFetch(
-    apiUrl(`/api/v1/knowledge/${encodeURIComponent(name)}/files/move`),
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ source, dest_folder: destFolder }),
-    },
-  );
+export async function moveKbFile(name: string, source: string, destFolder: string): Promise<void> {
+  const res = await apiFetch(apiUrl(`/api/v1/knowledge/${encodeURIComponent(name)}/files/move`), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ source, dest_folder: destFolder }),
+  })
   if (!res.ok) {
-    throw new Error(await readErrorDetail(res, "Failed to move file"));
+    throw new Error(await readErrorDetail(res, 'Failed to move file'))
   }
-  invalidateKnowledgeCaches();
+  invalidateKnowledgeCaches()
 }
 
 /**
@@ -1296,75 +1175,58 @@ export async function moveKbFile(
  */
 export async function deleteKbFile(
   name: string,
-  filename: string,
+  filename: string
 ): Promise<{ was_indexed: boolean }> {
   const res = await apiFetch(apiUrl(knowledgeBaseFilePath(name, filename)), {
-    method: "DELETE",
-  });
+    method: 'DELETE',
+  })
   if (!res.ok) {
-    throw new Error(await readErrorDetail(res, "Failed to delete file"));
+    throw new Error(await readErrorDetail(res, 'Failed to delete file'))
   }
-  invalidateKnowledgeCaches();
-  return (await res.json()) as { was_indexed: boolean };
+  invalidateKnowledgeCaches()
+  return (await res.json()) as { was_indexed: boolean }
 }
 
 export async function setDefaultKnowledgeBase(name: string): Promise<void> {
-  const res = await apiFetch(
-    apiUrl(`/api/v1/knowledge/default/${encodeURIComponent(name)}`),
-    { method: "PUT" },
-  );
+  const res = await apiFetch(apiUrl(`/api/v1/knowledge/default/${encodeURIComponent(name)}`), {
+    method: 'PUT',
+  })
   if (!res.ok) {
-    throw new Error(await readErrorDetail(res, "Failed to set default"));
+    throw new Error(await readErrorDetail(res, 'Failed to set default'))
   }
-  invalidateKnowledgeCaches();
+  invalidateKnowledgeCaches()
 }
 
-export async function reindexKnowledgeBase(
-  name: string,
-): Promise<KnowledgeTaskResponse> {
-  const res = await apiFetch(
-    apiUrl(`/api/v1/knowledge/${encodeURIComponent(name)}/reindex`),
-    { method: "POST" },
-  );
+export async function reindexKnowledgeBase(name: string): Promise<KnowledgeTaskResponse> {
+  const res = await apiFetch(apiUrl(`/api/v1/knowledge/${encodeURIComponent(name)}/reindex`), {
+    method: 'POST',
+  })
   if (!res.ok) {
-    const detail = await readErrorDetail(
-      res,
-      `Re-index failed (${res.status})`,
-    );
-    throw new Error(
-      withDockerUpgradeHint(detail, res.status, "Knowledge re-index"),
-    );
+    const detail = await readErrorDetail(res, `Re-index failed (${res.status})`)
+    throw new Error(withDockerUpgradeHint(detail, res.status, 'Knowledge re-index'))
   }
-  invalidateKnowledgeCaches();
-  return (await res.json()) as KnowledgeTaskResponse;
+  invalidateKnowledgeCaches()
+  return (await res.json()) as KnowledgeTaskResponse
 }
 
-export async function retryKnowledgeBase(
-  name: string,
-): Promise<KnowledgeTaskResponse> {
-  const res = await apiFetch(
-    apiUrl(`/api/v1/knowledge/${encodeURIComponent(name)}/retry`),
-    { method: "POST" },
-  );
+export async function retryKnowledgeBase(name: string): Promise<KnowledgeTaskResponse> {
+  const res = await apiFetch(apiUrl(`/api/v1/knowledge/${encodeURIComponent(name)}/retry`), {
+    method: 'POST',
+  })
   if (!res.ok) {
-    const detail = await readErrorDetail(res, `Retry failed (${res.status})`);
-    throw new Error(
-      withDockerUpgradeHint(detail, res.status, "Knowledge retry"),
-    );
+    const detail = await readErrorDetail(res, `Retry failed (${res.status})`)
+    throw new Error(withDockerUpgradeHint(detail, res.status, 'Knowledge retry'))
   }
-  invalidateKnowledgeCaches();
-  return (await res.json()) as KnowledgeTaskResponse;
+  invalidateKnowledgeCaches()
+  return (await res.json()) as KnowledgeTaskResponse
 }
 
 export async function deleteKnowledgeBase(name: string): Promise<void> {
-  const res = await apiFetch(
-    apiUrl(`/api/v1/knowledge/${encodeURIComponent(name)}`),
-    { method: "DELETE" },
-  );
+  const res = await apiFetch(apiUrl(`/api/v1/knowledge/${encodeURIComponent(name)}`), {
+    method: 'DELETE',
+  })
   if (!res.ok) {
-    throw new Error(
-      await readErrorDetail(res, `Delete failed (${res.status})`),
-    );
+    throw new Error(await readErrorDetail(res, `Delete failed (${res.status})`))
   }
-  invalidateKnowledgeCaches();
+  invalidateKnowledgeCaches()
 }

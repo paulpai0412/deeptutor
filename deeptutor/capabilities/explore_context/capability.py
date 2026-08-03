@@ -38,6 +38,7 @@ import yaml
 
 from deeptutor.capabilities.protocol import PromptBlock
 from deeptutor.core.context import UnifiedContext
+from deeptutor.core.i18n import parse_language
 from deeptutor.core.stream_bus import StreamBus
 
 logger = logging.getLogger(__name__)
@@ -46,13 +47,13 @@ _PROMPT_CACHE: dict[str, dict[str, Any]] = {}
 
 
 def _load_prompts(language: str) -> dict[str, Any]:
-    lang = "zh" if str(language or "en").lower().startswith("zh") else "en"
+    lang = parse_language(language)
     cached = _PROMPT_CACHE.get(lang)
     if cached is not None:
         return cached
     try:
         text = (
-            resources.files(__package__)
+            resources.files("deeptutor.capabilities.explore_context")
             .joinpath("prompts", lang, "explore_context.yaml")
             .read_text(encoding="utf-8")
         )

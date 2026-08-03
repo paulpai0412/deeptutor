@@ -29,11 +29,32 @@ The output is decoupled from the rest of ``turn_runtime``:
 
 from __future__ import annotations
 
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 import logging
-from typing import Any, Sequence
+from typing import Any, Protocol, Sequence, cast
 
-from deeptutor.services.session.protocol import SessionStoreProtocol
+from deeptutor.core.i18n import parse_language
+
+
+class SourceStore(Protocol):
+    """Minimal session-store surface required by source inventory."""
+
+    async def get_messages(self, session_id: str) -> list[dict[str, Any]]: ...
+
+    async def get_session(self, session_id: str) -> dict[str, Any] | None: ...
+
+    async def get_messages_for_context(
+        self, session_id: str, leaf_message_id: int | None = None
+    ) -> list[dict[str, Any]]: ...
+
+
+def _int_value(value: Any) -> int:
+    try:
+        return int(value or 0)
+    except (TypeError, ValueError):
+        return 0
+
 
 logger = logging.getLogger(__name__)
 
@@ -106,7 +127,7 @@ class SourceInventory:
 
 
 async def build_inventory(
-    store: SessionStoreProtocol,
+    store: SourceStore,
     *,
     session_id: str,
     leaf_message_id: int | None,
@@ -303,7 +324,7 @@ def _add_fresh(
 async def _add_fresh_history(
     inv: SourceInventory,
     *,
-    store: SessionStoreProtocol,
+    store: SourceStore,
     history_session_ids: Sequence[Any],
     current_turn_ordinal: int,
     language: str = "en",
@@ -330,7 +351,7 @@ async def _add_fresh_history(
 async def _add_fresh_questions(
     inv: SourceInventory,
     *,
-    store: SessionStoreProtocol,
+    store: SourceStore,
     question_entry_ids: Sequence[Any],
     current_turn_ordinal: int,
 ) -> None:
@@ -363,7 +384,7 @@ async def _add_fresh_questions(
 async def _add_historical(
     inv: SourceInventory,
     *,
-    store: SessionStoreProtocol,
+    store: SourceStore,
     session_id: str,
     leaf_message_id: int | None,
     language: str = "en",
@@ -385,7 +406,7 @@ async def _add_historical(
 async def _collect_from_user_message(
     inv: SourceInventory,
     *,
-    store: SessionStoreProtocol,
+    store: SourceStore,
     msg: dict[str, Any],
     turn_ordinal: int,
     language: str = "en",
@@ -530,7 +551,7 @@ async def _collect_from_user_message(
 
 
 async def _load_lineage(
-    store: SessionStoreProtocol,
+    store: SourceStore,
     session_id: str,
     leaf_message_id: int | None,
 ) -> list[dict[str, Any]]:
@@ -547,19 +568,19 @@ async def _load_lineage(
         return all_msgs
     by_id: dict[int, dict[str, Any]] = {}
     for m in all_msgs:
-        mid = m.get("id")
-        if mid is not None:
-            by_id[int(mid)] = m
+        mid = _int_value(m.get("id"))
+        if mid:
+            by_id[mid] = m
     chain: list[dict[str, Any]] = []
-    current: int | None = int(leaf_message_id)
+    current: int | None = _int_value(leaf_message_id) or None
     safety = 10_000
     while current is not None and safety > 0:
-        m = by_id.get(int(current))
+        m = by_id.get(current)
         if m is None:
             break
         chain.append(m)
-        parent = m.get("parent_message_id")
-        current = int(parent) if parent is not None else None
+        parent = _int_value(m.get("parent_message_id"))
+        current = parent or None
         safety -= 1
     chain.reverse()
     return chain
@@ -633,11 +654,15 @@ def _imported_agent_label(meta: dict[str, Any], lang: str) -> str | None:
     sid = str(meta.get("session_id") or meta.get("id") or "")
     if source == "partner":
         name = str(meta.get("partner_name") or "").strip()
-        return name or ("伙伴" if lang == "zh" else "a partner")
+        return name or (
+            "夥伴" if lang == "zh-TW" else "伙伴" if lang == "zh" else "a partner"
+        )
     if not source and not sid.startswith("imported_"):
         return None
     if source in _EXTERNAL_AGENT_LABELS:
         return _EXTERNAL_AGENT_LABELS[source]
+    if lang == "zh-TW":
+        return "外部 AI 助理"
     return "外部 AI 助手" if lang == "zh" else "an external AI assistant"
 
 
@@ -665,12 +690,17 @@ def serialize_referenced_transcript(
     be confused with the model's own ``assistant`` role. Returns ``""`` when
     there is no content to serialize.
     """
-    lang = "zh" if str(language or "en").lower().startswith("zh") else "en"
+    lang = parse_language(language)
     agent = _imported_agent_label(meta, lang)
     if agent is not None:
         assistant_label = agent
         header = (
-            f"〔以下是用户与外部 AI 助手「{agent}」的历史对话记录，由用户附带进来供你参考和讨论。"
+            f"〔以下是使用者與外部 AI 助理「{agent}」的歷史對話記錄，由使用者附帶進來供你參考與討論。"
+            "這不是你與使用者的對話——你沒有參與其中，也沒有執行其中的任何動作。"
+            "請將它視為第三方資料並客觀對待：重述時使用第三人稱，不要沿用其口吻，"
+            "也不要把其中助理做過的事說成是你做的。〕"
+            if lang == "zh-TW"
+            else f"〔以下是用户与外部 AI 助手「{agent}」的历史对话记录，由用户附带进来供你参考和讨论。"
             "这不是你与用户的对话——你没有参与其中，也没有执行其中的任何动作。"
             "请把它当作第三方材料客观对待：复述时用第三人称，不要沿用其口吻，"
             "也不要把其中助手做过的事说成是你做的。〕"
@@ -687,14 +717,16 @@ def serialize_referenced_transcript(
     else:
         assistant_label = "Assistant"
         header = (
-            "〔以下是另一段历史对话记录，由用户附带进来供你参考。它不是当前对话的一部分。〕"
+            "〔以下是另一段歷史對話記錄，由使用者附帶進來供你參考。它不是目前對話的一部分。〕"
+            if lang == "zh-TW"
+            else "〔以下是另一段历史对话记录，由用户附带进来供你参考。它不是当前对话的一部分。〕"
             if lang == "zh"
             else (
                 "[The following is a transcript of a separate past conversation, attached by the "
                 "user for reference. It is not part of the current conversation.]"
             )
         )
-    user_label = "用户" if lang == "zh" else "User"
+    user_label = "使用者" if lang == "zh-TW" else "用户" if lang == "zh" else "User"
     lines: list[str] = []
     for message in messages:
         content = str(message.get("content", "") or "").strip()
@@ -764,7 +796,7 @@ def _load_partner_session(ref: str, *, language: str = "en") -> tuple[str, str]:
 
 
 async def _load_history_session(
-    store: SessionStoreProtocol,
+    store: SourceStore,
     history_session_id: str,
     *,
     language: str = "en",
@@ -794,12 +826,15 @@ async def _load_history_session(
     return transcript, name
 
 
-async def _load_question_entry(store: SessionStoreProtocol, entry_id: int) -> tuple[str, str]:
+async def _load_question_entry(store: SourceStore, entry_id: int) -> tuple[str, str]:
     """Fetch and render one question-bank entry into a markdown block +
     short stem (used as the manifest name). Returns ``("", "")`` on
     missing entry. Imports the renderer lazily to avoid pulling
     ``turn_runtime``'s import surface into modules that consume this one."""
-    get_entry = getattr(store, "get_notebook_entry", None)
+    get_entry = cast(
+        Callable[[int], Awaitable[dict[str, Any] | None]] | None,
+        getattr(store, "get_notebook_entry", None),
+    )
     if not callable(get_entry):
         return "", ""
     try:

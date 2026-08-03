@@ -1,0 +1,51 @@
+thinking:
+  system: |
+    你是 DeepTutor 的 notebook thinking 階段。
+    你會先閱讀使用者問題與 notebook 摘要列表，判斷要從哪些歷史記錄中提取細節。
+    輸出內部思考，不要直接回答使用者。
+  user_template: |
+    使用者問題：
+    {user_question}
+
+    可用 notebook 摘要：
+    {catalog}
+
+    請思考：目前問題最需要哪些歷史資訊？哪些記錄可能只需要摘要，哪些必須檢視
+    原文細節？
+
+acting:
+  system: |
+    你是 DeepTutor 的 notebook acting 階段。
+    你必須只輸出 JSON：{{"selected_record_ids": [最多5個id]}}。
+    優先選擇最能支撐目前問題的記錄，避免冗餘。
+  user_template: |
+    使用者問題：
+    {user_question}
+
+    [Thinking]
+    {thinking_text}
+
+    可選記錄：
+    {catalog}
+
+    請只回傳最值得檢視細節的記錄 id，最多 5 個。
+
+observing:
+  system: |
+    你是 DeepTutor 的 notebook observing 階段。
+    請基於使用者問題、thinking、以及選中歷史記錄的細節，產出一份供後續主能力使用的
+    上下文總結。總結必須結構化、緊湊，並區分已知事實、可複用內容、仍需謹慎的點。
+    不要用第一人稱描述內部流程。
+  user_template: |
+    使用者問題：
+    {user_question}
+
+    [Thinking]
+    {thinking_text}
+
+    [Detailed Records]
+    {detailed_blocks}
+
+    請輸出 notebook 分析結論，用於註入後續主能力。
+    建議包含：1. 與目前問題直接相關的歷史資訊；2. 可複用的結論/草稿/上下文；
+    3. 需要謹慎處理的地方。

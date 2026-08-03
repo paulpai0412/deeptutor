@@ -23,6 +23,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from deeptutor.core.i18n import parse_language
 from deeptutor.services.prompt import get_prompt_manager
 
 
@@ -53,6 +54,12 @@ def load_book_prompts(name: str, language: str) -> dict[str, Any]:
     return prompts
 
 
+def book_text(language: str, *, en: str, zh: str, zh_tw: str) -> str:
+    """Select explicit book copy without runtime script conversion."""
+    locale = parse_language(language)
+    return zh_tw if locale == "zh-TW" else zh if locale == "zh" else en
+
+
 def get_book_prompt(prompts: dict[str, Any], key: str) -> str:
     """Return the prompt string under ``key`` from a loaded bundle.
 
@@ -64,4 +71,4 @@ def get_book_prompt(prompts: dict[str, Any], key: str) -> str:
     return value
 
 
-__all__ = ["load_book_prompts", "get_book_prompt"]
+__all__ = ["book_text", "get_book_prompt", "load_book_prompts"]

@@ -27,6 +27,7 @@ from deeptutor.services.llm import (
 )
 from deeptutor.services.llm import stream as llm_stream
 from deeptutor.services.prompt import get_prompt_manager
+from deeptutor.services.prompt.language import append_language_directive
 
 
 class BaseAgent(ABC):
@@ -143,6 +144,26 @@ class BaseAgent(ABC):
         except Exception as e:
             self.prompts = None
             self.logger.warning(f"Failed to load prompts for {agent_name}: {e}")
+
+    def _localized_llm_input(
+        self,
+        system_prompt: str,
+        messages: list[dict[str, Any]] | None,
+    ) -> tuple[str, list[dict[str, Any]] | None]:
+        system_prompt = append_language_directive(system_prompt, self.language)
+        if messages is None:
+            return system_prompt, None
+
+        localized = [dict(message) for message in messages]
+        for message in localized:
+            if message.get("role") == "system":
+                message["content"] = append_language_directive(
+                    str(message.get("content") or ""), self.language
+                )
+                break
+        else:
+            localized.insert(0, {"role": "system", "content": system_prompt})
+        return system_prompt, localized
 
     # -------------------------------------------------------------------------
     # Model and Parameter Getters
@@ -384,12 +405,13 @@ class BaseAgent(ABC):
         temperature = temperature if temperature is not None else self.get_temperature()
         max_tokens = max_tokens if max_tokens is not None else self.get_max_tokens()
         max_retries = self.get_max_retries()
+        system_prompt, messages = self._localized_llm_input(system_prompt, messages)
 
         # Record call start time
         start_time = time.time()
 
         # Build kwargs for LLM factory
-        kwargs = {
+        kwargs: dict[str, Any] = {
             "temperature": temperature,
         }
 
@@ -546,8 +568,10 @@ class BaseAgent(ABC):
         max_tokens = max_tokens if max_tokens is not None else self.get_max_tokens()
         max_retries = self.get_max_retries()
 
+        system_prompt, messages = self._localized_llm_input(system_prompt, messages)
+
         # Build kwargs
-        kwargs = {
+        kwargs: dict[str, Any] = {
             "temperature": temperature,
         }
 
@@ -717,7 +741,7 @@ class BaseAgent(ABC):
             return fallback if fallback else None
         else:
             # Simple lookup: get_prompt("key") or get_prompt("key", "fallback")
-            if section_value is not None:
+            if isinstance(section_value, str):
                 return section_value
             # field_or_fallback acts as fallback in simple mode
             return field_or_fallback if field_or_fallback else (fallback if fallback else None)

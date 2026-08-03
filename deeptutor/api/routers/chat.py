@@ -11,8 +11,7 @@ import logging
 from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
 
 from deeptutor.agents.chat import ChatAgent, SessionManager
-from deeptutor.i18n.stream import is_traditional_chinese
-from deeptutor.i18n.zh_tw import to_traditional_chinese
+from deeptutor.core.i18n import t
 from deeptutor.services.config import PROJECT_ROOT, load_config_with_main, parse_language
 from deeptutor.services.llm.config import get_llm_config
 from deeptutor.services.settings.interface_settings import get_ui_language
@@ -60,11 +59,11 @@ async def delete_session(session_id: str):
 
 @router.websocket("/chat")
 async def websocket_chat(websocket: WebSocket):
-    from deeptutor.api.routers.auth import ws_auth_failed, ws_require_auth
+    from deeptutor.api.routers.auth import is_ws_auth_token, ws_require_auth
     from deeptutor.multi_user.context import reset_current_user
 
     user_token = await ws_require_auth(websocket)
-    if user_token is ws_auth_failed:
+    if not is_ws_auth_token(user_token):
         return
 
     await websocket.accept()
@@ -160,16 +159,15 @@ async def websocket_chat(websocket: WebSocket):
                     api_version=api_version,
                 )
 
-                traditional = is_traditional_chinese(language)
                 if enable_rag and kb_name:
                     await websocket.send_json(
                         {
                             "type": "status",
                             "stage": "rag",
-                            "message": (
-                                f"正在搜尋知識庫：{kb_name}..."
-                                if traditional
-                                else f"Searching knowledge base: {kb_name}..."
+                            "message": t(
+                                "chat.searching_knowledge_base",
+                                language=language,
+                                name=kb_name,
                             ),
                         }
                     )
@@ -179,7 +177,7 @@ async def websocket_chat(websocket: WebSocket):
                         {
                             "type": "status",
                             "stage": "web",
-                            "message": "正在搜尋網路..." if traditional else "Searching the web...",
+                            "message": t("chat.searching_web", language=language),
                         }
                     )
 
@@ -187,7 +185,7 @@ async def websocket_chat(websocket: WebSocket):
                     {
                         "type": "status",
                         "stage": "generating",
-                        "message": "正在產生回覆..." if traditional else "Generating response...",
+                        "message": t("chat.generating_response", language=language),
                     }
                 )
 
@@ -202,12 +200,12 @@ async def websocket_chat(websocket: WebSocket):
                     enable_web_search=enable_web_search,
                     stream=True,
                 )
+                if isinstance(stream_generator, dict):
+                    raise RuntimeError("streaming chat returned a non-streaming result")
 
                 async for chunk_data in stream_generator:
                     if chunk_data["type"] == "chunk":
                         chunk_content = str(chunk_data["content"] or "")
-                        if traditional:
-                            chunk_content = to_traditional_chinese(chunk_content)
                         await websocket.send_json(
                             {
                                 "type": "stream",
@@ -217,8 +215,6 @@ async def websocket_chat(websocket: WebSocket):
                         full_response += chunk_content
                     elif chunk_data["type"] == "complete":
                         full_response = str(chunk_data["response"] or "")
-                        if traditional:
-                            full_response = to_traditional_chinese(full_response)
                         sources = chunk_data.get("sources", {"rag": [], "web": []})
 
                 if sources.get("rag") or sources.get("web"):
@@ -253,8 +249,7 @@ async def websocket_chat(websocket: WebSocket):
         except Exception:
             pass
     finally:
-        if user_token is not None:
-            try:
-                reset_current_user(user_token)
-            except Exception:
-                pass
+        try:
+            reset_current_user(user_token)
+        except Exception:
+            pass

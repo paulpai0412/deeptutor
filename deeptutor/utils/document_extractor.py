@@ -4,8 +4,8 @@ Bytes-in, text-out. Used by the chat turn runtime to inline the text of
 user-dropped files into the ``effective_user_message`` sent to the LLM.
 
 Two format families:
-  * **Binary Office** (.pdf / .docx / .xlsx / .pptx) — parsed with pymupdf /
-    python-docx / openpyxl / python-pptx.
+  * **Binary Office** (.pdf / .doc / .docx / .xlsx / .pptx) — parsed with pymupdf /
+    legacy-doc / python-docx / openpyxl / python-pptx.
   * **Text-like** (plain text, Markdown, source code, JSON, XML, CSV, …) —
     the extension set is imported from ``FileTypeRouter.TEXT_EXTENSIONS`` so
     the chat composer accepts every format the knowledge-base pipeline
@@ -28,6 +28,7 @@ import zipfile
 
 from defusedxml import ElementTree as DefusedElementTree
 from defusedxml.common import DefusedXmlException
+from legacy_doc import LegacyDocError, extract_text as extract_legacy_doc_text
 
 from deeptutor.services.rag.file_routing import FileTypeRouter
 
@@ -104,6 +105,7 @@ def _current_limits() -> tuple[int, int, int, int]:
 
 
 _PDF_MAGIC = b"%PDF-"
+_OLE_MAGIC = b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1"
 _OOXML_MAGIC = b"PK\x03\x04"
 
 
@@ -157,6 +159,12 @@ def _check_magic(ext: str, data: bytes, filename: str) -> None:
             raise CorruptDocumentError(
                 f"{filename} does not look like a PDF (bad header)", filename=filename
             )
+    elif ext == ".doc":
+        if not data.startswith(_OLE_MAGIC):
+            raise CorruptDocumentError(
+                f"{filename} does not look like a legacy Word file (bad header)",
+                filename=filename,
+            )
     elif ext in {".docx", ".xlsx", ".pptx"}:
         if not data.startswith(_OOXML_MAGIC):
             raise CorruptDocumentError(
@@ -198,6 +206,8 @@ def extract_text_from_bytes(
 
     if ext == ".pdf":
         text = _extract_pdf(data, filename)
+    elif ext == ".doc":
+        text = _extract_doc(data, filename)
     elif ext == ".docx":
         text = _extract_docx(data, filename)
     elif ext == ".xlsx":
@@ -239,7 +249,8 @@ def _extract_pdf(data: bytes, filename: str) -> str:
                         f"{filename} is encrypted and cannot be read", filename=filename
                     )
                 pages = [
-                    f"--- Page {i} ---\n{page.get_text() or ''}" for i, page in enumerate(doc, 1)
+                    f"--- Page {index + 1} ---\n{doc.load_page(index).get_text() or ''}"
+                    for index in range(doc.page_count)
                 ]
             return "\n\n".join(pages)
         except CorruptDocumentError:
@@ -272,6 +283,15 @@ def _extract_pdf(data: bytes, filename: str) -> str:
     except Exception as exc:
         raise CorruptDocumentError(
             f"{filename}: failed to read PDF ({exc})", filename=filename
+        ) from exc
+
+
+def _extract_doc(data: bytes, filename: str) -> str:
+    try:
+        return extract_legacy_doc_text(data).text
+    except LegacyDocError as exc:
+        raise CorruptDocumentError(
+            f"{filename}: failed to open legacy Word document ({exc})", filename=filename
         ) from exc
 
 
@@ -493,15 +513,23 @@ def _xlsx_cell_text(cell: Any, shared_strings: list[str]) -> str:
     return value
 
 
+def _natural_sort_key(value: str) -> list[int | str]:
+    parts: list[int | str] = []
+    for part in re.split(r"(\d+)", value):
+        try:
+            parts.append(int(part))
+        except ValueError:
+            parts.append(part)
+    return parts
+
+
 def _extract_xlsx_ooxml(data: bytes, filename: str) -> str:
     with _open_ooxml(data, filename) as zf:
         shared_strings = _xlsx_shared_strings(zf, filename)
         sheet_names = _xlsx_sheet_names(zf, filename)
         sheet_members = sorted(
             (name for name in zf.namelist() if re.match(r"xl/worksheets/sheet\d+\.xml$", name)),
-            key=lambda name: [
-                int(part) if part.isdigit() else part for part in re.split(r"(\d+)", name)
-            ],
+            key=_natural_sort_key,
         )
 
         sheets: list[str] = []
@@ -531,9 +559,7 @@ def _extract_pptx_ooxml(data: bytes, filename: str) -> str:
     with _open_ooxml(data, filename) as zf:
         slide_members = sorted(
             (name for name in zf.namelist() if re.match(r"ppt/slides/slide\d+\.xml$", name)),
-            key=lambda name: [
-                int(part) if part.isdigit() else part for part in re.split(r"(\d+)", name)
-            ],
+            key=_natural_sort_key,
         )
         slides: list[str] = []
         for index, member in enumerate(slide_members, 1):

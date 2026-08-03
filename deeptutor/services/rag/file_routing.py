@@ -48,7 +48,7 @@ class FileTypeRouter:
     """
 
     PDF_EXTENSIONS = {".pdf"}
-    OFFICE_EXTENSIONS = {".docx", ".xlsx", ".pptx"}
+    OFFICE_EXTENSIONS = {".doc", ".docx", ".xlsx", ".pptx"}
     PARSER_EXTENSIONS = PDF_EXTENSIONS | OFFICE_EXTENSIONS
 
     TEXT_EXTENSIONS = {
@@ -185,7 +185,7 @@ class FileTypeRouter:
             return DocumentType.PDF
         elif ext in cls.TEXT_EXTENSIONS:
             return DocumentType.TEXT
-        elif ext == ".docx":
+        elif ext in {".doc", ".docx"}:
             return DocumentType.DOCX
         elif ext == ".xlsx":
             return DocumentType.SPREADSHEET
@@ -278,15 +278,7 @@ class FileTypeRouter:
     @classmethod
     async def read_text_file(cls, file_path: str) -> str:
         """Read a text file with automatic encoding detection."""
-        for encoding in cls.TEXT_DECODING_CANDIDATES:
-            try:
-                with open(file_path, "r", encoding=encoding) as f:
-                    return f.read()
-            except UnicodeDecodeError:
-                continue
-
-        with open(file_path, "rb") as f:
-            return f.read().decode("utf-8", errors="replace")
+        return cls.decode_bytes(Path(file_path).read_bytes())
 
     @classmethod
     def needs_parser(cls, file_path: str) -> bool:

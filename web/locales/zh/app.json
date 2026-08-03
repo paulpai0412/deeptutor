@@ -1173,7 +1173,7 @@
   "Saved Questions": "收藏题目",
   "Paper Library": "试卷库",
   "Add files": "添加文件",
-  "Upload independent PDF files for Exams.": "上传独立的 PDF 文件，用于考试。",
+  "Upload independent PDF files for Exams.": "上传独立的 PDF 或 Word .doc 文件，用于考试。",
   "{{count}} files uploaded; {{rejected}} rejected": "{{count}} 个文件已上传；{{rejected}} 个已拒绝",
   "{{count}} files uploaded": "{{count}} 个文件已上传",
   "Search files...": "搜索文件……",

@@ -33,6 +33,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from deeptutor.core.i18n import parse_language
 from deeptutor.utils.json_parser import parse_json_response
 
 from ..blocks._llm_writer import llm_text
@@ -237,7 +238,8 @@ def _architect_user_prompt(
     exploration_summary: str,
     user_template: str,
 ) -> str:
-    none_label = "(无)" if language == "zh" else "(none)"
+    locale = parse_language(language)
+    none_label = "(無)" if locale == "zh-TW" else "(无)" if locale == "zh" else "(none)"
     objs = "\n".join(f"- {o}" for o in chapter.learning_objectives) or none_label
     return user_template.format(
         chapter_title=chapter.title,

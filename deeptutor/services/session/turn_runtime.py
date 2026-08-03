@@ -5,17 +5,19 @@ Turn-level runtime manager for unified chat streaming.
 from __future__ import annotations
 
 import asyncio
-from collections.abc import AsyncIterator, Callable, Sequence
+from asyncio import CancelledError
+from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
 import contextlib
 from contextvars import Token
 from dataclasses import dataclass, field
 import json
 import logging
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Any, Literal, cast
 
 from deeptutor.core.stream import StreamEvent, StreamEventType
 from deeptutor.services.llm.utils import clean_thinking_tags
 from deeptutor.services.path_service import get_path_service
+from deeptutor.services.prompt.language import append_language_directive
 from deeptutor.services.session.protocol import SessionStoreProtocol
 
 if TYPE_CHECKING:
@@ -302,20 +304,20 @@ async def _count_branch_user_turns(
         return sum(1 for m in all_msgs if m.get("role") == "user")
     by_id: dict[int, dict[str, Any]] = {}
     for m in all_msgs:
-        mid = m.get("id")
-        if mid is not None:
-            by_id[int(mid)] = m
+        mid = _int_value(m.get("id"))
+        if mid:
+            by_id[mid] = m
     count = 0
-    current: int | None = int(leaf_message_id)
+    current: int | None = _int_value(leaf_message_id) or None
     safety = 10_000
     while current is not None and safety > 0:
-        m = by_id.get(int(current))
+        m = by_id.get(current)
         if m is None:
             break
         if m.get("role") == "user":
             count += 1
-        parent = m.get("parent_message_id")
-        current = int(parent) if parent is not None else None
+        parent = _int_value(m.get("parent_message_id"))
+        current = parent or None
         safety -= 1
     return count
 
@@ -325,7 +327,10 @@ async def _build_question_bank_context(
     entry_ids: list[Any],
 ) -> str:
     """Fetch the requested Question Bank entries and render them as context."""
-    get_entry = getattr(store, "get_notebook_entry", None)
+    get_entry = cast(
+        Callable[[int], Awaitable[dict[str, Any] | None]] | None,
+        getattr(store, "get_notebook_entry", None),
+    )
     if not callable(get_entry):
         return ""
 
@@ -437,6 +442,17 @@ def _extract_persist_user_message(config: dict[str, Any] | None) -> bool:
     return bool(raw)
 
 
+def _list_value(value: Any) -> list[Any]:
+    return list(value) if isinstance(value, list) else []
+
+
+def _int_value(value: Any) -> int:
+    try:
+        return int(value or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
 def _extract_regenerate_flag(config: dict[str, Any] | None) -> bool:
     if not isinstance(config, dict):
         return False
@@ -457,8 +473,8 @@ def _format_followup_question_context(context: dict[str, Any], language: str = "
                 option_lines.append(f"{key}. {value}")
     correctness = context.get("is_correct")
     correctness_text = (
-        "correct" if correctness is True else "incorrect" if correctness is False else "unknown"
-    )
+        "correct" if correctness else "incorrect"
+    ) if isinstance(correctness, bool) else "unknown"
 
     if str(language or "en").lower().startswith("zh"):
         lines = [
@@ -588,7 +604,7 @@ def _format_followup_question_context(context: dict[str, Any], language: str = "
 
 @dataclass
 class _LiveSubscriber:
-    queue: asyncio.Queue[dict[str, Any]]
+    queue: asyncio.Queue[dict[str, Any] | None]
 
 
 @dataclass
@@ -691,7 +707,15 @@ class TurnRuntimeManager:
             if str(raw_config.get("mode") or "original_paper") == "original_paper":
                 session_id = str(payload.get("session_id") or "").strip()
                 if session_id:
-                    snapshot = await self.store.get_latest_quiz_snapshot(session_id)
+                    get_latest_snapshot = cast(
+                        Callable[[str], Awaitable[dict[str, Any] | None]] | None,
+                        getattr(self.store, "get_latest_quiz_snapshot", None),
+                    )
+                    snapshot = (
+                        await get_latest_snapshot(session_id)
+                        if get_latest_snapshot is not None
+                        else None
+                    )
                     recovered = str((snapshot or {}).get("paper_id") or "").strip()
                     if recovered:
                         raw_config["paper_id"] = recovered
@@ -900,15 +924,15 @@ class TurnRuntimeManager:
             or preferences.get("capability")
             or "chat"
         )
-        tools = list(
+        tools = _list_value(
             overrides.get("tools")
             if overrides.get("tools") is not None
-            else preferences.get("tools") or []
+            else preferences.get("tools")
         )
-        knowledge_bases = list(
+        knowledge_bases = _list_value(
             overrides.get("knowledge_bases")
             if overrides.get("knowledge_bases") is not None
-            else preferences.get("knowledge_bases") or []
+            else preferences.get("knowledge_bases")
         )
         language = str(overrides.get("language") or preferences.get("language") or "en")
 
@@ -917,7 +941,7 @@ class TurnRuntimeManager:
             {
                 "_persist_user_message": False,
                 "_regenerate": True,
-                "_regenerated_from_message_id": int(last_user["id"]),
+                "_regenerated_from_message_id": _int_value(last_user["id"]),
             }
         )
         if previous_turn_id:
@@ -936,20 +960,20 @@ class TurnRuntimeManager:
             "knowledge_bases": knowledge_bases,
             "language": language,
             "attachments": list(last_user.get("attachments") or []),
-            "notebook_references": list(
+            "notebook_references": _list_value(
                 overrides.get("notebook_references")
                 if overrides.get("notebook_references") is not None
-                else preferences.get("notebook_references") or []
+                else preferences.get("notebook_references")
             ),
-            "history_references": list(
+            "history_references": _list_value(
                 overrides.get("history_references")
                 if overrides.get("history_references") is not None
-                else preferences.get("history_references") or []
+                else preferences.get("history_references")
             ),
-            "book_references": list(
+            "book_references": _list_value(
                 overrides.get("book_references")
                 if overrides.get("book_references") is not None
-                else snapshot.get("bookReferences") or []
+                else snapshot.get("bookReferences")
             ),
             "config": config,
         }
@@ -971,7 +995,7 @@ class TurnRuntimeManager:
         # completes before the caller proceeds.
         try:
             await execution.task
-        except asyncio.CancelledError:
+        except CancelledError:
             pass
         return True
 
@@ -1018,15 +1042,11 @@ class TurnRuntimeManager:
         # waiting on the 45s heartbeat-timeout + reconnect catchup path.
         done_yielded = False
 
-        def _track(item: dict[str, Any]) -> dict[str, Any]:
-            nonlocal done_yielded
+        for item in backlog:
+            last_seq = max(last_seq, _int_value(item.get("seq")))
             if str(item.get("type") or "") == "done":
                 done_yielded = True
-            return item
-
-        for item in backlog:
-            last_seq = max(last_seq, int(item.get("seq") or 0))
-            yield _track(item)
+            yield item
 
         queue: asyncio.Queue[dict[str, Any] | None] = asyncio.Queue()
         subscriber = _LiveSubscriber(queue=queue)
@@ -1037,25 +1057,29 @@ class TurnRuntimeManager:
             if execution is not None:
                 execution.subscribers.append(subscriber)
                 live_backlog = [
-                    item for item in execution.events if int(item.get("seq") or 0) > last_seq
+                    item for item in execution.events if _int_value(item.get("seq")) > last_seq
                 ]
 
         for item in live_backlog:
-            seq = int(item.get("seq") or 0)
+            seq = _int_value(item.get("seq"))
             if seq <= last_seq:
                 continue
             last_seq = seq
-            yield _track(item)
+            if str(item.get("type") or "") == "done":
+                done_yielded = True
+            yield item
 
         catchup = []
         if execution is None:
             catchup = await self.store.get_turn_events(turn_id, after_seq=last_seq)
         for item in catchup:
-            seq = int(item.get("seq") or 0)
+            seq = _int_value(item.get("seq"))
             if seq <= last_seq:
                 continue
             last_seq = seq
-            yield _track(item)
+            if str(item.get("type") or "") == "done":
+                done_yielded = True
+            yield item
 
         turn = await self.store.get_turn(turn_id)
         if execution is None:
@@ -1076,11 +1100,13 @@ class TurnRuntimeManager:
                 item = await queue.get()
                 if item is None:
                     break
-                seq = int(item.get("seq") or 0)
+                seq = _int_value(item.get("seq"))
                 if seq <= last_seq:
                     continue
                 last_seq = seq
-                yield _track(item)
+                if str(item.get("type") or "") == "done":
+                    done_yielded = True
+                yield item
         finally:
             async with self._lock:
                 execution = self._executions.get(turn_id)
@@ -1770,7 +1796,7 @@ class TurnRuntimeManager:
                     )
                 except Exception:
                     logger.debug("Failed to generate session title", exc_info=True)
-        except asyncio.CancelledError:
+        except CancelledError:
             if not stream_done_sent:
                 await self._publish_live_event(
                     execution,
@@ -1871,17 +1897,6 @@ class TurnRuntimeManager:
         execution: _TurnExecution,
         event: StreamEvent,
     ) -> dict[str, Any]:
-        # Localize the human-readable event channel at the session transport
-        # boundary. This covers WS/SSE progress, errors, traces, and streamed
-        # answer chunks, while leaving structured metadata untouched.
-        from deeptutor.i18n.stream import localize_stream_event
-
-        localized = localize_stream_event(
-            event,
-            str(execution.payload.get("language") or "en"),
-        )
-        if localized is not event:
-            event.content = localized.content
         if event.type == StreamEventType.DONE and not event.metadata.get("status"):
             event.metadata = {**event.metadata, "status": "completed"}
         event.session_id = execution.session_id
@@ -1889,7 +1904,7 @@ class TurnRuntimeManager:
         payload = event.to_dict()
         async with self._lock:
             current = self._executions.get(execution.turn_id, execution)
-            seq = int(payload.get("seq") or 0)
+            seq = _int_value(payload.get("seq"))
             if seq <= 0:
                 seq = current.next_seq
                 current.next_seq += 1
@@ -1953,8 +1968,20 @@ class TurnRuntimeManager:
         try:
             from deeptutor.services.llm import stream as llm_stream
 
-            zh = str(ui_language or "").lower().startswith("zh")
-            if zh:
+            language = str(ui_language or "").lower().replace("_", "-")
+            if language in {"zh-tw", "zh-hant", "zh-hk"}:
+                sys_prompt = (
+                    "你需要為一段對話產生簡潔的標題。"
+                    "直接輸出標題文字，不要引號、Markdown 格式、末尾標點，"
+                    "也不要加上「標題：」等前綴。"
+                    "標題請控制在 4 至 10 個繁體中文字。"
+                )
+                user_prompt = (
+                    "請根據以下對話產生標題：\n\n"
+                    f"[使用者]\n{_clip_text(first_user, 800)}\n\n"
+                    f"[助理]\n{_clip_text(first_assistant, 1500)}"
+                )
+            elif language.startswith("zh"):
                 sys_prompt = (
                     "你需要为一段对话生成一个简洁的标题。"
                     "直接输出标题文本，不要引号、不要 Markdown 格式、"
@@ -1979,6 +2006,8 @@ class TurnRuntimeManager:
                     f"[Assistant]\n{_clip_text(first_assistant, 1500)}"
                 )
 
+            sys_prompt = append_language_directive(sys_prompt, ui_language)
+
             async def _collect_title() -> str:
                 buf: list[str] = []
                 async for c in llm_stream(
@@ -1992,7 +2021,7 @@ class TurnRuntimeManager:
 
             raw_title = await asyncio.wait_for(_collect_title(), timeout=20.0)
             title = _sanitize_session_title(raw_title)
-        except asyncio.TimeoutError:
+        except (asyncio.TimeoutError,):
             logger.debug("Title LLM call timed out — falling back")
         except Exception:
             logger.debug("Title LLM call failed", exc_info=True)
@@ -2035,7 +2064,10 @@ class TurnRuntimeManager:
         # per-event commits fsync once per event, which on slow storage (NAS
         # spinning disks) stretches this flush — and the visible spinner — to
         # minutes for a long turn.
-        append_batch = getattr(self.store, "append_turn_events", None)
+        append_batch = cast(
+            Callable[[str, list[dict[str, Any]]], Awaitable[list[dict[str, Any]]]] | None,
+            getattr(self.store, "append_turn_events", None),
+        )
         if callable(append_batch):
             try:
                 persisted_batch = await append_batch(execution.turn_id, events)

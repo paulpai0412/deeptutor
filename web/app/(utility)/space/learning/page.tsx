@@ -1,8 +1,8 @@
-"use client";
+'use client'
 
-import { useCallback, useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
-import { useTranslation } from "react-i18next";
+import { useCallback, useEffect, useState } from 'react'
+import { useRouter } from 'next/navigation'
+import { useTranslation } from 'react-i18next'
 import {
   GraduationCap,
   Loader2,
@@ -12,7 +12,7 @@ import {
   CircleDot,
   Circle,
   MessageSquare,
-} from "lucide-react";
+} from 'lucide-react'
 
 import {
   fetchAllProgress,
@@ -22,8 +22,8 @@ import {
   type ProgressSummary,
   type MasteryMapResult,
   type ObjectiveStatus,
-} from "@/lib/learning-api";
-import { toTaiwanChinese } from "@/lib/taiwan-zh";
+} from '@/lib/learning-api'
+import { selectLocalizedText } from '@/i18n/localized-text'
 
 /**
  * Mastery Path dashboard — the persistent "screen" of the mastery experience.
@@ -35,95 +35,97 @@ import { toTaiwanChinese } from "@/lib/taiwan-zh";
  * tutor enforces. A path is keyed by its chat session, so "Continue" reopens
  * that session in mastery mode.
  */
-export default function MasteryPathPage() {
-  const { i18n } = useTranslation();
-  const zh = i18n.language?.toLowerCase().startsWith("zh");
-  const tr = useCallback(
-    (cn: string, en: string) => (zh ? toTaiwanChinese(cn) : en),
-    [zh],
-  );
-  const router = useRouter();
+type Translate = (zh: string, zhTW: string, en: string) => string
 
-  const [paths, setPaths] = useState<ProgressSummary[]>([]);
-  const [selected, setSelected] = useState<string | null>(null);
-  const [detail, setDetail] = useState<MasteryMapResult | null>(null);
-  const [loadingList, setLoadingList] = useState(true);
-  const [loadingDetail, setLoadingDetail] = useState(false);
+export default function MasteryPathPage() {
+  const { i18n } = useTranslation()
+  const tr = useCallback<Translate>(
+    (zh, zhTW, en) => selectLocalizedText(i18n.language, { zh, zhTW, en }),
+    [i18n.language]
+  )
+  const router = useRouter()
+
+  const [paths, setPaths] = useState<ProgressSummary[]>([])
+  const [selected, setSelected] = useState<string | null>(null)
+  const [detail, setDetail] = useState<MasteryMapResult | null>(null)
+  const [loadingList, setLoadingList] = useState(true)
+  const [loadingDetail, setLoadingDetail] = useState(false)
 
   const loadList = useCallback(async () => {
-    setLoadingList(true);
+    setLoadingList(true)
     try {
-      const result = await fetchAllProgress();
+      const result = await fetchAllProgress()
       const withContent = result.summaries
-        .filter((s) => s.kp_count > 0)
-        .sort((a, b) => b.updated_at - a.updated_at);
-      setPaths(withContent);
-      setSelected((prev) => prev ?? withContent[0]?.book_id ?? null);
+        .filter(s => s.kp_count > 0)
+        .sort((a, b) => b.updated_at - a.updated_at)
+      setPaths(withContent)
+      setSelected(prev => prev ?? withContent[0]?.book_id ?? null)
     } catch {
-      setPaths([]);
+      setPaths([])
     } finally {
-      setLoadingList(false);
+      setLoadingList(false)
     }
-  }, []);
+  }, [])
 
   useEffect(() => {
-    loadList();
-  }, [loadList]);
+    loadList()
+  }, [loadList])
 
   useEffect(() => {
     if (!selected) {
-      setDetail(null);
-      return;
+      setDetail(null)
+      return
     }
-    let cancelled = false;
-    setLoadingDetail(true);
+    let cancelled = false
+    setLoadingDetail(true)
     fetchMasteryMap(selected)
-      .then((result) => {
-        if (!cancelled) setDetail(result);
+      .then(result => {
+        if (!cancelled) setDetail(result)
       })
       .catch(() => {
-        if (!cancelled) setDetail(null);
+        if (!cancelled) setDetail(null)
       })
       .finally(() => {
-        if (!cancelled) setLoadingDetail(false);
-      });
+        if (!cancelled) setLoadingDetail(false)
+      })
     return () => {
-      cancelled = true;
-    };
-  }, [selected]);
+      cancelled = true
+    }
+  }, [selected])
 
   const handleDelete = useCallback(
     async (pathId: string) => {
       if (
         !window.confirm(
-          tr("确定删除这条精通之路？", "Delete this mastery path?"),
+          tr('确定删除这条精通之路？', '確定刪除這條精通之路？', 'Delete this mastery path?')
         )
       )
-        return;
-      await deleteProgress(pathId);
-      if (selected === pathId) setSelected(null);
-      await loadList();
+        return
+      await deleteProgress(pathId)
+      if (selected === pathId) setSelected(null)
+      await loadList()
     },
-    [selected, loadList, tr],
-  );
+    [selected, loadList, tr]
+  )
 
   const handleRedo = useCallback(
     async (pathId: string) => {
       if (
         !window.confirm(
           tr(
-            "重置进度？知识点保留，但掌握度与复习计划清空。",
-            "Reset progress? Objectives are kept, but mastery and reviews are cleared.",
-          ),
+            '重置进度？知识点保留，但掌握度与复习计划清空。',
+            '重置進度？知識點保留，但掌握度與複習計劃清空。',
+            'Reset progress? Objectives are kept, but mastery and reviews are cleared.'
+          )
         )
       )
-        return;
-      await redoProgress(pathId);
-      const result = await fetchMasteryMap(pathId);
-      setDetail(result);
+        return
+      await redoProgress(pathId)
+      const result = await fetchMasteryMap(pathId)
+      setDetail(result)
     },
-    [tr],
-  );
+    [tr]
+  )
 
   return (
     <div className="flex h-full">
@@ -132,14 +134,13 @@ export default function MasteryPathPage() {
         <header className="px-4 py-3 border-b border-[var(--border)]">
           <div className="flex items-center gap-2 text-[var(--foreground)]">
             <GraduationCap className="w-4 h-4" />
-            <h1 className="text-sm font-semibold">
-              {tr("精通之路", "Mastery Path")}
-            </h1>
+            <h1 className="text-sm font-semibold">{tr('精通之路', '精通之路', 'Mastery Path')}</h1>
           </div>
           <p className="mt-1 text-xs text-[var(--muted-foreground)]">
             {tr(
-              "掌握式学习：硬门槛 + 间隔复习",
-              "Mastery-based learning: hard gate + spaced review",
+              '掌握式学习：硬门槛 + 间隔复习',
+              '掌握式學習：硬門檻 + 間隔複習',
+              'Mastery-based learning: hard gate + spaced review'
             )}
           </p>
         </header>
@@ -151,26 +152,25 @@ export default function MasteryPathPage() {
           ) : paths.length === 0 ? (
             <p className="px-2 py-3 text-xs text-[var(--muted-foreground)] leading-relaxed">
               {tr(
-                "还没有精通之路。去「对话」选择 Mastery Path 模式，让导师根据你的材料建一条。",
-                "No paths yet. Open Chat, pick Mastery Path mode, and ask the tutor to build one from your materials.",
+                '还没有精通之路。去「对话」选择 Mastery Path 模式，让导师根据你的材料建一条。',
+                '還沒有精通之路。去「對話」選擇 Mastery Path 模式，讓導師根據你的材料建一條。',
+                'No paths yet. Open Chat, pick Mastery Path mode, and ask the tutor to build one from your materials.'
               )}
             </p>
           ) : (
-            paths.map((path) => (
+            paths.map(path => (
               <button
                 key={path.book_id}
                 onClick={() => setSelected(path.book_id)}
                 className={`w-full text-left px-3 py-2 rounded-md transition-colors cursor-pointer ${
                   selected === path.book_id
-                    ? "bg-[var(--primary)]/10 ring-1 ring-[var(--primary)]/30"
-                    : "hover:bg-[var(--accent)]"
+                    ? 'bg-[var(--primary)]/10 ring-1 ring-[var(--primary)]/30'
+                    : 'hover:bg-[var(--accent)]'
                 }`}
               >
-                <div className="truncate text-sm text-[var(--foreground)]">
-                  {path.name}
-                </div>
+                <div className="truncate text-sm text-[var(--foreground)]">{path.name}</div>
                 <div className="mt-0.5 text-xs text-[var(--muted-foreground)]">
-                  {path.kp_count} {tr("个知识点", "objectives")} ·{" "}
+                  {path.kp_count} {tr('个知识点', '個知識點', 'objectives')} ·{' '}
                   {path.avg_mastery_pct}%
                 </div>
               </button>
@@ -179,11 +179,11 @@ export default function MasteryPathPage() {
         </div>
         <footer className="p-2 border-t border-[var(--border)]">
           <button
-            onClick={() => router.push("/home")}
+            onClick={() => router.push('/home')}
             className="w-full flex items-center justify-center gap-1.5 px-3 py-2 text-sm rounded-md bg-[var(--primary)] text-[var(--primary-foreground)] hover:opacity-90 transition-opacity cursor-pointer"
           >
             <MessageSquare className="w-3.5 h-3.5" />
-            {tr("新建（在对话中）", "New (in Chat)")}
+            {tr('新建（在对话中）', '新建（在對話中）', 'New (in Chat)')}
           </button>
         </footer>
       </aside>
@@ -199,83 +199,80 @@ export default function MasteryPathPage() {
             <GraduationCap className="w-10 h-10 mb-3 opacity-40" />
             <p className="text-sm max-w-sm leading-relaxed">
               {tr(
-                "选择一条精通之路查看进度地图，或在「对话」里用 Mastery Path 模式开始。",
-                "Select a path to see its progress map, or start one in Chat with Mastery Path mode.",
+                '选择一条精通之路查看进度地图，或在「对话」里用 Mastery Path 模式开始。',
+                '選擇一條精通之路檢視進度地圖，或在「對話」裡用 Mastery Path 模式開始。',
+                'Select a path to see its progress map, or start one in Chat with Mastery Path mode.'
               )}
             </p>
           </div>
         ) : (
           <MapView
             result={detail}
-            zh={!!zh}
             tr={tr}
-            onContinue={() =>
-              selected && router.push(`/home/${encodeURIComponent(selected)}`)
-            }
+            onContinue={() => selected && router.push(`/home/${encodeURIComponent(selected)}`)}
             onRedo={() => selected && handleRedo(selected)}
             onDelete={() => selected && handleDelete(selected)}
           />
         )}
       </section>
     </div>
-  );
+  )
 }
 
 const STATUS_META: Record<
   ObjectiveStatus,
-  { cn: string; en: string; className: string }
+  { cn: string; tw: string; en: string; className: string }
 > = {
-  mastered: { cn: "已掌握", en: "Mastered", className: "text-green-500" },
-  learning: { cn: "学习中", en: "Learning", className: "text-yellow-500" },
+  mastered: { cn: '已掌握', tw: '已掌握', en: 'Mastered', className: 'text-green-500' },
+  learning: { cn: '学习中', tw: '學習中', en: 'Learning', className: 'text-yellow-500' },
   new: {
-    cn: "未开始",
-    en: "Not started",
-    className: "text-[var(--muted-foreground)]",
+    cn: '未开始',
+    tw: '未開始',
+    en: 'Not started',
+    className: 'text-[var(--muted-foreground)]',
   },
-};
+}
 
-const ACTION_LABEL: Record<string, { cn: string; en: string }> = {
-  probe: { cn: "先探查是否已掌握", en: "Probe — test out first" },
-  practice: { cn: "练习直到达标", en: "Practice until the gate clears" },
-  assess: { cn: "用自己的话解释", en: "Explain it in your own words" },
-  review: { cn: "到期复习", en: "Due for review" },
+const ACTION_LABEL: Record<string, { cn: string; tw: string; en: string }> = {
+  probe: { cn: '先探查是否已掌握', tw: '先探查是否已掌握', en: 'Probe — test out first' },
+  practice: { cn: '练习直到达标', tw: '練習直到達標', en: 'Practice until the gate clears' },
+  assess: { cn: '用自己的话解释', tw: '用自己的話解釋', en: 'Explain it in your own words' },
+  review: { cn: '到期复习', tw: '到期複習', en: 'Due for review' },
   answer_pending: {
-    cn: "有待回答的问题",
-    en: "A question is awaiting your answer",
+    cn: '有待回答的问题',
+    tw: '有待回答的問題',
+    en: 'A question is awaiting your answer',
   },
-  complete: { cn: "已全部掌握 🎉", en: "All mastered 🎉" },
-};
+  complete: { cn: '已全部掌握 🎉', tw: '已全部掌握 🎉', en: 'All mastered 🎉' },
+}
 
 function StatusIcon({ status }: { status: ObjectiveStatus }) {
-  const cls = `w-3 h-3 shrink-0 ${STATUS_META[status].className}`;
-  if (status === "mastered") return <CircleCheck className={cls} />;
-  if (status === "learning") return <CircleDot className={cls} />;
-  return <Circle className={cls} />;
+  const cls = `w-3 h-3 shrink-0 ${STATUS_META[status].className}`
+  if (status === 'mastered') return <CircleCheck className={cls} />
+  if (status === 'learning') return <CircleDot className={cls} />
+  return <Circle className={cls} />
 }
 
 function MapView({
   result,
-  zh,
   tr,
   onContinue,
   onRedo,
   onDelete,
 }: {
-  result: MasteryMapResult;
-  zh: boolean;
-  tr: (cn: string, en: string) => string;
-  onContinue: () => void;
-  onRedo: () => void;
-  onDelete: () => void;
+  result: MasteryMapResult
+  tr: Translate
+  onContinue: () => void
+  onRedo: () => void
+  onDelete: () => void
 }) {
-  const { map, next } = result;
-  const pct = map.counts.total
-    ? Math.round((map.counts.mastered / map.counts.total) * 100)
-    : 0;
+  const { map, next } = result
+  const pct = map.counts.total ? Math.round((map.counts.mastered / map.counts.total) * 100) : 0
   const action = ACTION_LABEL[next.action] ?? {
     cn: next.reason,
+    tw: next.reason,
     en: next.reason,
-  };
+  }
 
   return (
     <div className="max-w-2xl mx-auto px-6 py-5">
@@ -284,33 +281,29 @@ function MapView({
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 text-sm text-[var(--muted-foreground)]">
             <span>
-              {map.counts.mastered}/{map.counts.total}{" "}
-              {tr("已掌握", "mastered")}
+              {map.counts.mastered}/{map.counts.total} {tr('已掌握', '已掌握', 'mastered')}
             </span>
             {map.due_reviews > 0 && (
               <span className="text-yellow-600">
-                · {map.due_reviews} {tr("项待复习", "due for review")}
+                · {map.due_reviews} {tr('项待复习', '項待複習', 'due for review')}
               </span>
             )}
           </div>
           <div className="mt-1.5 h-1.5 w-full rounded-full bg-[var(--accent)] overflow-hidden">
-            <div
-              className="h-full bg-green-500 transition-all"
-              style={{ width: `${pct}%` }}
-            />
+            <div className="h-full bg-green-500 transition-all" style={{ width: `${pct}%` }} />
           </div>
         </div>
         <div className="flex items-center gap-1.5 shrink-0">
           <button
             onClick={onRedo}
-            title={tr("重置进度", "Reset progress")}
+            title={tr('重置进度', '重置進度', 'Reset progress')}
             className="p-1.5 rounded-md text-[var(--muted-foreground)] hover:bg-[var(--accent)] cursor-pointer"
           >
             <RotateCcw className="w-4 h-4" />
           </button>
           <button
             onClick={onDelete}
-            title={tr("删除", "Delete")}
+            title={tr('删除', '刪除', 'Delete')}
             className="p-1.5 rounded-md text-[var(--muted-foreground)] hover:bg-red-500/10 hover:text-red-500 cursor-pointer"
           >
             <Trash2 className="w-4 h-4" />
@@ -324,47 +317,42 @@ function MapView({
         className="mt-4 w-full text-left rounded-lg border border-[var(--border)] hover:border-[var(--primary)]/40 hover:bg-[var(--accent)] p-3 transition-colors cursor-pointer"
       >
         <div className="text-xs text-[var(--muted-foreground)]">
-          {tr("接下来", "Next")}
+          {tr('接下来', '接下來', 'Next')}
         </div>
         <div className="mt-0.5 text-sm font-medium text-[var(--foreground)]">
-          {next.action === "complete"
-            ? tr(action.cn, action.en)
-            : `${next.knowledge_point_name} — ${tr(action.cn, action.en)}`}
+          {next.action === 'complete'
+            ? tr(action.cn, action.tw, action.en)
+            : `${next.knowledge_point_name} — ${tr(action.cn, action.tw, action.en)}`}
         </div>
         <div className="mt-1 text-xs text-[var(--primary)]">
-          {tr("在对话中继续辅导 →", "Continue tutoring in Chat →")}
+          {tr('在对话中继续辅导 →', '在對話中繼續輔導 →', 'Continue tutoring in Chat →')}
         </div>
       </button>
 
       {/* Module / objective map */}
       <div className="mt-5 space-y-4">
-        {map.modules.map((module) => (
+        {map.modules.map(module => (
           <div key={module.id}>
             <div className="flex items-center justify-between">
-              <h3 className="text-sm font-medium text-[var(--foreground)]">
-                {module.name}
-              </h3>
+              <h3 className="text-sm font-medium text-[var(--foreground)]">{module.name}</h3>
               <span className="text-xs text-[var(--muted-foreground)]">
                 {module.mastered}/{module.total}
               </span>
             </div>
             <div className="mt-1.5 space-y-1">
-              {module.knowledge_points.map((kp) => (
-                <div
-                  key={kp.id}
-                  className="flex items-center gap-2 px-2 py-1 rounded-md text-sm"
-                >
+              {module.knowledge_points.map(kp => (
+                <div key={kp.id} className="flex items-center gap-2 px-2 py-1 rounded-md text-sm">
                   <StatusIcon status={kp.status} />
-                  <span className="flex-1 truncate text-[var(--foreground)]">
-                    {kp.name}
-                  </span>
+                  <span className="flex-1 truncate text-[var(--foreground)]">{kp.name}</span>
                   <span className="text-[10px] uppercase tracking-wide text-[var(--muted-foreground)]">
                     {kp.type}
                   </span>
-                  <span
-                    className={`text-xs ${STATUS_META[kp.status].className}`}
-                  >
-                    {zh ? STATUS_META[kp.status].cn : STATUS_META[kp.status].en}
+                  <span className={`text-xs ${STATUS_META[kp.status].className}`}>
+                    {tr(
+                      STATUS_META[kp.status].cn,
+                      STATUS_META[kp.status].tw,
+                      STATUS_META[kp.status].en
+                    )}
                   </span>
                 </div>
               ))}
@@ -373,5 +361,5 @@ function MapView({
         ))}
       </div>
     </div>
-  );
+  )
 }

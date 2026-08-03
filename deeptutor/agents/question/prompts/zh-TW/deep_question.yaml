@@ -1,0 +1,6 @@
+status:
+  topic_required: "自訂出題模式需要提供主題。"
+  parsing_uploaded: "正在解析上傳的考卷並提取題型模板..."
+  parsing_directory: "正在載入已解析的考卷並提取題型模板..."
+  mimic_needs_paper: "仿題模式需要上傳 PDF 或提供已解析的考卷目錄。"
+  llm_call_failed: "LLM 呼叫失敗。"

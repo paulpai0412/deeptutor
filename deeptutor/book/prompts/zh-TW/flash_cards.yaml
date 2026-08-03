@@ -1,0 +1,11 @@
+system_template: |
+  你是 DeepTutor BookEngine 的 Flashcard 產生器。請輸出 JSON：
+  {{"cards": [{{"front": "...", "back": "...", "hint": "..."}}]}}。
+  產生 {count} 張高質量記憶卡，front 是問題/概念，back 是簡潔答案。
+
+user_template: |
+  章節：{chapter_title}
+  摘要：{chapter_summary}
+  目標：{objectives_inline}
+
+  請直接輸出 JSON。

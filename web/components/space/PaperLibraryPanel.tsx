@@ -3,15 +3,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import Image from 'next/image'
 import { useRouter } from 'next/navigation'
-import {
-  ArrowLeft,
-  ExternalLink,
-  FileText,
-  Loader2,
-  Pencil,
-  Search,
-  Trash2,
-} from 'lucide-react'
+import { ArrowLeft, ExternalLink, FileText, Loader2, Pencil, Search, Trash2 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import PaperLibraryUploadSection from '@/components/knowledge/PaperLibraryUploadSection'
 import MarkdownRenderer from '@/components/common/MarkdownRenderer'
@@ -86,7 +78,7 @@ interface PaperReviewProps {
     questionId: string,
     questionNumber: string,
     answer: string,
-    images: string[],
+    images: string[]
   ) => Promise<PaperLibraryQuestion>
   savingQuestionId: string | null
 }
@@ -103,12 +95,15 @@ export function PaperReview({
     Record<string, { questionNumber: string; answer: string; images: string[] }>
   >(() =>
     Object.fromEntries(
-      paper.questions.map(question => [question.question_id, {
-        questionNumber: question.question_number,
-        answer: question.answer,
-        images: [...question.images],
-      }]),
-    ),
+      paper.questions.map(question => [
+        question.question_id,
+        {
+          questionNumber: question.question_number,
+          answer: question.answer,
+          images: [...question.images],
+        },
+      ])
+    )
   )
   const [error, setError] = useState<string | null>(null)
 
@@ -208,7 +203,6 @@ export function PaperReview({
     </figure>
   )
 
-
   return (
     <div className="space-y-4">
       <button
@@ -237,9 +231,15 @@ export function PaperReview({
           </span>
         </div>
         <div className="mt-3 flex flex-wrap items-center gap-3 text-[11px] text-[var(--muted-foreground)]">
-          <span>{paper.question_count} {t('questions')}</span>
+          <span>
+            {paper.question_count} {t('questions')}
+          </span>
           {paper.parser_engine && <span>{paper.parser_engine}</span>}
-          {paper.task_id && <span>{t('Task')}: {paper.task_id}</span>}
+          {paper.task_id && (
+            <span>
+              {t('Task')}: {paper.task_id}
+            </span>
+          )}
           <button
             type="button"
             disabled={!['ready', 'ready_with_warnings', 'partial'].includes(paper.status)}
@@ -256,7 +256,9 @@ export function PaperReview({
         )}
         {paper.warnings && paper.warnings.length > 0 && (
           <ul className="mt-3 list-disc space-y-1 rounded-lg bg-amber-50 px-5 py-2 text-[12px] text-amber-800 dark:bg-amber-950/20 dark:text-amber-200">
-            {paper.warnings.map((warning, index) => <li key={`${warning}-${index}`}>{warning}</li>)}
+            {paper.warnings.map((warning, index) => (
+              <li key={`${warning}-${index}`}>{warning}</li>
+            ))}
           </ul>
         )}
       </div>
@@ -321,10 +323,7 @@ export function PaperReview({
                 </div>
 
                 <div className="mt-3 text-[13px] leading-relaxed text-[var(--foreground)]">
-                  <MarkdownRenderer
-                    content={question.question_text}
-                    variant="compact"
-                  />
+                  <MarkdownRenderer content={question.question_text} variant="compact" />
                 </div>
 
                 {Object.keys(question.options).length > 0 && (
@@ -381,7 +380,7 @@ export function PaperReview({
                         question.question_id,
                         draft.questionNumber,
                         draft.answer,
-                        draft.images,
+                        draft.images
                       ).catch(error => {
                         setError(error instanceof Error ? error.message : String(error))
                       })
@@ -434,7 +433,7 @@ export default function PaperLibraryPanel({
       setPapers(
         libraryId
           ? await listLibraryPapers(libraryId, { search, status })
-          : await listPaperLibrary({ search, status }),
+          : await listPaperLibrary({ search, status })
       )
     } catch (error) {
       setErrorMsg(error instanceof Error ? error.message : String(error))
@@ -453,12 +452,13 @@ export default function PaperLibraryPanel({
     return () => window.clearInterval(timer)
   }, [load, papers])
 
-  const handleStartQuiz = useCallback((paperId: string) => {
-    const libraryQuery = libraryId
-      ? `&exam_library_id=${encodeURIComponent(libraryId)}`
-      : ''
-    router.push(`/home?exam_paper_id=${encodeURIComponent(paperId)}${libraryQuery}`)
-  }, [libraryId, router])
+  const handleStartQuiz = useCallback(
+    (paperId: string) => {
+      const libraryQuery = libraryId ? `&exam_library_id=${encodeURIComponent(libraryId)}` : ''
+      router.push(`/home?exam_paper_id=${encodeURIComponent(paperId)}${libraryQuery}`)
+    },
+    [libraryId, router]
+  )
 
   const handleOpenPaper = useCallback(async (paperId: string) => {
     setReviewLoading(true)
@@ -473,27 +473,21 @@ export default function PaperLibraryPanel({
   }, [])
 
   const handleSaveQuestion = useCallback(
-    async (
-      questionId: string,
-      questionNumber: string,
-      answer: string,
-      images: string[],
-    ) => {
+    async (questionId: string, questionNumber: string, answer: string, images: string[]) => {
       if (!selectedPaper) throw new Error(t('No paper selected'))
       setSavingQuestionId(questionId)
       try {
         const updated = libraryId
-          ? await updateLibraryPaperQuestion(
-              libraryId,
-              selectedPaper.paper_id,
-              questionId,
-              { question_number: questionNumber, answer, images },
-            )
-          : await updatePaperQuestion(
-              selectedPaper.paper_id,
-              questionId,
-              { question_number: questionNumber, answer, images },
-            )
+          ? await updateLibraryPaperQuestion(libraryId, selectedPaper.paper_id, questionId, {
+              question_number: questionNumber,
+              answer,
+              images,
+            })
+          : await updatePaperQuestion(selectedPaper.paper_id, questionId, {
+              question_number: questionNumber,
+              answer,
+              images,
+            })
         setSelectedPaper(previous =>
           previous
             ? {
@@ -504,43 +498,49 @@ export default function PaperLibraryPanel({
                     : {
                         ...question,
                         images: question.images.filter(image => !updated.images.includes(image)),
-                      },
+                      }
                 ),
               }
-            : previous,
+            : previous
         )
         return updated
       } finally {
         setSavingQuestionId(null)
       }
     },
-    [libraryId, selectedPaper, t],
+    [libraryId, selectedPaper, t]
   )
 
-  const handleRetry = useCallback(async (paperId: string) => {
-    if (!window.confirm(t('Retry extraction for this paper?'))) return
-    setErrorMsg(null)
-    try {
-      if (libraryId) await retryLibraryPaper(libraryId, paperId)
-      else await retryPaper(paperId)
-      await load()
-    } catch (error) {
-      setErrorMsg(error instanceof Error ? error.message : String(error))
-    }
-  }, [libraryId, load, t])
+  const handleRetry = useCallback(
+    async (paperId: string) => {
+      if (!window.confirm(t('Retry extraction for this paper?'))) return
+      setErrorMsg(null)
+      try {
+        if (libraryId) await retryLibraryPaper(libraryId, paperId)
+        else await retryPaper(paperId)
+        await load()
+      } catch (error) {
+        setErrorMsg(error instanceof Error ? error.message : String(error))
+      }
+    },
+    [libraryId, load, t]
+  )
 
-  const handleDelete = useCallback(async (paperId: string, displayName: string) => {
-    if (!window.confirm(t('Delete paper {{name}}?', { name: displayName }))) return
-    setErrorMsg(null)
-    try {
-      if (libraryId) await deleteLibraryPaper(libraryId, paperId)
-      else await deletePaper(paperId)
-      setPapers(previous => previous.filter(paper => paper.paper_id !== paperId))
-      setSelectedPaper(previous => previous?.paper_id === paperId ? null : previous)
-    } catch (error) {
-      setErrorMsg(error instanceof Error ? error.message : String(error))
-    }
-  }, [libraryId, t])
+  const handleDelete = useCallback(
+    async (paperId: string, displayName: string) => {
+      if (!window.confirm(t('Delete paper {{name}}?', { name: displayName }))) return
+      setErrorMsg(null)
+      try {
+        if (libraryId) await deleteLibraryPaper(libraryId, paperId)
+        else await deletePaper(paperId)
+        setPapers(previous => previous.filter(paper => paper.paper_id !== paperId))
+        setSelectedPaper(previous => (previous?.paper_id === paperId ? null : previous))
+      } catch (error) {
+        setErrorMsg(error instanceof Error ? error.message : String(error))
+      }
+    },
+    [libraryId, t]
+  )
 
   const handleRename = useCallback(async () => {
     if (!editing || !editing.name.trim()) return
@@ -549,12 +549,10 @@ export default function PaperLibraryPanel({
         ? await renameLibraryPaper(libraryId, editing.id, editing.name.trim())
         : await renamePaper(editing.id, editing.name.trim())
       setPapers(previous =>
-        previous.map(paper => (paper.paper_id === updated.paper_id ? updated : paper)),
+        previous.map(paper => (paper.paper_id === updated.paper_id ? updated : paper))
       )
       setSelectedPaper(previous =>
-        previous && previous.paper_id === updated.paper_id
-          ? { ...previous, ...updated }
-          : previous,
+        previous && previous.paper_id === updated.paper_id ? { ...previous, ...updated } : previous
       )
       setEditing(null)
     } catch (error) {
@@ -568,12 +566,12 @@ export default function PaperLibraryPanel({
       setErrorMsg(null)
       try {
         await movePaper(libraryId, paperId, targetLibraryId)
-        setPapers((previous) => previous.filter((paper) => paper.paper_id !== paperId))
+        setPapers(previous => previous.filter(paper => paper.paper_id !== paperId))
       } catch (error) {
         setErrorMsg(error instanceof Error ? error.message : String(error))
       }
     },
-    [libraryId],
+    [libraryId]
   )
 
   if (reviewLoading) {
@@ -598,13 +596,7 @@ export default function PaperLibraryPanel({
 
   return (
     <div className="space-y-4">
-      {!hideUpload && (
-        <PaperLibraryUploadSection
-          libraryId={libraryId}
-          onUploaded={load}
-          compact
-        />
-      )}
+      {!hideUpload && <PaperLibraryUploadSection libraryId={libraryId} onUploaded={load} compact />}
 
       <div className="flex items-center justify-between gap-3">
         <form
@@ -638,7 +630,9 @@ export default function PaperLibraryPanel({
         >
           <option value="">{t('All statuses')}</option>
           {PAPER_STATUS_OPTIONS.map(option => (
-            <option key={option} value={option}>{statusLabel(option, t)}</option>
+            <option key={option} value={option}>
+              {statusLabel(option, t)}
+            </option>
           ))}
         </select>
         <span className="shrink-0 text-[12px] text-[var(--muted-foreground)]">
@@ -761,11 +755,13 @@ export default function PaperLibraryPanel({
                   )}
                   <button
                     type="button"
-                    onClick={() => window.open(
-                      apiUrl(paperSourcePath(paper.paper_id)),
-                      '_blank',
-                      'noopener,noreferrer',
-                    )}
+                    onClick={() =>
+                      window.open(
+                        apiUrl(paperSourcePath(paper.paper_id)),
+                        '_blank',
+                        'noopener,noreferrer'
+                      )
+                    }
                     className="inline-flex items-center gap-1 text-[var(--primary)] hover:underline"
                   >
                     <ExternalLink size={11} />
@@ -795,7 +791,11 @@ export default function PaperLibraryPanel({
                     type="button"
                     disabled={paper.status === 'processing'}
                     onClick={() => void handleDelete(paper.paper_id, paper.display_name)}
-                    title={paper.status === 'processing' ? t('Cannot delete while processing') : t('Delete paper')}
+                    title={
+                      paper.status === 'processing'
+                        ? t('Cannot delete while processing')
+                        : t('Delete paper')
+                    }
                     className="rounded p-1 text-[var(--muted-foreground)] hover:bg-red-50 hover:text-red-600 disabled:cursor-not-allowed disabled:opacity-30 dark:hover:bg-red-950/30"
                   >
                     <Trash2 size={12} />

@@ -12,7 +12,7 @@ from typing import Any
 
 from ..models import BlockType, SourceAnchor
 from ._llm_writer import llm_json
-from ._prompts import get_book_prompt, load_book_prompts
+from ._prompts import book_text, get_book_prompt, load_book_prompts
 from .base import BlockContext, BlockGenerator, GenerationFailure
 
 
@@ -26,10 +26,14 @@ class FlashCardsGenerator(BlockGenerator):
         chapter_title = params.get("chapter_title", ctx.chapter.title)
         chapter_summary = params.get("chapter_summary", ctx.chapter.summary)
         objectives = params.get("objectives") or ctx.chapter.learning_objectives
-        count = max(3, min(8, int(params.get("count") or 5)))
+        try:
+            count = int(params.get("count") or 5)
+        except (TypeError, ValueError):
+            count = 5
+        count = max(3, min(8, count))
 
         prompts = load_book_prompts("flash_cards", ctx.language)
-        none_label = "(无)" if ctx.language == "zh" else "(none)"
+        none_label = book_text(ctx.language, en="(none)", zh="(无)", zh_tw="(無)")
         system_prompt = get_book_prompt(prompts, "system_template").format(count=count)
         user_prompt = get_book_prompt(prompts, "user_template").format(
             chapter_title=chapter_title,
@@ -63,11 +67,9 @@ class FlashCardsGenerator(BlockGenerator):
                 )
         if not cards:
             raise GenerationFailure("LLM did not return any flashcards.")
-        return (
-            {"cards": cards},
-            [],
-            data.get("_metadata") if isinstance(data.get("_metadata"), dict) else {},
-        )
+        raw_metadata = data.get("_metadata")
+        metadata = raw_metadata if isinstance(raw_metadata, dict) else {}
+        return {"cards": cards}, [], metadata
 
 
 __all__ = ["FlashCardsGenerator"]

@@ -105,7 +105,8 @@ export function previewKindFor(source: FilePreviewSource): PreviewKind {
     mime === "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
   )
     return "xlsx";
-  if (OFFICE_BINARY_EXTS.has(ext)) return "office-text";
+  if (OFFICE_BINARY_EXTS.has(ext) || mime === "application/msword")
+    return "office-text";
   // Catches both extension-based mappings (.js, .ts, .go, .vue, .lua, …)
   // and special filenames without extensions (Dockerfile, Makefile, …).
   if (langForFilename(source.filename || "")) return "code";

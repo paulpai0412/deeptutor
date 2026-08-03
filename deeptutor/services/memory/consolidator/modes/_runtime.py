@@ -2,7 +2,7 @@
 
 These keep the per-mode files focused on algorithm, not plumbing:
 
-* Prompt loading (en/zh, cached).
+* Prompt loading (en/zh/zh-TW, cached).
 * SSE event emission (``_emit``).
 * Document load + atomic write.
 * LLM call wrapper with retries + a one-line warning on failure.
@@ -37,21 +37,17 @@ _META_CACHE: dict[str, dict[str, Any]] = {}
 
 
 def load_prompt(name: str, language: str) -> dict[str, str]:
-    """Load one memory prompt, with Traditional Chinese wording when requested."""
+    """Load one memory prompt for the requested locale."""
     lang = _lang_code(language)
     key = (lang, name)
     cached = _PROMPT_CACHE.get(key)
     if cached is not None:
         return cached
-    prompt_lang = lang if lang in {"en", "zh"} else "zh"
+    prompt_lang = lang if lang in {"en", "zh", "zh-TW"} else "en"
     path = _PROMPTS_DIR / prompt_lang / f"{name}.yaml"
     data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
     if not isinstance(data, dict) or "system" not in data or "user" not in data:
         raise RuntimeError(f"prompt {path} missing 'system'/'user' keys")
-    if lang == "zh-TW":
-        from deeptutor.i18n.zh_tw import convert_nested
-
-        data = convert_nested(data)
     _PROMPT_CACHE[key] = {"system": data["system"], "user": data["user"]}
     return _PROMPT_CACHE[key]
 
@@ -62,13 +58,9 @@ def load_focus_meta(language: str) -> dict[str, Any]:
     cached = _META_CACHE.get(lang)
     if cached is not None:
         return cached
-    prompt_lang = lang if lang in {"en", "zh"} else "zh"
+    prompt_lang = lang if lang in {"en", "zh", "zh-TW"} else "en"
     path = _PROMPTS_DIR / prompt_lang / "_meta.yaml"
     data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
-    if lang == "zh-TW":
-        from deeptutor.i18n.zh_tw import convert_nested
-
-        data = convert_nested(data)
     _META_CACHE[lang] = data
     return data
 

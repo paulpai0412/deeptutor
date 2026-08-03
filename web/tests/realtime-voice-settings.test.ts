@@ -35,7 +35,10 @@ test('models settings marks connected Realtime Voice as configured', () => {
 
   assert.match(source, /leaf\.key === ["']realtime_voice["']/)
   assert.match(source, /realtimeVoiceStatus\.ready/)
-  assert.match(source, /label: \{ zh: ["']已配置["'], en: ["']Configured["'] \}/)
+  assert.match(
+    source,
+    /label: \{ zh: ["']已配置["'], zhTW: ["']已配置["'], en: ["']Configured["'] \}/
+  )
 })
 
 test('Realtime Voice settings provides browser authorization and live connection actions', () => {

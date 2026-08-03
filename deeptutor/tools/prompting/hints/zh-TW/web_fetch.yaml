@@ -1,0 +1,6 @@
+short_description: "抓取一個具體 URL 的網頁內容並提取為 markdown 文字。"
+when_to_use: "使用者訊息裡出現具體 URL 且需要讀那個頁面時使用：分享了部落格 / 教材 / 論文連結並問相關問題，或者使用者明確說\"幫我讀這個頁面\"。普通主題搜尋請用 web_search。"
+input_format: "{\"url\": \"完整 http(s):// URL\", \"max_chars\": 50000}。max_chars 可選，預設 50000，超出會截斷。"
+guideline: "對於需要登入、有反爬蟲、或純前端 JS 渲染的頁面會失敗——失敗時如實告知使用者，不要憑空補內容。回傳結果是已經去掉指令碼/側邊欄的純文字（首行 `# 標題`）。"
+note: "拒絕 file:// / localhost / 內網 IP 等地址。一次只抓一個 URL；要抓多個分多次呼叫。"
+phase: "exploration"

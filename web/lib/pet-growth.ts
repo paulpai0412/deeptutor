@@ -20,9 +20,27 @@ export type PetGrowthState = {
 }
 
 export const PET_MISSIONS = [
-  { id: 'focus', labelZh: '完成 10 分鐘專心學習', labelEn: 'Finish 10 minutes of focus', xp: 15 },
-  { id: 'practice', labelZh: '回答一題練習題', labelEn: 'Answer one practice question', xp: 8 },
-  { id: 'mistake', labelZh: '整理一題錯題', labelEn: 'Review one mistake', xp: 12 },
+  {
+    id: 'focus',
+    labelZh: '完成 10 分钟专心学习',
+    labelZhTW: '完成 10 分鐘專心學習',
+    labelEn: 'Finish 10 minutes of focus',
+    xp: 15,
+  },
+  {
+    id: 'practice',
+    labelZh: '回答一题练习题',
+    labelZhTW: '回答一題練習題',
+    labelEn: 'Answer one practice question',
+    xp: 8,
+  },
+  {
+    id: 'mistake',
+    labelZh: '整理一题错题',
+    labelZhTW: '整理一題錯題',
+    labelEn: 'Review one mistake',
+    xp: 12,
+  },
 ] as const
 
 const DEFAULT_STATE: PetGrowthState = {
@@ -219,6 +237,7 @@ export function petLevelProgress(xp: number): {
 export type PetGrowthAppearance = {
   stage: 'baby' | 'sprout' | 'star' | 'legend'
   labelZh: string
+  labelZhTW: string
   labelEn: string
   height: number
   auraClassName: string
@@ -230,7 +249,8 @@ export function petGrowthAppearance(xp: number): PetGrowthAppearance {
   if (level >= 5) {
     return {
       stage: 'legend',
-      labelZh: '傳奇學霸',
+      labelZh: '传奇学霸',
+      labelZhTW: '傳奇學霸',
       labelEn: 'Legend scholar',
       height: 150,
       auraClassName:
@@ -241,7 +261,8 @@ export function petGrowthAppearance(xp: number): PetGrowthAppearance {
   if (level >= 3) {
     return {
       stage: 'star',
-      labelZh: '閃耀成長',
+      labelZh: '闪耀成长',
+      labelZhTW: '閃耀成長',
       labelEn: 'Shining growth',
       height: 140,
       auraClassName:
@@ -252,7 +273,8 @@ export function petGrowthAppearance(xp: number): PetGrowthAppearance {
   if (level >= 2) {
     return {
       stage: 'sprout',
-      labelZh: '努力長大',
+      labelZh: '努力长大',
+      labelZhTW: '努力長大',
       labelEn: 'Growing learner',
       height: 126,
       auraClassName:
@@ -263,6 +285,7 @@ export function petGrowthAppearance(xp: number): PetGrowthAppearance {
   return {
     stage: 'baby',
     labelZh: '新手幼崽',
+    labelZhTW: '新手幼崽',
     labelEn: 'Baby buddy',
     height: 112,
     auraClassName:

@@ -1,8 +1,9 @@
 """Auth router — login, logout, status, registration, profile, and user-management endpoints."""
 
-from contextvars import Token as _CtxToken
+from contextvars import Token
 import logging
 import re
+from typing import TypeAlias, TypeGuard
 
 from fastapi import (
     APIRouter,
@@ -29,6 +30,9 @@ _SECURE = bool(load_auth_settings()["cookie_secure"])
 _SAMESITE = "none" if _SECURE else "lax"
 
 from deeptutor.multi_user.context import set_current_user, user_from_token_payload
+from deeptutor.multi_user.models import CurrentUser
+
+_CtxToken: TypeAlias = Token[CurrentUser | None]
 from deeptutor.multi_user.paths import local_admin_user
 from deeptutor.services.auth import (
     AUTH_ENABLED,
@@ -288,6 +292,10 @@ class _WsAuthFailed:
 ws_auth_failed: _WsAuthFailed = _WsAuthFailed()
 
 
+def is_ws_auth_token(value: _CtxToken | _WsAuthFailed) -> TypeGuard[_CtxToken]:
+    return not isinstance(value, _WsAuthFailed)
+
+
 async def ws_require_auth(ws: WebSocket) -> _CtxToken | _WsAuthFailed:
     """Authenticate a WebSocket connection and set the user ContextVar.
 
@@ -301,7 +309,7 @@ async def ws_require_auth(ws: WebSocket) -> _CtxToken | _WsAuthFailed:
     Usage::
 
         user_token = await ws_require_auth(ws)
-        if user_token is ws_auth_failed:
+        if not is_ws_auth_token(user_token):
             return
         await ws.accept()
         try:

@@ -1,0 +1,6 @@
+short_description: "檢視使用者的筆記本（不傳參數 → 列出全部）或某個筆記本內的所有記錄（傳 notebook_id → 列出 records）。"
+when_to_use: "在呼叫 `write_note` 的 edit 模式之前先呼叫此工具拿到 record_id。使用者用描述引用某本筆記本但你需要它的精確 id 時也用此工具。"
+input_format: "{} 列總覽；{\"notebook_id\": \"system prompt 列出的或先前 index 回傳的 id\"} 鑽取單本筆記本的記錄。"
+guideline: "Index 模式回傳 id + name + 記錄數；鑽取模式回傳 record id + 標題 + summary + 日期（按時間倒序，最多 80 條）。如果 system prompt 的 notebook 索引已經能回答你的問題（筆記本名字 / id），就不要再呼叫此工具——只在確實需要新資訊（例如發現 record_id 以便 edit，或使用者中途新建了筆記本）時呼叫。"
+note: "使用者沒有任何筆記本時此工具不會出現。輸出是 markdown，可以直接引用片段回覆使用者。"
+phase: "exploration"

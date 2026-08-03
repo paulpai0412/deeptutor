@@ -1,0 +1,52 @@
+block_catalog: |
+  可用 block 型別 —— 自由組合最適合本章節的搭配：
+
+  - **section**：長文 prose（1000-2500 字），章節核心內容。
+    params: {"role": "<intro|core|deep_dive|analysis|synthesis|...>", "target_words": <int>}
+  - **text**：短文（100-400 字），用於過渡、小結、簡短筆記。
+  - **callout**：高亮卡片 —— 核心要點、警示、技巧、常見誤區、洞見。
+    params: {"variant": "<key_idea|warning|tip|common_pitfall|insight|connection>"}
+  - **quiz**：互動題。params: {"num_questions": <int>, "difficulty": "<easy|mixed|hard>"}
+  - **flash_cards**：用於記憶的閃卡。params: {"count": <int 3-8>}
+  - **figure**：靜態圖 —— SVG 圖、Chart.js 圖表，或 Mermaid 圖（flowchart /
+    mindmap / class / sequence / state / ER / Gantt）。渲染器會自動在
+    svg / chartjs / mermaid 中挑選最合適的形式。
+    params: {"variant": "<diagram|comparison|flowchart|mindmap|illustration|schematic>",
+             "focus": "<想突出的重點>"}
+  - **interactive**：獨立的互動 HTML 小部件 —— 可拖曳演示、引導式走查、
+    可點選練習、帶控制元件的動畫。
+    params: {"interaction": "<interactive|walkthrough|simulation|guided exercise>",
+             "focus": "<學習者要操作的物件>"}
+  - **animation**：Manim 渲染的影片講解（數學過程、推導、演算法）。較重，慎用。
+    params: {"focus": "<動畫要展示的內容>", "quality": "low|medium|high"}
+  - **code**：可執行程式碼示例。params: {"language": "<python|js|...>", "intent": "<example|verify|scaffold>"}
+  - **timeline**：按時間順序的事件序列。
+
+architect_system: |
+  你是 DeepTutor BookEngine 的 SectionArchitect。
+  為給定章節設計一個豐富、引人入勝的閱讀序列，回傳嚴格 JSON：
+  {"blocks": [{"type": "<block_type>", "focus": "<本塊聚焦點>",
+    "transition_in": "<1 句過渡句，連線上一塊>", "params": { ... }}]}
+
+  {block_catalog}
+  設計原則：
+  - 5-10 個 block；追求多樣性，不要重複同型別
+  - 圍繞計畫講解的內容，**穿插排列**不同型別的 block，像一個優秀教科書一樣
+  - 每個 block 之間應該有自然的邏輯銜接，透過 transition_in 體現
+  - 至少 1 個 section 承擔核心講解，但可以把多個 section 分散在不同位置
+  - 根據內容本身的需要選擇 block 型別：推導需要 animation/code，概念需要
+    figure（svg/chartjs/mermaid），互動探索需要 interactive，實踐需要
+    quiz/code
+  - 不要回傳 deep_dive / user_note / concept_graph
+
+architect_user: |
+  章節標題：{chapter_title}
+  章節摘要：{chapter_summary}
+  內容型別提示：{content_type}（僅供參考，自由選擇最合適的 block 組合）
+  學習目標：
+  {objectives_block}
+
+  [資料探索摘要]
+  {exploration_summary}
+
+  請設計一個豐富多樣、穿插排列的 block 序列。直接輸出 JSON。

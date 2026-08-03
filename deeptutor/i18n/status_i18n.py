@@ -44,14 +44,6 @@ class StatusI18n:
             language=language,
         )
         raw = prompts.get("status") if isinstance(prompts, dict) else None
-        if isinstance(raw, dict) and str(language or "").lower().replace("_", "-") in {
-            "zh-tw",
-            "zh-hant",
-            "zh-hk",
-        }:
-            from deeptutor.i18n.zh_tw import convert_nested
-
-            raw = convert_nested(raw)
         self._strings: dict[str, Any] = raw if isinstance(raw, dict) else {}
 
     def t(self, key: str, default: str = "", /, **kwargs: Any) -> str:

@@ -14,7 +14,7 @@ from typing import Any
 
 from ..models import BlockType, SourceAnchor
 from ._llm_writer import llm_json
-from ._prompts import get_book_prompt, load_book_prompts
+from ._prompts import book_text, get_book_prompt, load_book_prompts
 from .base import BlockContext, BlockGenerator, GenerationFailure
 
 
@@ -29,7 +29,7 @@ class DeepDiveGenerator(BlockGenerator):
         chapter_summary = params.get("chapter_summary", ctx.chapter.summary)
 
         prompts = load_book_prompts("deep_dive", ctx.language)
-        none_label = "(无)" if ctx.language == "zh" else "(none)"
+        none_label = book_text(ctx.language, en="(none)", zh="(无)", zh_tw="(無)")
         user_prompt = get_book_prompt(prompts, "user_template").format(
             chapter_title=chapter_title,
             chapter_summary=chapter_summary or none_label,
@@ -59,11 +59,9 @@ class DeepDiveGenerator(BlockGenerator):
                 )
         if not suggestions:
             raise GenerationFailure("LLM returned no deep-dive suggestions.")
-        return (
-            {"suggestions": suggestions},
-            [],
-            data.get("_metadata") if isinstance(data.get("_metadata"), dict) else {},
-        )
+        raw_metadata = data.get("_metadata")
+        metadata = raw_metadata if isinstance(raw_metadata, dict) else {}
+        return {"suggestions": suggestions}, [], metadata
 
 
 __all__ = ["DeepDiveGenerator"]

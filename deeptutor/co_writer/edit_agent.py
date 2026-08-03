@@ -11,6 +11,7 @@ import uuid
 
 from deeptutor.agents.base_agent import BaseAgent
 from deeptutor.co_writer.storage import _atomic_write_json
+from deeptutor.core.i18n import parse_language
 from deeptutor.runtime.registry.tool_registry import get_tool_registry
 from deeptutor.services.llm import clean_thinking_tags
 from deeptutor.services.path_service import get_path_service
@@ -86,8 +87,7 @@ def save_tool_call(call_id: str, tool_type: str, data: dict[str, Any]) -> str:
     ensure_dirs()
     filename = f"{call_id}_{tool_type}.json"
     filepath = tool_calls_dir() / filename
-    with open(filepath, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
+    _atomic_write_json(filepath, data)
     return str(filepath)
 
 
@@ -154,6 +154,9 @@ class EditAgent(BaseAgent):
         system_template = self.get_prompt(
             "system",
             "You are an expert editor and writing assistant.\n\nAvailable reference tools:\n{available_tools}",
+        ) or (
+            "You are an expert editor and writing assistant.\n\n"
+            "Available reference tools:\n{available_tools}"
         )
         system_prompt = system_template.format(available_tools=self._build_available_tools_text())
 
@@ -163,13 +166,16 @@ class EditAgent(BaseAgent):
         action_template = self.get_prompt(
             "action_template",
             "{action_verb} the following text based on the user's instruction.\n\nUser Instruction: {instruction}\n\n",
+        ) or (
+            "{action_verb} the following text based on the user's instruction.\n\n"
+            "User Instruction: {instruction}\n\n"
         )
         user_prompt = action_template.format(action_verb=action_verb, instruction=instruction)
 
         if context:
             context_template = self.get_prompt(
                 "context_template", "Reference Context ({source_label}):\n{context}\n\n"
-            )
+            ) or "Reference Context ({source_label}):\n{context}\n\n"
             user_prompt += context_template.format(
                 context=context,
                 source_label=self._get_source_label(source),
@@ -178,6 +184,9 @@ class EditAgent(BaseAgent):
         text_template = self.get_prompt(
             "user_template",
             "Target Text to Edit:\n{text}\n\nOutput only the edited text, without quotes or explanations.",
+        ) or (
+            "Target Text to Edit:\n{text}\n\n"
+            "Output only the edited text, without quotes or explanations."
         )
         user_prompt += text_template.format(text=text)
 
@@ -297,10 +306,10 @@ class EditAgent(BaseAgent):
         """
         operation_id = datetime.now().strftime("%Y%m%d_%H%M%S") + "_" + uuid.uuid4().hex[:6]
 
-        system_prompt = self.get_prompt("auto_mark_system", "")
+        system_prompt = self.get_prompt("auto_mark_system", "") or ""
         user_template = self.get_prompt(
             "auto_mark_user_template", "Process the following text:\n{text}"
-        )
+        ) or "Process the following text:\n{text}"
         user_prompt = user_template.format(text=text)
 
         self.logger.info("Calling LLM for auto-mark...")
@@ -335,10 +344,11 @@ class EditAgent(BaseAgent):
     def _build_available_tools_text(self) -> str:
         tool_names = [name for name in self.enabled_tools if name in {"rag", "web_search"}]
         if not tool_names:
-            return (
-                "（当前未启用外部参考工具）"
-                if str(self.language).lower().startswith("zh")
-                else "(no external reference tools enabled)"
+            language = parse_language(self.language)
+            if language == "zh-TW":
+                return "（目前未啟用外部參考工具）"
+            return "（当前未启用外部参考工具）" if language == "zh" else (
+                "(no external reference tools enabled)"
             )
         return self._tool_registry.build_prompt_text(
             tool_names,
@@ -350,10 +360,13 @@ class EditAgent(BaseAgent):
         labels = {
             "en": {"rag": "knowledge base", "web": "web search"},
             "zh": {"rag": "知识库", "web": "网页搜索"},
+            "zh-TW": {"rag": "知識庫", "web": "網頁搜尋"},
         }
-        lang = "zh" if str(self.language).lower().startswith("zh") else "en"
+        lang = parse_language(self.language)
         if source in labels[lang]:
             return labels[lang][source]
+        if lang == "zh-TW":
+            return "參考資料"
         return "reference" if lang == "en" else "参考资料"
 
 

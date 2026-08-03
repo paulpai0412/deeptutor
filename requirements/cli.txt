@@ -49,6 +49,7 @@ arxiv>=2.0.0
 
 # --- Document text extraction (chat attachments) + office-skill authoring libs ---
 python-docx>=1.1.0
+legacy-doc>=0.2.1,<1.0.0
 openpyxl>=3.1.0
 python-pptx>=1.0.0
 pypdf>=4.0.0

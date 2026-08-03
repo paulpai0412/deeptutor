@@ -1,0 +1,6 @@
+short_description: "載入擴充套件工具（如 MCP 伺服器工具），使其在本會話中可呼叫。"
+when_to_use: "當任務需要「Extended Tools」清單中尚未載入的工具時使用。未載入就直接呼叫擴充套件工具會失敗。"
+input_format: "`names` — 字串陣列，工具名須與 Extended Tools 清單完全一致。"
+guideline: "只載入目前任務需要的工具，不要整批載入。載入後整個會話內持續可用，無需重複載入。"
+note: "若回傳 unknown，回到 Extended Tools 清單核對名字拼寫。"
+phase: "exploration"

@@ -1,0 +1,3 @@
+generate_ideas:
+  system: "請根據使用者主題和約束產生多樣化的題目創意。"
+  user: "主題：{topic}"

@@ -97,7 +97,7 @@ class DocumentValidator:
         exts_to_check = allowed_extensions or DocumentValidator.ALLOWED_EXTENSIONS
         if ext not in exts_to_check:
             raise ValueError(
-                f"Unsupported file type: {ext}. Allowed types: {', '.join(exts_to_check)}"
+                f"Unsupported file type: {ext}. Allowed types: {', '.join(sorted(exts_to_check))}"
             )
 
         # Additional MIME type validation for the legacy/default policy. For
@@ -158,10 +158,13 @@ class DocumentValidator:
         if not os.path.isfile(path):
             raise ValueError(f"Not a file: {path}")
 
-        if not os.access(path, os.R_OK):
-            raise ValueError(f"File not readable: {path}")
+        try:
+            size = os.path.getsize(path)
+            with open(path, "rb"):
+                pass
+        except OSError as exc:
+            raise ValueError(f"File not readable: {path}") from exc
 
-        size = os.path.getsize(path)
         filename = os.path.basename(path)
 
         # Validate using validate_upload_safety

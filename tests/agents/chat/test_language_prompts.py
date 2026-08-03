@@ -41,15 +41,18 @@ def test_agentic_chat_final_prompt_uses_selected_language(
 
     ctx = UnifiedContext()
     zh_prompt = AgenticChatPipeline(language="zh")._build_system_prompt([], ctx)
+    zh_tw_prompt = AgenticChatPipeline(language="zh-TW")._build_system_prompt([], ctx)
     en_prompt = AgenticChatPipeline(language="en")._build_system_prompt([], ctx)
 
     # Prompt blocks are phase-specific, but the shared language directive
     # still runs at the end, so per-language imperatives must surface.
     assert "请严格使用中文" in zh_prompt
+    assert "請嚴格使用繁體中文（臺灣）" in zh_tw_prompt
     assert "Write ALL reader-facing text" in en_prompt
     # Persona phrasing differs by language so the prompts are not just
     # English text with a Chinese tail appended.
     assert "你是 DeepTutor" in zh_prompt
+    assert "你是 DeepTutor" in zh_tw_prompt
     assert "You are DeepTutor" in en_prompt
 
 
@@ -75,6 +78,31 @@ def test_mastery_plugin_system_prompt_uses_localized_fallback(
     assert "精通导师模式" in zh_prompt
     assert "## mastery_tutor" in en_prompt
     assert "Mastery Tutor mode" in en_prompt
+
+
+@pytest.mark.asyncio
+async def test_base_agent_stream_applies_traditional_chinese_directive(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, str] = {}
+
+    async def fake_stream(**kwargs):
+        captured["system_prompt"] = str(kwargs["system_prompt"])
+        yield "測試"
+
+    monkeypatch.setattr("deeptutor.agents.base_agent.llm_stream", fake_stream)
+    agent = ChatAgent(language="zh-TW", config={})
+
+    chunks = [
+        chunk
+        async for chunk in agent.stream_llm(
+            user_prompt="請說明",
+            system_prompt="You are a tutor.",
+        )
+    ]
+
+    assert chunks == ["測試"]
+    assert "請嚴格使用繁體中文（臺灣）" in captured["system_prompt"]
 
 
 def test_legacy_chat_agent_system_prompt_uses_selected_language() -> None:

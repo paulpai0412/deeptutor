@@ -26,6 +26,7 @@ from __future__ import annotations
 
 from contextlib import suppress
 from dataclasses import dataclass, field
+import inspect
 import logging
 from typing import Any, Callable
 
@@ -38,6 +39,7 @@ from deeptutor.core.agentic import (
 )
 from deeptutor.core.agentic.messages import assistant_message_with_tool_calls
 from deeptutor.core.context import UnifiedContext
+from deeptutor.core.i18n import parse_language
 from deeptutor.core.stream_bus import StreamBus
 from deeptutor.core.trace import build_trace_metadata, merge_trace_metadata, new_call_id
 from deeptutor.runtime.registry.tool_registry import get_tool_registry
@@ -67,13 +69,13 @@ CHARS_PER_SOURCE = 8000
 TOTAL_CHARS = 48000
 BRIEFING_MAX_TOKENS = 1400
 
-# Maps a manifest source-id prefix to a human kind label (en, zh).
-_KIND_BY_PREFIX: dict[str, tuple[str, str]] = {
-    "hs-": ("Conversation transcript", "对话记录"),
-    "nb-": ("Notebook record", "笔记本记录"),
-    "bk-": ("Book excerpt", "书籍节选"),
-    "qb-": ("Question-bank entry", "题库条目"),
-    "at-": ("Document", "文档"),
+# Maps a manifest source-id prefix to a human kind label (en, zh, zh-TW).
+_KIND_BY_PREFIX: dict[str, tuple[str, str, str]] = {
+    "hs-": ("Conversation transcript", "对话记录", "對話記錄"),
+    "nb-": ("Notebook record", "笔记本记录", "筆記本記錄"),
+    "bk-": ("Book excerpt", "书籍节选", "書籍節選"),
+    "qb-": ("Question-bank entry", "题库条目", "題庫條目"),
+    "at-": ("Document", "文档", "文件"),
 }
 
 
@@ -88,7 +90,7 @@ class ContextExplorer:
     """Investigate the turn's attached sources and return an objective briefing."""
 
     def __init__(self, *, language: str, prompts: dict[str, Any]) -> None:
-        self.language = "zh" if str(language or "en").lower().startswith("zh") else "en"
+        self.language = parse_language(language)
         self._prompts = prompts or {}
         cfg = get_llm_config()
         self.model = getattr(cfg, "model", None)
@@ -315,7 +317,9 @@ class ContextExplorer:
             close = getattr(response_stream, "close", None)
             if callable(close):
                 with suppress(Exception):
-                    await close()
+                    result = close()
+                    if inspect.isawaitable(result):
+                        await result
 
         tool_calls = [
             {
@@ -454,9 +458,11 @@ class ContextExplorer:
         return "\n\n".join(blocks)
 
     def _kind_label(self, sid: str) -> str:
-        for prefix, (en, zh) in _KIND_BY_PREFIX.items():
+        for prefix, (en, zh, zh_tw) in _KIND_BY_PREFIX.items():
             if sid.startswith(prefix):
-                return zh if self.language == "zh" else en
+                return zh_tw if self.language == "zh-TW" else zh if self.language == "zh" else en
+        if self.language == "zh-TW":
+            return "來源"
         return "来源" if self.language == "zh" else "Source"
 
     def _clip(self, text: str, limit: int) -> str:
@@ -465,7 +471,13 @@ class ContextExplorer:
             return ""
         if len(text) <= limit:
             return text
-        note = "\n…（已截断）" if self.language == "zh" else "\n…(truncated)"
+        note = (
+            "\n…（已截斷）"
+            if self.language == "zh-TW"
+            else "\n…（已截断）"
+            if self.language == "zh"
+            else "\n…(truncated)"
+        )
         return text[:limit].rstrip() + note
 
     # ---- shared helpers --------------------------------------------------
@@ -512,7 +524,13 @@ class ContextExplorer:
     def _status_exploring(self) -> str:
         return self._t(
             "status.exploring",
-            default="上下文调查" if self.language == "zh" else "Context exploration",
+            default=(
+                "上下文調查"
+                if self.language == "zh-TW"
+                else "上下文调查"
+                if self.language == "zh"
+                else "Context exploration"
+            ),
         )
 
     def _briefing_header(self) -> str:

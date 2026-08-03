@@ -20,6 +20,7 @@ import {
   resetPetGrowth,
   subscribePetGrowth,
 } from '@/lib/pet-growth'
+import { selectLocalizedText } from '@/i18n/localized-text'
 import { DISABLED_PET_ID, PETS, getPet } from '@/lib/pets'
 
 const SORTED_PETS = [...PETS].sort((a, b) => a.displayName.localeCompare(b.displayName))
@@ -30,8 +31,8 @@ function formatSignedXp(xp: number): string {
 
 export default function PetGrowthPage() {
   const { language, pet, setPet } = useAppShell()
-  const zh = language.toLowerCase().startsWith('zh')
-  const tr = (zhText: string, enText: string) => (zh ? zhText : enText)
+  const tr = (zh: string, en: string, zhTW: string) =>
+    selectLocalizedText(language, { en, zh, zhTW })
   const growth = useSyncExternalStore(subscribePetGrowth, readPetGrowth, readPetGrowthServer)
   const selectedPet = getPet(pet)
   const progress = useMemo(() => petLevelProgress(growth.xp), [growth.xp])
@@ -50,13 +51,17 @@ export default function PetGrowthPage() {
   const claimMission = (mission: (typeof PET_MISSIONS)[number]) => {
     claimPetMission({
       id: mission.id,
-      label: tr(mission.labelZh, mission.labelEn),
+      label: tr(mission.labelZh, mission.labelEn, mission.labelZhTW),
       xp: mission.xp,
     })
   }
 
   const reset = () => {
-    if (!window.confirm(tr('確定要重置寵物成長進度嗎？', 'Reset pet growth progress?'))) {
+    if (
+      !window.confirm(
+        tr('确定要重置宠物成长进度吗？', 'Reset pet growth progress?', '確定要重置寵物成長進度嗎？')
+      )
+    ) {
       return
     }
     resetPetGrowth()
@@ -69,15 +74,16 @@ export default function PetGrowthPage() {
           <div>
             <div className="mb-2 inline-flex items-center gap-2 rounded-full bg-amber-500/10 px-3 py-1 text-[12px] font-medium text-amber-700 dark:text-amber-300">
               <PawPrint size={14} />
-              {tr('寵物養成', 'Pet care')}
+              {tr('宠物养成', 'Pet care', '寵物養成')}
             </div>
             <h1 className="font-serif text-[28px] font-semibold tracking-tight text-[var(--foreground)]">
-              {tr('寵物中心', 'Pet Center')}
+              {tr('宠物中心', 'Pet Center', '寵物中心')}
             </h1>
             <p className="mt-2 max-w-2xl text-[13.5px] leading-relaxed text-[var(--muted-foreground)]">
               {tr(
-                '用 Pet XP 把每天學習變成養成遊戲：答題、複習和連續 Study Day 會讓寵物升級；答錯或缺席會扣一點 XP，讓孩子看見努力的回饋。',
-                'Turn study into a growth loop with Pet XP: answers, review, and Study Day streaks level up the pet; wrong answers or missed days cost a little XP so effort has visible feedback.'
+                '用 Pet XP 把每天学习变成养成游戏：答题、复习和连续 Study Day 会让宠物升级；答错或缺席会扣一点 XP，让孩子看见努力的反馈。',
+                'Turn study into a growth loop with Pet XP: answers, review, and Study Day streaks level up the pet; wrong answers or missed days cost a little XP so effort has visible feedback.',
+                '用 Pet XP 把每天學習變成養成遊戲：答題、複習和連續 Study Day 會讓寵物升級；答錯或缺席會扣一點 XP，讓孩子看見努力的回饋。'
               )}
             </p>
           </div>
@@ -87,7 +93,7 @@ export default function PetGrowthPage() {
             className="inline-flex items-center gap-1.5 self-start rounded-lg border border-[var(--border)]/70 px-3 py-1.5 text-[12.5px] text-[var(--muted-foreground)] transition-colors hover:border-[var(--border)] hover:text-[var(--foreground)]"
           >
             <RotateCcw size={13} />
-            {tr('重置進度', 'Reset progress')}
+            {tr('重置进度', 'Reset progress', '重置進度')}
           </button>
         </header>
 
@@ -116,28 +122,29 @@ export default function PetGrowthPage() {
               </div>
               <div className="min-w-0 flex-1">
                 <div className="text-[13px] text-[var(--muted-foreground)]">
-                  {tr('目前夥伴', 'Current buddy')}
+                  {tr('当前伙伴', 'Current buddy', '目前夥伴')}
                 </div>
                 <div className="mt-1 flex flex-wrap items-center gap-2">
                   <h2 className="text-[24px] font-semibold tracking-tight text-[var(--foreground)]">
-                    {selectedPet?.displayName ?? tr('尚未選擇', 'Not selected')}
+                    {selectedPet?.displayName ?? tr('尚未选择', 'Not selected', '尚未選擇')}
                   </h2>
                   <span className="rounded-full bg-amber-500/10 px-2.5 py-1 text-[12px] font-medium text-amber-700 dark:text-amber-300">
-                    {tr(appearance.labelZh, appearance.labelEn)}
+                    {tr(appearance.labelZh, appearance.labelEn, appearance.labelZhTW)}
                   </span>
                 </div>
                 <p className="mt-2 text-[13px] leading-relaxed text-[var(--muted-foreground)]">
                   {selectedPet?.description ??
                     tr(
-                      '選擇一隻寵物，讓它陪孩子一起完成每日任務。',
-                      'Choose a pet to grow alongside daily study missions.'
+                      '选择一只宠物，让它陪孩子一起完成每日任务。',
+                      'Choose a pet to grow alongside daily study missions.',
+                      '選擇一隻寵物，讓它陪孩子一起完成每日任務。'
                     )}
                 </p>
 
                 <div className="mt-5 grid grid-cols-3 gap-2">
                   <StatCard
                     icon={<Trophy size={15} />}
-                    label={tr('等級', 'Level')}
+                    label={tr('等级', 'Level', '等級')}
                     value={String(progress.level)}
                   />
                   <StatCard
@@ -147,16 +154,17 @@ export default function PetGrowthPage() {
                   />
                   <StatCard
                     icon={<Flame size={15} />}
-                    label={tr('連續', 'Streak')}
-                    value={tr(`${growth.streak} 天`, `${growth.streak}d`)}
+                    label={tr('连续', 'Streak', '連續')}
+                    value={tr(`${growth.streak} 天`, `${growth.streak}d`, `${growth.streak} 天`)}
                   />
                 </div>
 
                 <div className="mt-5">
                   <div className="mb-1.5 flex justify-between text-[12px] text-[var(--muted-foreground)]">
-                    <span>{tr('距離下一級', 'Next level')}</span>
+                    <span>{tr('距离下一级', 'Next level', '距離下一級')}</span>
                     <span>
                       {tr(
+                        `${progress.current}/${progress.needed} XP`,
                         `${progress.current}/${progress.needed} XP`,
                         `${progress.current}/${progress.needed} XP`
                       )}
@@ -177,13 +185,14 @@ export default function PetGrowthPage() {
             <div className="flex items-center gap-2">
               <Gift size={18} className="text-amber-600 dark:text-amber-300" />
               <h2 className="text-[17px] font-semibold text-[var(--foreground)]">
-                {tr('今日成長任務', "Today's growth missions")}
+                {tr('今日成长任务', "Today's growth missions", '今日成長任務')}
               </h2>
             </div>
             <p className="mt-1 text-[12.5px] leading-relaxed text-[var(--muted-foreground)]">
               {tr(
-                '每項每天只能領取一次。實際做題提交也會自動記錄 Pet XP。',
-                'Each can be claimed once per day. Quiz submissions also record Pet XP automatically.'
+                '每项每天只能领取一次。实际做题提交也会自动记录 Pet XP。',
+                'Each can be claimed once per day. Quiz submissions also record Pet XP automatically.',
+                '每項每天只能領取一次。實際做題提交也會自動記錄 Pet XP。'
               )}
             </p>
             <div className="mt-4 space-y-2.5">
@@ -203,10 +212,11 @@ export default function PetGrowthPage() {
                   >
                     <span>
                       <span className="block text-[13.5px] font-medium text-[var(--foreground)]">
-                        {tr(mission.labelZh, mission.labelEn)}
+                        {tr(mission.labelZh, mission.labelEn, mission.labelZhTW)}
                       </span>
                       <span className="mt-0.5 block text-[12px] text-[var(--muted-foreground)]">
                         {tr(
+                          `${formatSignedXp(mission.xp)} Pet XP`,
                           `${formatSignedXp(mission.xp)} Pet XP`,
                           `${formatSignedXp(mission.xp)} Pet XP`
                         )}
@@ -223,18 +233,19 @@ export default function PetGrowthPage() {
         <section className="mt-5 grid gap-5 lg:grid-cols-[1fr_0.75fr]">
           <div className="rounded-3xl border border-[var(--border)]/70 bg-[var(--card)] p-5 shadow-sm">
             <h2 className="text-[17px] font-semibold text-[var(--foreground)]">
-              {tr('選擇陪伴寵物', 'Choose companion pet')}
+              {tr('选择陪伴宠物', 'Choose companion pet', '選擇陪伴寵物')}
             </h2>
             <p className="mt-1 text-[12.5px] text-[var(--muted-foreground)]">
               {tr(
-                '外觀設定中的寵物選擇已移到這裡，成長與換寵物在同一頁完成。',
-                'The pet picker from Appearance now lives here with growth controls.'
+                '外观设置中的宠物选择已移到这里，成长与换宠物在同一页完成。',
+                'The pet picker from Appearance now lives here with growth controls.',
+                '外觀設定中的寵物選擇已移到這裡，成長與換寵物在同一頁完成。'
               )}
             </p>
             <div className="mt-4 grid grid-cols-3 gap-3 sm:grid-cols-5">
               <PetPickerCard
                 pet={null}
-                label={tr('關閉', 'Disabled')}
+                label={tr('关闭', 'Disabled', '關閉')}
                 selected={pet === DISABLED_PET_ID}
                 onSelectAction={selectPet}
               />
@@ -253,7 +264,7 @@ export default function PetGrowthPage() {
           <div className="space-y-5">
             <div className="rounded-3xl border border-[var(--border)]/70 bg-[var(--card)] p-5 shadow-sm">
               <h2 className="text-[17px] font-semibold text-[var(--foreground)]">
-                {tr('成就徽章', 'Achievements')}
+                {tr('成就徽章', 'Achievements', '成就徽章')}
               </h2>
               <div className="mt-3 flex flex-wrap gap-2">
                 {badges.length > 0 ? (
@@ -268,8 +279,9 @@ export default function PetGrowthPage() {
                 ) : (
                   <p className="text-[12.5px] text-[var(--muted-foreground)]">
                     {tr(
-                      '先拿到 80 XP，寵物就會獲得第一個升級徽章。',
-                      'Reach 80 XP to unlock the first level-up badge.'
+                      '先拿到 80 XP，宠物就会获得第一个升级徽章。',
+                      'Reach 80 XP to unlock the first level-up badge.',
+                      '先拿到 80 XP，寵物就會獲得第一個升級徽章。'
                     )}
                   </p>
                 )}
@@ -278,7 +290,7 @@ export default function PetGrowthPage() {
 
             <div className="rounded-3xl border border-[var(--border)]/70 bg-[var(--card)] p-5 shadow-sm">
               <h2 className="text-[17px] font-semibold text-[var(--foreground)]">
-                {tr('最近記錄', 'Recent activity')}
+                {tr('最近记录', 'Recent activity', '最近記錄')}
               </h2>
               <div className="mt-3 space-y-2">
                 {growth.recent.length > 0 ? (
@@ -297,13 +309,21 @@ export default function PetGrowthPage() {
                             : 'text-rose-600 dark:text-rose-300'
                         }
                       >
-                        {tr(`${formatSignedXp(item.xp)} XP`, `${formatSignedXp(item.xp)} XP`)}
+                        {tr(
+                          `${formatSignedXp(item.xp)} XP`,
+                          `${formatSignedXp(item.xp)} XP`,
+                          `${formatSignedXp(item.xp)} XP`
+                        )}
                       </span>
                     </div>
                   ))
                 ) : (
                   <p className="text-[12.5px] text-[var(--muted-foreground)]">
-                    {tr('完成一個任務開始養成。', 'Complete a mission to start growing.')}
+                    {tr(
+                      '完成一个任务开始养成。',
+                      'Complete a mission to start growing.',
+                      '完成一個任務開始養成。'
+                    )}
                   </p>
                 )}
               </div>

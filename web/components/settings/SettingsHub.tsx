@@ -1,23 +1,19 @@
-"use client";
+'use client'
 
-import { useCallback, useEffect, useMemo, useState } from "react";
-import Link from "next/link";
-import { useTranslation } from "react-i18next";
-import { ChevronRight, Rocket, type LucideIcon } from "lucide-react";
+import { useCallback, useEffect, useMemo, useState } from 'react'
+import Link from 'next/link'
+import { useTranslation } from 'react-i18next'
+import { ChevronRight, Rocket, type LucideIcon } from 'lucide-react'
 
-import { apiFetch, apiUrl } from "@/lib/api";
+import { apiFetch, apiUrl } from '@/lib/api'
 import {
   serviceReadiness,
   useSettings,
   type ServiceReadiness,
-} from "@/components/settings/SettingsContext";
-import SettingsStatusPanel from "@/components/settings/SettingsStatusPanel";
-import {
-  SETTINGS_CATEGORIES,
-  type Lang,
-  type SettingsCategory,
-} from "@/lib/settings-nav";
-import { toTaiwanChinese } from "@/lib/taiwan-zh";
+} from '@/components/settings/SettingsContext'
+import SettingsStatusPanel from '@/components/settings/SettingsStatusPanel'
+import { SETTINGS_CATEGORIES, type Lang, type SettingsCategory } from '@/lib/settings-nav'
+import { selectLocalizedText } from '@/i18n/localized-text'
 
 /**
  * Settings hub — the landing page of `/settings`.
@@ -30,24 +26,19 @@ import { toTaiwanChinese } from "@/lib/taiwan-zh";
  */
 
 type NetworkPreview = {
-  apiBase: string;
-};
+  apiBase: string
+}
 
 export default function SettingsHub() {
-  const { i18n } = useTranslation();
-  const zh = i18n.language?.toLowerCase().startsWith("zh");
-  const tr = useCallback(
-    (l: Lang) => (zh ? toTaiwanChinese(l.zh) : l.en),
-    [zh],
-  );
+  const { i18n } = useTranslation()
+  const tr = useCallback((text: Lang) => selectLocalizedText(i18n.language, text), [i18n.language])
 
-  const { catalog, catalogEditable, diagnosticsResults, startTour } =
-    useSettings();
+  const { catalog, catalogEditable, diagnosticsResults, startTour } = useSettings()
 
   // Model preview: how many of the model-service leaves are configured.
   const modelStats = useMemo(() => {
-    const cat = SETTINGS_CATEGORIES.find((c) => c.key === "models");
-    const services = (cat?.children ?? []).filter((l) => l.service);
+    const cat = SETTINGS_CATEGORIES.find(c => c.key === 'models')
+    const services = (cat?.children ?? []).filter(l => l.service)
     if (catalogEditable !== true) {
       return {
         total: services.length,
@@ -55,54 +46,55 @@ export default function SettingsHub() {
         passed: 0,
         failed: 0,
         states: [] as ServiceReadiness[],
-      };
+      }
     }
-    const states = services.map((leaf) =>
-      serviceReadiness(catalog, leaf.service!, diagnosticsResults),
-    );
+    const states = services.map(leaf =>
+      serviceReadiness(catalog, leaf.service!, diagnosticsResults)
+    )
     return {
       total: services.length,
-      configured: states.filter((state) => state !== "not_configured").length,
-      passed: states.filter((state) => state === "passed").length,
-      failed: states.filter((state) => state === "failed").length,
+      configured: states.filter(state => state !== 'not_configured').length,
+      passed: states.filter(state => state === 'passed').length,
+      failed: states.filter(state => state === 'failed').length,
       states,
-    };
-  }, [catalog, catalogEditable, diagnosticsResults]);
+    }
+  }, [catalog, catalogEditable, diagnosticsResults])
 
   // Network preview: a guarded peek at the effective browser API base. Fails
   // quietly (non-admins get 403) → the block falls back to its blurb.
-  const [network, setNetwork] = useState<NetworkPreview | null>(null);
+  const [network, setNetwork] = useState<NetworkPreview | null>(null)
   useEffect(() => {
-    let cancelled = false;
-    (async () => {
+    let cancelled = false
+    ;(async () => {
       try {
-        const res = await apiFetch(apiUrl("/api/v1/settings/network"));
-        if (!res.ok) return;
+        const res = await apiFetch(apiUrl('/api/v1/settings/network'))
+        if (!res.ok) return
         const data = (await res.json()) as {
-          effective?: { browser_api_base?: string };
-        };
-        if (cancelled) return;
-        setNetwork({ apiBase: data.effective?.browser_api_base || "" });
+          effective?: { browser_api_base?: string }
+        }
+        if (cancelled) return
+        setNetwork({ apiBase: data.effective?.browser_api_base || '' })
       } catch {
         /* leave null → block shows its blurb */
       }
-    })();
+    })()
     return () => {
-      cancelled = true;
-    };
-  }, []);
+      cancelled = true
+    }
+  }, [])
 
   return (
     <div>
       <header className="mb-7 flex items-start justify-between gap-4">
         <div className="min-w-0">
           <h1 className="font-serif text-[24px] font-semibold leading-tight tracking-tight text-[var(--foreground)]">
-            {tr({ zh: "设置", en: "Settings" })}
+            {tr({ zh: '设置', zhTW: '設定', en: 'Settings' })}
           </h1>
           <p className="mt-1.5 max-w-xl text-[13px] leading-relaxed text-[var(--muted-foreground)]">
             {tr({
-              zh: "管理外观、模型与服务、知识库、聊天与记忆。",
-              en: "Manage appearance, models and services, knowledge base, chat, and memory.",
+              zh: '管理外观、模型与服务、知识库、聊天与记忆。',
+              zhTW: '管理外觀、模型與服務、知識庫、聊天與記憶。',
+              en: 'Manage appearance, models and services, knowledge base, chat, and memory.',
             })}
           </p>
         </div>
@@ -112,25 +104,25 @@ export default function SettingsHub() {
           className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-[var(--border)]/60 px-3 py-1.5 text-[12.5px] font-medium text-[var(--muted-foreground)] transition-colors hover:border-[var(--border)] hover:text-[var(--foreground)]"
         >
           <Rocket size={13} />
-          {tr({ zh: "引导", en: "Tour" })}
+          {tr({ zh: '引导', zhTW: '引導', en: 'Tour' })}
         </button>
       </header>
 
       <SettingsStatusPanel />
 
       <div className="mt-5 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-        {SETTINGS_CATEGORIES.map((category) => (
+        {SETTINGS_CATEGORIES.map(category => (
           <CategoryBlock
             key={category.key}
             category={category}
             tr={tr}
-            modelStats={category.key === "models" ? modelStats : undefined}
-            network={category.key === "network" ? network : undefined}
+            modelStats={category.key === 'models' ? modelStats : undefined}
+            network={category.key === 'network' ? network : undefined}
           />
         ))}
       </div>
     </div>
-  );
+  )
 }
 
 function CategoryBlock({
@@ -139,18 +131,18 @@ function CategoryBlock({
   modelStats,
   network,
 }: {
-  category: SettingsCategory;
-  tr: (l: Lang) => string;
+  category: SettingsCategory
+  tr: (l: Lang) => string
   modelStats?: {
-    total: number;
-    configured: number;
-    passed: number;
-    failed: number;
-    states: ServiceReadiness[];
-  };
-  network?: NetworkPreview | null;
+    total: number
+    configured: number
+    passed: number
+    failed: number
+    states: ServiceReadiness[]
+  }
+  network?: NetworkPreview | null
 }) {
-  const Icon: LucideIcon = category.icon;
+  const Icon: LucideIcon = category.icon
 
   return (
     <Link
@@ -187,7 +179,7 @@ function CategoryBlock({
         )}
       </div>
     </Link>
-  );
+  )
 }
 
 function ModelPreview({
@@ -196,22 +188,18 @@ function ModelPreview({
   tr,
 }: {
   stats: {
-    total: number;
-    configured: number;
-    passed: number;
-    failed: number;
-    states: ServiceReadiness[];
-  };
-  blurb: string;
-  tr: (l: Lang) => string;
+    total: number
+    configured: number
+    passed: number
+    failed: number
+    states: ServiceReadiness[]
+  }
+  blurb: string
+  tr: (l: Lang) => string
 }) {
   // Restricted deployments (no editable catalog) can't know — show the blurb.
   if (stats.configured < 0) {
-    return (
-      <p className="text-[12.5px] leading-relaxed text-[var(--muted-foreground)]">
-        {blurb}
-      </p>
-    );
+    return <p className="text-[12.5px] leading-relaxed text-[var(--muted-foreground)]">{blurb}</p>
   }
   return (
     <div className="flex items-center gap-2.5">
@@ -220,13 +208,13 @@ function ModelPreview({
           <span
             key={i}
             className={`h-1.5 w-1.5 rounded-full ${
-              state === "passed"
-                ? "bg-emerald-500"
-                : state === "failed"
-                  ? "bg-red-500"
-                  : state === "untested"
-                    ? "bg-zinc-400 dark:bg-zinc-500"
-                    : "bg-zinc-300/60 dark:bg-zinc-700"
+              state === 'passed'
+                ? 'bg-emerald-500'
+                : state === 'failed'
+                  ? 'bg-red-500'
+                  : state === 'untested'
+                    ? 'bg-zinc-400 dark:bg-zinc-500'
+                    : 'bg-zinc-300/60 dark:bg-zinc-700'
             }`}
           />
         ))}
@@ -235,40 +223,37 @@ function ModelPreview({
         {stats.failed > 0
           ? tr({
               zh: `${stats.configured}/${stats.total} 已配置 · ${stats.failed} 个失败`,
+              zhTW: `${stats.configured}/${stats.total} 已配置 · ${stats.failed} 個失敗`,
               en: `${stats.configured}/${stats.total} configured · ${stats.failed} failed`,
             })
           : stats.passed > 0
             ? tr({
                 zh: `${stats.configured}/${stats.total} 已配置 · ${stats.passed} 个通过`,
+                zhTW: `${stats.configured}/${stats.total} 已設定 · ${stats.passed} 項測試通過`,
                 en: `${stats.configured}/${stats.total} configured · ${stats.passed} passed`,
               })
             : tr({
                 zh: `${stats.configured}/${stats.total} 已配置`,
+                zhTW: `${stats.configured}/${stats.total} 已配置`,
                 en: `${stats.configured}/${stats.total} configured`,
               })}
       </span>
     </div>
-  );
+  )
 }
 
-function NetworkPreviewRow({
-  network,
-  tr,
-}: {
-  network: NetworkPreview;
-  tr: (l: Lang) => string;
-}) {
+function NetworkPreviewRow({ network, tr }: { network: NetworkPreview; tr: (l: Lang) => string }) {
   return (
     <div className="flex items-center gap-2 text-[12px] text-[var(--muted-foreground)]">
       <span className="shrink-0 text-[var(--muted-foreground)]/70">
-        {tr({ zh: "API", en: "API" })}
+        {tr({ zh: 'API', zhTW: 'API', en: 'API' })}
       </span>
       <span
         className="truncate font-mono text-[11.5px] text-[var(--foreground)]"
         title={network.apiBase}
       >
-        {network.apiBase || tr({ zh: "本地", en: "local" })}
+        {network.apiBase || tr({ zh: '本地', zhTW: '本地', en: 'local' })}
       </span>
     </div>
-  );
+  )
 }

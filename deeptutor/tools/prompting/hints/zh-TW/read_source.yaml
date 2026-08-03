@@ -1,0 +1,6 @@
+short_description: "按 id 載入已掛載來源（筆記、書頁、歷史會話、題庫條目、附件）的完整文字。"
+when_to_use: "僅當上方 \"Attached Sources\" 清單中某條目的 preview 不足以回答使用者問題時才呼叫；preview 已經包含的內容不要重複調。"
+input_format: "{\"source_id\": \"清單中給出的精確 id（如 nb-... / bk-... / hs-... / qb-... / at-...）\"}。"
+guideline: "source_id 必須照搬清單原文，絕不拼造。一次只能取一個來源，多個來源相關時按需多次呼叫。"
+note: "如果使用者根本沒掛任何來源，本工具不會出現；不要憑空詢問\"哪份資料\"。"
+phase: "exploration"

@@ -8,8 +8,8 @@ import { ArrowUpRight } from 'lucide-react'
 import { useRealtimeVoiceProvider } from '@/hooks/useRealtimeVoiceProvider'
 import { fetchAuthStatus } from '@/lib/auth'
 import { serviceReadiness, useSettings } from '@/components/settings/SettingsContext'
+import { selectLocalizedText } from '@/i18n/localized-text'
 import { SETTINGS_CATEGORIES, type Lang, type SettingsLeaf } from '@/lib/settings-nav'
-import { toTaiwanChinese } from '@/lib/taiwan-zh'
 
 /**
  * Second-level grid for a sub-hub category (Models, Chat). Lists the
@@ -19,8 +19,7 @@ import { toTaiwanChinese } from '@/lib/taiwan-zh'
  */
 export default function SettingsSectionGrid({ categoryKey }: { categoryKey: string }) {
   const { i18n } = useTranslation()
-  const zh = i18n.language?.toLowerCase().startsWith('zh')
-  const tr = useCallback((l: Lang) => (zh ? toTaiwanChinese(l.zh) : l.en), [zh])
+  const tr = useCallback((text: Lang) => selectLocalizedText(i18n.language, text), [i18n.language])
 
   const { catalog, catalogEditable, diagnosticsResults } = useSettings()
   const { status: realtimeVoiceStatus, loading: realtimeVoiceLoading } = useRealtimeVoiceProvider()
@@ -47,12 +46,12 @@ export default function SettingsSectionGrid({ categoryKey }: { categoryKey: stri
           ? {
               tone: 'neutral',
               dot: true,
-              label: { zh: '已配置', en: 'Configured' },
+              label: { zh: '已配置', zhTW: '已配置', en: 'Configured' },
             }
           : {
               tone: 'neutral',
               dot: false,
-              label: { zh: '未配置', en: 'Not set' },
+              label: { zh: '未配置', zhTW: '未配置', en: 'Not set' },
             }
       }
       if (!leaf.service) return null
@@ -62,27 +61,27 @@ export default function SettingsSectionGrid({ categoryKey }: { categoryKey: stri
         return {
           tone: 'bad',
           dot: true,
-          label: { zh: '测试失败', en: 'Test failed' },
+          label: { zh: '测试失败', zhTW: '測試失敗', en: 'Test failed' },
         }
       }
       if (readiness === 'passed') {
         return {
           tone: 'ok',
           dot: true,
-          label: { zh: '测试通过', en: 'Test passed' },
+          label: { zh: '测试通过', zhTW: '測試透過', en: 'Test passed' },
         }
       }
       if (readiness === 'untested') {
         return {
           tone: 'neutral',
           dot: true,
-          label: { zh: '已配置', en: 'Configured' },
+          label: { zh: '已配置', zhTW: '已配置', en: 'Configured' },
         }
       }
       return {
         tone: 'neutral',
         dot: false,
-        label: { zh: '未配置', en: 'Not set' },
+        label: { zh: '未配置', zhTW: '未配置', en: 'Not set' },
       }
     },
     [catalog, catalogEditable, diagnosticsResults, realtimeVoiceLoading, realtimeVoiceStatus.ready]

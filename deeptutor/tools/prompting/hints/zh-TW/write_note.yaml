@@ -1,0 +1,6 @@
+short_description: "新增筆記本記錄（mode='append'）或修改已有記錄（mode='edit'）。"
+when_to_use: "append：使用者明確要求儲存，或本回合產生了自包含的解題過程 / 新概念整理 / 錯題分析。edit：使用者要求修改、擴充套件或更正之前儲存的記錄——edit 之前一定要先用 `list_notebook` 拿到正確的 record_id。"
+input_format: "append: {\"mode\": \"append\", \"notebook_id\": \"...\", \"title\": \"...\", \"turns_to_include\": \"3\" 或 \"all\", \"note\": \"可選\"}。edit: {\"mode\": \"edit\", \"notebook_id\": \"...\", \"record_id\": \"...\", \"title\": 可選, \"content\": 可選, \"note\": 可選}。append 模式下你不需要寫 body——工具會自己讀真實對話歷史拼好；只有在確實想儲存你自己撰寫的總結時才主動傳 `content`。"
+guideline: "`turns_to_include` 預設 3。使用者說『把整段對話存下來』時用 'all'。永遠不要憑空發明筆記本 id 或 record id——schema 列舉列出了合法 notebook_id，record_id 透過 `list_notebook` 拿到。`note` 是簡短評註（『為什麼值得儲存』『以後看這條要記得的背景』），不是內文。"
+note: "使用者沒有任何筆記本時此工具不會出現。append 成功後回傳 notebook_name + record_id；edit 成功後會確認改了哪些欄位，告訴使用者即可。"
+phase: "synthesis"

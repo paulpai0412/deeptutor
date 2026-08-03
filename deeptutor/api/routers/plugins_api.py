@@ -20,7 +20,6 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from deeptutor.core.i18n import t
 from deeptutor.i18n.metadata_i18n import tool_description_i18n
-from deeptutor.i18n.stream import localize_stream_event
 from deeptutor.logging import (
     ProcessLogEvent,
     bind_log_context,
@@ -34,15 +33,6 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 ANSI_ESCAPE_RE = re.compile(r"\x1B\[[0-?]*[ -/]*[@-~]")
-
-
-def _discover_plugins() -> list[Any]:
-    try:
-        from deeptutor.plugins.loader import discover_plugins
-    except Exception:
-        logger.debug("Plugin loader unavailable; returning no plugins.", exc_info=True)
-        return []
-    return discover_plugins()
 
 
 class ToolExecuteRequest(BaseModel):
@@ -69,7 +59,7 @@ class CapabilityExecuteRequest(BaseModel):
 async def list_plugins():
     tool_registry = get_tool_registry()
     capability_registry = get_capability_registry()
-    plugin_manifests = _discover_plugins()
+    plugin_manifests: list[Any] = []
 
     tools = [
         {
@@ -225,7 +215,7 @@ async def _execute_stream(tool_name: str, params: dict[str, Any]) -> AsyncGenera
     result_holder: dict[str, Any] = {}
     error_holder: dict[str, str] = {}
     done = asyncio.Event()
-    task_id = f"playground_tool_{tool_name}_{int(time.time() * 1000)}"
+    task_id = f"playground_tool_{tool_name}_{time.time_ns()}"
 
     async def _run():
         try:
@@ -261,7 +251,7 @@ async def _execute_stream(tool_name: str, params: dict[str, Any]) -> AsyncGenera
             try:
                 item = await asyncio.wait_for(event_queue.get(), timeout=0.15)
                 yield _sse(item["kind"], item["payload"])
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 pass
 
         while not event_queue.empty():
@@ -314,7 +304,7 @@ async def _execute_capability_stream(
             content=body.content,
             session_id=body.session_id,
             chat_id=body.chat_id,
-            llm_selection=body.llm_selection,
+            llmSelection=body.llm_selection,
         )
         async for chunk in _partner_chat_stream(partner_id, request):
             yield chunk
@@ -361,7 +351,7 @@ async def _execute_capability_stream(
     final_result: dict[str, Any] | None = None
     error_holder: dict[str, str] = {}
     done = asyncio.Event()
-    task_id = f"playground_capability_{capability_name}_{int(time.time() * 1000)}"
+    task_id = f"playground_capability_{capability_name}_{time.time_ns()}"
 
     async def _run():
         nonlocal final_result
@@ -384,9 +374,8 @@ async def _execute_capability_stream(
                             if event.type.value == "result":
                                 final_result = dict(event.metadata)
                                 continue
-                            localized_event = localize_stream_event(event, body.language)
                             await event_queue.put(
-                                {"kind": "stream", "payload": localized_event.to_dict()}
+                                {"kind": "stream", "payload": event.to_dict()}
                             )
         except Exception as exc:
             error_holder["detail"] = str(exc)
@@ -403,7 +392,7 @@ async def _execute_capability_stream(
             try:
                 item = await asyncio.wait_for(event_queue.get(), timeout=0.15)
                 yield _sse(item["kind"], item["payload"])
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 pass
 
         while not event_queue.empty():

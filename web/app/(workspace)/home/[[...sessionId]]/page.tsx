@@ -1,16 +1,9 @@
-"use client";
+'use client'
 
-import dynamic from "next/dynamic";
-import Image from "next/image";
-import {
-  type KeyboardEvent,
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-} from "react";
-import { useParams, useRouter, useSearchParams } from "next/navigation";
+import dynamic from 'next/dynamic'
+import Image from 'next/image'
+import { type KeyboardEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useParams, useRouter, useSearchParams } from 'next/navigation'
 
 import {
   BarChart3,
@@ -28,54 +21,45 @@ import {
   PenLine,
   Sparkles,
   type LucideIcon,
-} from "lucide-react";
-import { useTranslation } from "react-i18next";
-import type { SelectedRecord } from "@/lib/notebook-selection-types";
-import type { SelectedHistorySession } from "@/components/chat/HistorySessionPicker";
-import type { SelectedQuestionEntry } from "@/components/chat/QuestionBankPicker";
-import ChatComposer from "@/components/chat/home/ChatComposer";
-import { ChatMessageList } from "@/components/chat/home/ChatMessages";
-import SessionLoadingView from "@/components/chat/home/SessionLoadingView";
+} from 'lucide-react'
+import { useTranslation } from 'react-i18next'
+import type { SelectedRecord } from '@/lib/notebook-selection-types'
+import type { SelectedHistorySession } from '@/components/chat/HistorySessionPicker'
+import type { SelectedQuestionEntry } from '@/components/chat/QuestionBankPicker'
+import ChatComposer from '@/components/chat/home/ChatComposer'
+import { ChatMessageList } from '@/components/chat/home/ChatMessages'
+import SessionLoadingView from '@/components/chat/home/SessionLoadingView'
 // Imported eagerly so the drawer shell is always mounted off-screen —
 // clicking a chip becomes a single CSS class flip, no chunk fetch + double
 // render. The heavy renderers inside still load lazily.
-import FilePreviewDrawer from "@/components/chat/preview/FilePreviewDrawer";
-import { buildSessionActivity } from "@/components/chat/home/SessionActivityPanel";
-import Tooltip from "@/components/common/Tooltip";
+import FilePreviewDrawer from '@/components/chat/preview/FilePreviewDrawer'
+import { buildSessionActivity } from '@/components/chat/home/SessionActivityPanel'
+import Tooltip from '@/components/common/Tooltip'
 import SessionViewerPanel, {
   type SessionViewerPanelHandle,
-} from "@/components/chat/home/SessionViewerPanel";
-import {
-  QuizFollowupProvider,
-  useQuizFollowupController,
-} from "@/context/QuizFollowupContext";
-import {
-  GeogebraTabProvider,
-  useGeogebraTabOpener,
-} from "@/context/GeogebraTabContext";
-import { BookmarkPlus, Download, PanelRight } from "lucide-react";
+} from '@/components/chat/home/SessionViewerPanel'
+import { QuizFollowupProvider, useQuizFollowupController } from '@/context/QuizFollowupContext'
+import { GeogebraTabProvider, useGeogebraTabOpener } from '@/context/GeogebraTabContext'
+import { BookmarkPlus, Download, PanelRight } from 'lucide-react'
 import {
   useUnifiedChat,
   type MessageAttachment,
   type MessageRequestSnapshot,
   type SendMessageOptions,
-} from "@/context/UnifiedChatContext";
-import { useAppShell } from "@/context/AppShellContext";
-import type { FilePreviewSource } from "@/components/chat/preview/previewerFor";
-import type { LLMSelection, StreamEvent } from "@/lib/unified-ws";
-import {
-  extractBase64FromDataUrl,
-  readFileAsDataUrl,
-} from "@/lib/file-attachments";
-import { classifyFile, isSvgFilename } from "@/lib/doc-attachments";
-import { useAttachmentLimits } from "@/lib/attachment-limits";
-import { useChatAutoScroll } from "@/hooks/useChatAutoScroll";
-import { useMeasuredHeight } from "@/hooks/useMeasuredHeight";
+} from '@/context/UnifiedChatContext'
+import { useAppShell } from '@/context/AppShellContext'
+import type { FilePreviewSource } from '@/components/chat/preview/previewerFor'
+import type { LLMSelection, StreamEvent } from '@/lib/unified-ws'
+import { extractBase64FromDataUrl, readFileAsDataUrl } from '@/lib/file-attachments'
+import { classifyFile, isSvgFilename } from '@/lib/doc-attachments'
+import { useAttachmentLimits } from '@/lib/attachment-limits'
+import { useChatAutoScroll } from '@/hooks/useChatAutoScroll'
+import { useMeasuredHeight } from '@/hooks/useMeasuredHeight'
 import {
   loadCapabilityPlaygroundConfigs,
   resolveCapabilityPlaygroundConfig,
   type CapabilityPlaygroundConfigMap,
-} from "@/lib/playground-config";
+} from '@/lib/playground-config'
 import {
   DEFAULT_QUIZ_CONFIG,
   buildQuizWSConfig,
@@ -84,233 +68,202 @@ import {
   resolveExamWSConfig,
   resolveQuizWSConfig,
   type DeepQuestionFormConfig,
-} from "@/lib/quiz-types";
+} from '@/lib/quiz-types'
 import {
   DEFAULT_VISUALIZE_CONFIG,
   buildVisualizeWSConfig,
   type VisualizeFormConfig,
-} from "@/lib/visualize-types";
+} from '@/lib/visualize-types'
 import {
   buildResearchWSConfig,
   createEmptyResearchConfig,
   validateResearchConfig,
   type DeepResearchFormConfig,
   type OutlineItem,
-} from "@/lib/research-types";
+} from '@/lib/research-types'
 import {
   listKnowledgeBases,
   listPaperLibraries,
   type PaperLibrarySummary,
-} from "@/lib/knowledge-api";
-import { getSubagentSettings } from "@/lib/subagents-api";
-import { listLLMOptions, type LLMOption } from "@/lib/llm-options";
-import {
-  getEnabledOptionalTools,
-  invalidateEnabledOptionalToolsCache,
-} from "@/lib/tools-settings";
-import { downloadChatMarkdown } from "@/lib/chat-export";
-import type { SpaceMemoryFile } from "@/lib/space-items";
-import {
-  selectedBooksToPayload,
-  type SelectedBookReference,
-} from "@/lib/book-references";
+} from '@/lib/knowledge-api'
+import { getSubagentSettings } from '@/lib/subagents-api'
+import { listLLMOptions, type LLMOption } from '@/lib/llm-options'
+import { getEnabledOptionalTools, invalidateEnabledOptionalToolsCache } from '@/lib/tools-settings'
+import { downloadChatMarkdown } from '@/lib/chat-export'
+import type { SpaceMemoryFile } from '@/lib/space-items'
+import { selectedBooksToPayload, type SelectedBookReference } from '@/lib/book-references'
 
-const NotebookRecordPicker = dynamic(
-  () => import("@/components/notebook/NotebookRecordPicker"),
-  {
-    ssr: false,
-  },
-);
-const HistorySessionPicker = dynamic(
-  () => import("@/components/chat/HistorySessionPicker"),
-  {
-    ssr: false,
-  },
-);
-const MyAgentsPicker = dynamic(
-  () => import("@/components/chat/MyAgentsPicker"),
-  {
-    ssr: false,
-  },
-);
-const QuestionBankPicker = dynamic(
-  () => import("@/components/chat/QuestionBankPicker"),
-  {
-    ssr: false,
-  },
-);
-const MemoryPicker = dynamic(() => import("@/components/chat/MemoryPicker"), {
+const NotebookRecordPicker = dynamic(() => import('@/components/notebook/NotebookRecordPicker'), {
   ssr: false,
-});
-const BookReferencePicker = dynamic(
-  () => import("@/components/chat/BookReferencePicker"),
-  {
-    ssr: false,
-  },
-);
-const SaveToNotebookModal = dynamic(
-  () => import("@/components/notebook/SaveToNotebookModal"),
-  {
-    ssr: false,
-  },
-);
+})
+const HistorySessionPicker = dynamic(() => import('@/components/chat/HistorySessionPicker'), {
+  ssr: false,
+})
+const MyAgentsPicker = dynamic(() => import('@/components/chat/MyAgentsPicker'), {
+  ssr: false,
+})
+const QuestionBankPicker = dynamic(() => import('@/components/chat/QuestionBankPicker'), {
+  ssr: false,
+})
+const MemoryPicker = dynamic(() => import('@/components/chat/MemoryPicker'), {
+  ssr: false,
+})
+const BookReferencePicker = dynamic(() => import('@/components/chat/BookReferencePicker'), {
+  ssr: false,
+})
+const SaveToNotebookModal = dynamic(() => import('@/components/notebook/SaveToNotebookModal'), {
+  ssr: false,
+})
 // Activity-panel config card hosts the capability-specific form (Quiz /
 // Animator / Visualize / Research). Lazy-loaded so capabilities that
 // don't need a form (Chat / Solve) don't ship the form JS.
-const CapabilityConfigCard = dynamic(
-  () => import("@/components/chat/home/CapabilityConfigCard"),
-  { ssr: false },
-);
-const QuizConfigPanel = dynamic(
-  () => import("@/components/quiz/QuizConfigPanel"),
-  { ssr: false },
-);
-const VisualizeConfigPanel = dynamic(
-  () => import("@/components/visualize/VisualizeConfigPanel"),
-  { ssr: false },
-);
-const ResearchConfigPanel = dynamic(
-  () => import("@/components/research/ResearchConfigPanel"),
-  { ssr: false },
-);
+const CapabilityConfigCard = dynamic(() => import('@/components/chat/home/CapabilityConfigCard'), {
+  ssr: false,
+})
+const QuizConfigPanel = dynamic(() => import('@/components/quiz/QuizConfigPanel'), { ssr: false })
+const VisualizeConfigPanel = dynamic(() => import('@/components/visualize/VisualizeConfigPanel'), {
+  ssr: false,
+})
+const ResearchConfigPanel = dynamic(() => import('@/components/research/ResearchConfigPanel'), {
+  ssr: false,
+})
 
 /* ------------------------------------------------------------------ */
 /*  Type & data definitions                                           */
 /* ------------------------------------------------------------------ */
 
 type ToolName =
-  | "brainstorm"
-  | "geogebra_analysis"
-  | "web_search"
-  | "code_execution"
-  | "reason"
-  | "paper_search"
-  | "imagegen"
-  | "videogen";
+  | 'brainstorm'
+  | 'geogebra_analysis'
+  | 'web_search'
+  | 'code_execution'
+  | 'reason'
+  | 'paper_search'
+  | 'imagegen'
+  | 'videogen'
 
 interface ToolDef {
-  name: ToolName;
-  label: string;
-  icon: LucideIcon;
+  name: ToolName
+  label: string
+  icon: LucideIcon
 }
 
 const ALL_TOOLS: ToolDef[] = [
-  { name: "brainstorm", label: "Brainstorm", icon: Lightbulb },
-  { name: "geogebra_analysis", label: "GeoGebra", icon: Compass },
-  { name: "web_search", label: "Web Search", icon: Globe },
-  { name: "code_execution", label: "Code", icon: Code2 },
-  { name: "reason", label: "Reason", icon: Sparkles },
-  { name: "paper_search", label: "Arxiv Search", icon: FileSearch },
-  { name: "imagegen", label: "Image Gen", icon: ImageIcon },
-  { name: "videogen", label: "Video Gen", icon: Clapperboard },
-];
+  { name: 'brainstorm', label: 'Brainstorm', icon: Lightbulb },
+  { name: 'geogebra_analysis', label: 'GeoGebra', icon: Compass },
+  { name: 'web_search', label: 'Web Search', icon: Globe },
+  { name: 'code_execution', label: 'Code', icon: Code2 },
+  { name: 'reason', label: 'Reason', icon: Sparkles },
+  { name: 'paper_search', label: 'Arxiv Search', icon: FileSearch },
+  { name: 'imagegen', label: 'Image Gen', icon: ImageIcon },
+  { name: 'videogen', label: 'Video Gen', icon: Clapperboard },
+]
 
 interface CapabilityDef {
-  value: string;
-  label: string;
-  description: string;
-  icon: LucideIcon;
-  allowedTools: ToolName[];
-  defaultTools: ToolName[];
+  value: string
+  label: string
+  description: string
+  icon: LucideIcon
+  allowedTools: ToolName[]
+  defaultTools: ToolName[]
   // Loop-engine capabilities run on the chat agent loop (solve / mastery) rather
   // than a bespoke pipeline. They are collapsed into the "More" flyout in the
   // capability picker instead of listed directly. Driven by the loop-capability
   // registry on the backend; mirrored here as a static flag.
-  loopEngine?: boolean;
+  loopEngine?: boolean
 }
 
 const CAPABILITIES: CapabilityDef[] = [
   {
-    value: "",
-    label: "Chat",
-    description: "Flexible conversation with any tool",
+    value: '',
+    label: 'Chat',
+    description: 'Flexible conversation with any tool',
     icon: MessageSquare,
     allowedTools: [
-      "brainstorm",
-      "geogebra_analysis",
-      "web_search",
-      "code_execution",
-      "reason",
-      "paper_search",
-      "imagegen",
-      "videogen",
+      'brainstorm',
+      'geogebra_analysis',
+      'web_search',
+      'code_execution',
+      'reason',
+      'paper_search',
+      'imagegen',
+      'videogen',
     ],
     defaultTools: [],
   },
   {
-    value: "deep_solve",
-    label: "Solve",
-    description: "Multi-step reasoning & problem solving",
+    value: 'deep_solve',
+    label: 'Solve',
+    description: 'Multi-step reasoning & problem solving',
     icon: BrainCircuit,
-    allowedTools: ["web_search", "code_execution", "reason"],
-    defaultTools: ["web_search", "code_execution", "reason"],
+    allowedTools: ['web_search', 'code_execution', 'reason'],
+    defaultTools: ['web_search', 'code_execution', 'reason'],
     loopEngine: true,
   },
   {
-    value: "deep_question",
-    label: "Quiz",
-    description: "Custom and mimic paper question generation",
+    value: 'deep_question',
+    label: 'Quiz',
+    description: 'Custom and mimic paper question generation',
     icon: PenLine,
-    allowedTools: ["web_search", "code_execution"],
-    defaultTools: ["web_search", "code_execution"],
+    allowedTools: ['web_search', 'code_execution'],
+    defaultTools: ['web_search', 'code_execution'],
   },
   {
-    value: "exam",
-    label: "Exam",
-    description: "Take a selected Paper Library paper",
+    value: 'exam',
+    label: 'Exam',
+    description: 'Take a selected Paper Library paper',
     icon: GraduationCap,
     allowedTools: [],
     defaultTools: [],
   },
   {
-    value: "deep_research",
-    label: "Research",
-    description: "Comprehensive multi-agent research",
+    value: 'deep_research',
+    label: 'Research',
+    description: 'Comprehensive multi-agent research',
     icon: Microscope,
-    allowedTools: ["web_search", "paper_search", "code_execution"],
-    defaultTools: ["web_search", "paper_search", "code_execution"],
+    allowedTools: ['web_search', 'paper_search', 'code_execution'],
+    defaultTools: ['web_search', 'paper_search', 'code_execution'],
   },
   {
-    value: "visualize",
-    label: "Visualize",
-    description:
-      "Generate charts, diagrams, interactive pages, or math animations",
+    value: 'visualize',
+    label: 'Visualize',
+    description: 'Generate charts, diagrams, interactive pages, or math animations',
     icon: BarChart3,
     allowedTools: [],
     defaultTools: [],
   },
   {
-    value: "mastery_path",
-    label: "Mastery Path",
-    description: "Mastery-based tutoring with a hard gate",
+    value: 'mastery_path',
+    label: 'Mastery Path',
+    description: 'Mastery-based tutoring with a hard gate',
     icon: GraduationCap,
     // The mastery tools (status/quiz/grade/assess/build) auto-mount server-side
     // when this capability is active; rag auto-mounts when a KB is attached.
     // These are only the extra optional tools the tutor may also reach for.
-    allowedTools: ["web_search", "code_execution"],
+    allowedTools: ['web_search', 'code_execution'],
     defaultTools: [],
     loopEngine: true,
   },
-];
+]
 
 interface KnowledgeBase {
-  name: string;
-  is_default?: boolean;
+  name: string
+  is_default?: boolean
   metadata?: {
     /** Connected-source kind, e.g. "obsidian" | "subagent". */
-    type?: string;
+    type?: string
     /** Backend of a connected subagent: "claude_code" | "codex" | "partner". */
-    agent_kind?: string;
-  };
+    agent_kind?: string
+  }
 }
 
 interface PendingAttachment {
-  type: string;
-  filename: string;
-  base64?: string;
-  previewUrl?: string;
-  size?: number;
-  mimeType?: string;
+  type: string
+  filename: string
+  base64?: string
+  previewUrl?: string
+  size?: number
+  mimeType?: string
 }
 
 /* ------------------------------------------------------------------ */
@@ -318,7 +271,7 @@ interface PendingAttachment {
 /* ------------------------------------------------------------------ */
 
 function getCapability(value: string | null): CapabilityDef {
-  return CAPABILITIES.find((c) => c.value === (value || "")) ?? CAPABILITIES[0];
+  return CAPABILITIES.find(c => c.value === (value || '')) ?? CAPABILITIES[0]
 }
 
 /* ------------------------------------------------------------------ */
@@ -326,15 +279,15 @@ function getCapability(value: string | null): CapabilityDef {
 /* ------------------------------------------------------------------ */
 
 export default function ChatPage() {
-  const params = useParams<{ sessionId?: string[] }>();
-  const searchParams = useSearchParams();
-  const router = useRouter();
-  const { t } = useTranslation();
-  const sessionIdParam = params.sessionId?.[0] ?? null;
-  const originalPaperIdParam = searchParams.get("original_paper_id");
-  const examPaperIdParam = searchParams.get("exam_paper_id");
-  const examLibraryIdParam = searchParams.get("exam_library_id");
-  const { setActiveSessionId } = useAppShell();
+  const params = useParams<{ sessionId?: string[] }>()
+  const searchParams = useSearchParams()
+  const router = useRouter()
+  const { t } = useTranslation()
+  const sessionIdParam = params.sessionId?.[0] ?? null
+  const originalPaperIdParam = searchParams.get('original_paper_id')
+  const examPaperIdParam = searchParams.get('exam_paper_id')
+  const examLibraryIdParam = searchParams.get('exam_library_id')
+  const { setActiveSessionId } = useAppShell()
 
   const {
     state,
@@ -353,51 +306,42 @@ export default function ChatPage() {
     newSession,
     loadSession,
     renameSessionTitle,
-  } = useUnifiedChat();
+  } = useUnifiedChat()
 
-  const [knowledgeBases, setKnowledgeBases] = useState<KnowledgeBase[]>([]);
-  const [paperLibraries, setPaperLibraries] = useState<PaperLibrarySummary[]>(
-    [],
-  );
+  const [knowledgeBases, setKnowledgeBases] = useState<KnowledgeBase[]>([])
+  const [paperLibraries, setPaperLibraries] = useState<PaperLibrarySummary[]>([])
   // A connected agent to preselect once it loads, from `?agent=<name>` on the
   // URL (the partner list page links here to drop straight into a chat with a
   // partner). Captured once at first client render — the URL is rewritten to
   // `/home/<sessionId>` as soon as the new session is created, dropping the
   // query — so we can't read it later from the live search params.
-  const pendingAgentRef = useRef<string | null | undefined>(undefined);
+  const pendingAgentRef = useRef<string | null | undefined>(undefined)
   if (pendingAgentRef.current === undefined) {
     pendingAgentRef.current =
-      typeof window === "undefined"
+      typeof window === 'undefined'
         ? null
-        : new URLSearchParams(window.location.search).get("agent");
+        : new URLSearchParams(window.location.search).get('agent')
   }
   // Paper Library's "Start Exam" action opens a fresh draft
   // session with this opaque ID. The query is dropped once the server assigns
   // the new session URL (see the URL effect below).
-  const originalPaperSetupRef = useRef(false);
-  const examSetupRef = useRef(false);
-  const agentPreselectDoneRef = useRef(false);
-  const [llmOptions, setLLMOptions] = useState<LLMOption[]>([]);
-  const [activeLLMDefault, setActiveLLMDefault] = useState<LLMSelection | null>(
-    null,
-  );
-  const [llmOptionsLoading, setLLMOptionsLoading] = useState(true);
-  const [llmOptionsError, setLLMOptionsError] = useState(false);
-  const [capabilityConfigs, setCapabilityConfigs] =
-    useState<CapabilityPlaygroundConfigMap>({});
+  const originalPaperSetupRef = useRef(false)
+  const examSetupRef = useRef(false)
+  const agentPreselectDoneRef = useRef(false)
+  const [llmOptions, setLLMOptions] = useState<LLMOption[]>([])
+  const [activeLLMDefault, setActiveLLMDefault] = useState<LLMSelection | null>(null)
+  const [llmOptionsLoading, setLLMOptionsLoading] = useState(true)
+  const [llmOptionsError, setLLMOptionsError] = useState(false)
+  const [capabilityConfigs, setCapabilityConfigs] = useState<CapabilityPlaygroundConfigMap>({})
   // User-toggleable tools the user has enabled in /settings/tools. This is
   // the single source of truth for which optional tools the chat agent may
   // use; the chat composer no longer exposes a picker.
-  const [userEnabledTools, setUserEnabledTools] = useState<string[] | null>(
-    null,
-  );
-  const [attachments, setAttachments] = useState<PendingAttachment[]>([]);
-  const attachmentLimits = useAttachmentLimits();
-  const [dragging, setDragging] = useState(false);
-  const [attachmentError, setAttachmentError] = useState<string | null>(null);
-  const [previewSource, setPreviewSource] = useState<FilePreviewSource | null>(
-    null,
-  );
+  const [userEnabledTools, setUserEnabledTools] = useState<string[] | null>(null)
+  const [attachments, setAttachments] = useState<PendingAttachment[]>([])
+  const attachmentLimits = useAttachmentLimits()
+  const [dragging, setDragging] = useState(false)
+  const [attachmentError, setAttachmentError] = useState<string | null>(null)
+  const [previewSource, setPreviewSource] = useState<FilePreviewSource | null>(null)
   // Right-side panels — Activity (floating cards) and Viewer (full sidebar
   // with tabs for file previews + web pages). Each independently togglable
   // and persisted across reloads.
@@ -407,28 +351,28 @@ export default function ChatPage() {
   // preference is then applied in a post-mount effect below.
   // Single right-side panel: the Activity/Viewer. Its home view is the
   // session activity; files and web pages open as tabs alongside it.
-  const [viewerPanelOpen, setViewerPanelOpen] = useState(false);
+  const [viewerPanelOpen, setViewerPanelOpen] = useState(false)
   useEffect(() => {
-    if (typeof window === "undefined") return;
-    if (window.localStorage.getItem("dt:chat:viewer-panel") === "1") {
-      setViewerPanelOpen(true);
+    if (typeof window === 'undefined') return
+    if (window.localStorage.getItem('dt:chat:viewer-panel') === '1') {
+      setViewerPanelOpen(true)
     }
-  }, []);
+  }, [])
   const setViewerOpen = useCallback((next: boolean) => {
-    setViewerPanelOpen(next);
-    if (typeof window !== "undefined") {
-      window.localStorage.setItem("dt:chat:viewer-panel", next ? "1" : "0");
+    setViewerPanelOpen(next)
+    if (typeof window !== 'undefined') {
+      window.localStorage.setItem('dt:chat:viewer-panel', next ? '1' : '0')
     }
-  }, []);
+  }, [])
   const toggleViewerPanel = useCallback(() => {
-    setViewerPanelOpen((prev) => {
-      const next = !prev;
-      if (typeof window !== "undefined") {
-        window.localStorage.setItem("dt:chat:viewer-panel", next ? "1" : "0");
+    setViewerPanelOpen(prev => {
+      const next = !prev
+      if (typeof window !== 'undefined') {
+        window.localStorage.setItem('dt:chat:viewer-panel', next ? '1' : '0')
       }
-      return next;
-    });
-  }, []);
+      return next
+    })
+  }, [])
   /**
    * Force the panel open on its Activity home. Used by the send-gate when the
    * user tries to send while the active capability still needs its config
@@ -436,26 +380,24 @@ export default function ChatPage() {
    * panel and switch to it. Also used by the capability-switch auto-open
    * effect below.
    */
-  const viewerPanelRef = useRef<SessionViewerPanelHandle | null>(null);
+  const viewerPanelRef = useRef<SessionViewerPanelHandle | null>(null)
   const ensureActivityPanelOpen = useCallback(() => {
-    setViewerOpen(true);
-    viewerPanelRef.current?.focusActivityHome();
-  }, [setViewerOpen]);
-  const attachmentErrorTimer = useRef<ReturnType<typeof setTimeout> | null>(
-    null,
-  );
-  const [capMenuOpen, setCapMenuOpen] = useState(false);
+    setViewerOpen(true)
+    viewerPanelRef.current?.focusActivityHome()
+  }, [setViewerOpen])
+  const attachmentErrorTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const [capMenuOpen, setCapMenuOpen] = useState(false)
   const [quizConfig, setQuizConfig] = useState<DeepQuestionFormConfig>({
     ...DEFAULT_QUIZ_CONFIG,
-  });
-  const [selectedExamPaperName, setSelectedExamPaperName] = useState("");
-  const [quizPdf, setQuizPdf] = useState<File | null>(null);
+  })
+  const [selectedExamPaperName, setSelectedExamPaperName] = useState('')
+  const [quizPdf, setQuizPdf] = useState<File | null>(null)
   const [visualizeConfig, setVisualizeConfig] = useState<VisualizeFormConfig>({
     ...DEFAULT_VISUALIZE_CONFIG,
-  });
+  })
   const [researchConfig, setResearchConfig] = useState<DeepResearchFormConfig>(
-    createEmptyResearchConfig(),
-  );
+    createEmptyResearchConfig()
+  )
   // Capability-config confirmation gate.
   //
   // For capabilities that need explicit configuration (Quiz, Visualize,
@@ -463,9 +405,8 @@ export default function ChatPage() {
   // panel before sending. Any subsequent edit to the underlying config
   // invalidates the confirmation, so the user re-confirms once they've
   // adjusted settings. Capability switches also reset this flag.
-  const [capabilityConfigConfirmed, setCapabilityConfigConfirmed] =
-    useState(false);
-  const autoStartCapabilityRef = useRef<string | null>(null);
+  const [capabilityConfigConfirmed, setCapabilityConfigConfirmed] = useState(false)
+  const autoStartCapabilityRef = useRef<string | null>(null)
   // Per-session persistence of the capability-config form. The form lives
   // in local React state, so anything that remounts the page (browser
   // back/forward to /home/<id>, URL-driven session swap, etc.) would
@@ -473,50 +414,50 @@ export default function ChatPage() {
   // Storing the form by sessionId in localStorage keeps the selections —
   // and the Confirmed badge — stable for the rest of the session.
   const capabilityConfigStorageKey = useMemo(() => {
-    const sid = state.sessionId || sessionIdParam || "";
-    return sid ? `dt:chat:capability-config:${sid}` : null;
-  }, [state.sessionId, sessionIdParam]);
-  const lastHydratedConfigKeyRef = useRef<string | null>(null);
+    const sid = state.sessionId || sessionIdParam || ''
+    return sid ? `dt:chat:capability-config:${sid}` : null
+  }, [state.sessionId, sessionIdParam])
+  const lastHydratedConfigKeyRef = useRef<string | null>(null)
   // Hydrate the form configs on first encounter of each session id, so
   // the user's prior selections come back when they return to a session.
   useEffect(() => {
-    if (typeof window === "undefined") return;
-    if (!capabilityConfigStorageKey) return;
-    if (lastHydratedConfigKeyRef.current === capabilityConfigStorageKey) return;
-    lastHydratedConfigKeyRef.current = capabilityConfigStorageKey;
-    const raw = window.localStorage.getItem(capabilityConfigStorageKey);
-    if (!raw) return;
+    if (typeof window === 'undefined') return
+    if (!capabilityConfigStorageKey) return
+    if (lastHydratedConfigKeyRef.current === capabilityConfigStorageKey) return
+    lastHydratedConfigKeyRef.current = capabilityConfigStorageKey
+    const raw = window.localStorage.getItem(capabilityConfigStorageKey)
+    if (!raw) return
     try {
       const parsed = JSON.parse(raw) as {
-        quizConfig?: DeepQuestionFormConfig;
-        visualizeConfig?: VisualizeFormConfig;
-        researchConfig?: DeepResearchFormConfig;
-        capabilityConfigConfirmed?: boolean;
-      };
-      if (parsed.quizConfig) {
-        const restoredQuizConfig = normalizeQuizConfig(parsed.quizConfig);
-        if (restoredQuizConfig.mode === "original_paper") {
-          restoredQuizConfig.mode = "custom";
-          restoredQuizConfig.paper_id = "";
-          restoredQuizConfig.paper_library_id = "";
-          restoredQuizConfig.paper_path = "";
-        }
-        setQuizConfig(restoredQuizConfig);
+        quizConfig?: DeepQuestionFormConfig
+        visualizeConfig?: VisualizeFormConfig
+        researchConfig?: DeepResearchFormConfig
+        capabilityConfigConfirmed?: boolean
       }
-      if (parsed.visualizeConfig) setVisualizeConfig(parsed.visualizeConfig);
-      if (parsed.researchConfig) setResearchConfig(parsed.researchConfig);
-      if (typeof parsed.capabilityConfigConfirmed === "boolean") {
-        setCapabilityConfigConfirmed(parsed.capabilityConfigConfirmed);
+      if (parsed.quizConfig) {
+        const restoredQuizConfig = normalizeQuizConfig(parsed.quizConfig)
+        if (restoredQuizConfig.mode === 'original_paper') {
+          restoredQuizConfig.mode = 'custom'
+          restoredQuizConfig.paper_id = ''
+          restoredQuizConfig.paper_library_id = ''
+          restoredQuizConfig.paper_path = ''
+        }
+        setQuizConfig(restoredQuizConfig)
+      }
+      if (parsed.visualizeConfig) setVisualizeConfig(parsed.visualizeConfig)
+      if (parsed.researchConfig) setResearchConfig(parsed.researchConfig)
+      if (typeof parsed.capabilityConfigConfirmed === 'boolean') {
+        setCapabilityConfigConfirmed(parsed.capabilityConfigConfirmed)
       }
     } catch {
       /* corrupted entry — ignore */
     }
-  }, [capabilityConfigStorageKey]);
+  }, [capabilityConfigStorageKey])
   // Persist on every change. Write is synchronous and small, and
   // localStorage already de-dupes identical writes at the browser level.
   useEffect(() => {
-    if (typeof window === "undefined") return;
-    if (!capabilityConfigStorageKey) return;
+    if (typeof window === 'undefined') return
+    if (!capabilityConfigStorageKey) return
     window.localStorage.setItem(
       capabilityConfigStorageKey,
       JSON.stringify({
@@ -524,157 +465,136 @@ export default function ChatPage() {
         visualizeConfig,
         researchConfig,
         capabilityConfigConfirmed,
-      }),
-    );
+      })
+    )
   }, [
     capabilityConfigStorageKey,
     quizConfig,
     visualizeConfig,
     researchConfig,
     capabilityConfigConfirmed,
-  ]);
-  const [showSaveModal, setShowSaveModal] = useState(false);
-  const [showNotebookPicker, setShowNotebookPicker] = useState(false);
-  const [showBookPicker, setShowBookPicker] = useState(false);
-  const [showHistoryPicker, setShowHistoryPicker] = useState(false);
-  const [showAgentsPicker, setShowAgentsPicker] = useState(false);
-  const [showQuestionBankPicker, setShowQuestionBankPicker] = useState(false);
+  ])
+  const [showSaveModal, setShowSaveModal] = useState(false)
+  const [showNotebookPicker, setShowNotebookPicker] = useState(false)
+  const [showBookPicker, setShowBookPicker] = useState(false)
+  const [showHistoryPicker, setShowHistoryPicker] = useState(false)
+  const [showAgentsPicker, setShowAgentsPicker] = useState(false)
+  const [showQuestionBankPicker, setShowQuestionBankPicker] = useState(false)
   // Session persona selector (toolbar chip / `/persona` / @space entry all
   // open the same dropdown). The selection itself lives in the unified chat
   // context (state.personaSelection) so it follows the session.
-  const [personaSelectorOpen, setPersonaSelectorOpen] = useState(false);
-  const [showMemoryPicker, setShowMemoryPicker] = useState(false);
-  const [spaceMenuOpen, setSpaceMenuOpen] = useState(false);
-  const [selectedNotebookRecords, setSelectedNotebookRecords] = useState<
-    SelectedRecord[]
-  >([]);
-  const [selectedBookReferences, setSelectedBookReferences] = useState<
-    SelectedBookReference[]
-  >([]);
-  const [selectedHistorySessions, setSelectedHistorySessions] = useState<
-    SelectedHistorySession[]
-  >([]);
+  const [personaSelectorOpen, setPersonaSelectorOpen] = useState(false)
+  const [showMemoryPicker, setShowMemoryPicker] = useState(false)
+  const [spaceMenuOpen, setSpaceMenuOpen] = useState(false)
+  const [selectedNotebookRecords, setSelectedNotebookRecords] = useState<SelectedRecord[]>([])
+  const [selectedBookReferences, setSelectedBookReferences] = useState<SelectedBookReference[]>([])
+  const [selectedHistorySessions, setSelectedHistorySessions] = useState<SelectedHistorySession[]>(
+    []
+  )
   // Imported-agent conversation references. Same shape as history sessions —
   // they fold into the same history_references payload (see below), so the
   // backend treats them identically; the separate state only keeps the
   // composer's "My Agents" group distinct from "Chat History".
-  const [selectedAgentSessions, setSelectedAgentSessions] = useState<
-    SelectedHistorySession[]
-  >([]);
-  const [selectedQuestionEntries, setSelectedQuestionEntries] = useState<
-    SelectedQuestionEntry[]
-  >([]);
-  const [selectedMemoryFiles, setSelectedMemoryFiles] = useState<
-    SpaceMemoryFile[]
-  >([]);
-  const dragCounter = useRef(0);
-  const capMenuRef = useRef<HTMLDivElement>(null);
-  const capBtnRef = useRef<HTMLButtonElement>(null);
-  const spaceMenuRef = useRef<HTMLDivElement>(null);
-  const spaceBtnRef = useRef<HTMLButtonElement>(null);
-  const initialLoadRef = useRef(false);
+  const [selectedAgentSessions, setSelectedAgentSessions] = useState<SelectedHistorySession[]>([])
+  const [selectedQuestionEntries, setSelectedQuestionEntries] = useState<SelectedQuestionEntry[]>(
+    []
+  )
+  const [selectedMemoryFiles, setSelectedMemoryFiles] = useState<SpaceMemoryFile[]>([])
+  const dragCounter = useRef(0)
+  const capMenuRef = useRef<HTMLDivElement>(null)
+  const capBtnRef = useRef<HTMLButtonElement>(null)
+  const spaceMenuRef = useRef<HTMLDivElement>(null)
+  const spaceBtnRef = useRef<HTMLButtonElement>(null)
+  const initialLoadRef = useRef(false)
   // Session-loading overlay: shown while navigating from chat-history →
   // session detail. Holds an AbortController so the user can cancel.
-  const [sessionLoading, setSessionLoading] = useState(false);
-  const loadAbortRef = useRef<AbortController | null>(null);
+  const [sessionLoading, setSessionLoading] = useState(false)
+  const loadAbortRef = useRef<AbortController | null>(null)
   // Bridge ref: ``ChatComposer`` writes a prefill function into this on
   // mount; ``ChatMessageList`` reads it via ``handlePrefillComposer`` so an
   // ``AskUserOptions`` chip click can drop text into the composer textarea.
-  const prefillInputRef = useRef<((text: string) => void) | null>(null);
+  const prefillInputRef = useRef<((text: string) => void) | null>(null)
   const handlePrefillComposer = useCallback((text: string) => {
-    prefillInputRef.current?.(text);
-  }, []);
+    prefillInputRef.current?.(text)
+  }, [])
 
   // A clickable node inside an inlined visualization SVG (data-prompt) — and the
   // html widget's sendPrompt bridge — dispatch this window event; mirror it into
   // the composer as a prefilled follow-up (user confirms before sending).
   useEffect(() => {
     const onVizPrompt = (e: Event) => {
-      const text = (e as CustomEvent<string>).detail;
-      if (typeof text === "string" && text) handlePrefillComposer(text);
-    };
-    window.addEventListener("dt:visualize-prompt", onVizPrompt);
-    return () => window.removeEventListener("dt:visualize-prompt", onVizPrompt);
-  }, [handlePrefillComposer]);
+      const text = (e as CustomEvent<string>).detail
+      if (typeof text === 'string' && text) handlePrefillComposer(text)
+    }
+    window.addEventListener('dt:visualize-prompt', onVizPrompt)
+    return () => window.removeEventListener('dt:visualize-prompt', onVizPrompt)
+  }, [handlePrefillComposer])
 
-  const activeCap = useMemo(
-    () => getCapability(state.activeCapability),
-    [state.activeCapability],
-  );
+  const activeCap = useMemo(() => getCapability(state.activeCapability), [state.activeCapability])
 
-  const isQuizMode = activeCap.value === "deep_question";
-  const isExamMode = activeCap.value === "exam";
+  const isQuizMode = activeCap.value === 'deep_question'
+  const isExamMode = activeCap.value === 'exam'
   // An exam is "active" when this session already contains emitted exam
   // questions — further sends are interactive proctor turns, not restarts.
   const examHasQuestions = useMemo(() => {
-    if (!isExamMode) return false;
+    if (!isExamMode) return false
     for (let index = state.messages.length - 1; index >= 0; index -= 1) {
-      const message = state.messages[index];
-      if (message.role !== "assistant" || message.capability !== "exam") {
-        continue;
+      const message = state.messages[index]
+      if (message.role !== 'assistant' || message.capability !== 'exam') {
+        continue
       }
-      const questions = extractQuizQuestionsFromEvents(message.events ?? []);
-      if (questions?.length) return true;
+      const questions = extractQuizQuestionsFromEvents(message.events ?? [])
+      if (questions?.length) return true
     }
-    return false;
-  }, [isExamMode, state.messages]);
+    return false
+  }, [isExamMode, state.messages])
   // Same for generated quizzes: a completed quiz turns later sends into
   // proctor turns instead of re-running the whole generation pipeline.
   const quizHasQuestions = useMemo(() => {
-    if (!isQuizMode) return false;
+    if (!isQuizMode) return false
     for (let index = state.messages.length - 1; index >= 0; index -= 1) {
-      const message = state.messages[index];
-      if (
-        message.role !== "assistant" ||
-        message.capability !== "deep_question"
-      ) {
-        continue;
+      const message = state.messages[index]
+      if (message.role !== 'assistant' || message.capability !== 'deep_question') {
+        continue
       }
-      const questions = extractQuizQuestionsFromEvents(message.events ?? []);
-      if (questions?.length) return true;
+      const questions = extractQuizQuestionsFromEvents(message.events ?? [])
+      if (questions?.length) return true
     }
-    return false;
-  }, [isQuizMode, state.messages]);
-  const isVisualizeMode = activeCap.value === "visualize";
-  const isResearchMode = activeCap.value === "deep_research";
-  const capabilityNeedsConfig =
-    isQuizMode || isExamMode || isVisualizeMode || isResearchMode;
+    return false
+  }, [isQuizMode, state.messages])
+  const isVisualizeMode = activeCap.value === 'visualize'
+  const isResearchMode = activeCap.value === 'deep_research'
+  const capabilityNeedsConfig = isQuizMode || isExamMode || isVisualizeMode || isResearchMode
 
   // Edit-invalidates-confirm wrappers — flipping any field after the user
   // hit *Confirm* should restore the gate so they re-confirm intentionally.
   // `useCallback` keeps identities stable so the memoized ChatComposer /
   // CapabilityConfigCard don't churn on every keystroke.
   const handleChangeQuizConfig = useCallback((next: DeepQuestionFormConfig) => {
-    setQuizConfig(normalizeQuizConfig(next));
-    setCapabilityConfigConfirmed(false);
-  }, []);
+    setQuizConfig(normalizeQuizConfig(next))
+    setCapabilityConfigConfirmed(false)
+  }, [])
   const handleExamPaperNameChange = useCallback((name: string) => {
-    setSelectedExamPaperName((previous) => (previous === name ? previous : name));
-  }, []);
+    setSelectedExamPaperName(previous => (previous === name ? previous : name))
+  }, [])
   const handleUploadQuizPdf = useCallback((file: File | null) => {
-    setQuizPdf(file);
-    setCapabilityConfigConfirmed(false);
-  }, []);
-  const handleChangeVisualizeConfig = useCallback(
-    (next: VisualizeFormConfig) => {
-      setVisualizeConfig(next);
-      setCapabilityConfigConfirmed(false);
-    },
-    [],
-  );
-  const handleChangeResearchConfig = useCallback(
-    (next: DeepResearchFormConfig) => {
-      setResearchConfig(next);
-      setCapabilityConfigConfirmed(false);
-    },
-    [],
-  );
+    setQuizPdf(file)
+    setCapabilityConfigConfirmed(false)
+  }, [])
+  const handleChangeVisualizeConfig = useCallback((next: VisualizeFormConfig) => {
+    setVisualizeConfig(next)
+    setCapabilityConfigConfirmed(false)
+  }, [])
+  const handleChangeResearchConfig = useCallback((next: DeepResearchFormConfig) => {
+    setResearchConfig(next)
+    setCapabilityConfigConfirmed(false)
+  }, [])
   const handleConfirmCapabilityConfig = useCallback(() => {
-    setCapabilityConfigConfirmed(true);
+    setCapabilityConfigConfirmed(true)
     if (isQuizMode || isExamMode) {
-      autoStartCapabilityRef.current = activeCap.value;
+      autoStartCapabilityRef.current = activeCap.value
     }
-  }, [activeCap.value, isExamMode, isQuizMode]);
+  }, [activeCap.value, isExamMode, isQuizMode])
 
   /**
    * Auto-open the right-side Activity panel when the user switches into a
@@ -690,95 +610,83 @@ export default function ChatPage() {
   // Initialized false so landing directly on a config-needing capability
   // (restored exam/quiz session) counts as a transition too — otherwise the
   // panel never auto-opens there and the user can't reach the config card.
-  const lastCapabilityNeedsConfigRef = useRef(false);
+  const lastCapabilityNeedsConfigRef = useRef(false)
   useEffect(() => {
-    const prev = lastCapabilityNeedsConfigRef.current;
-    lastCapabilityNeedsConfigRef.current = capabilityNeedsConfig;
+    const prev = lastCapabilityNeedsConfigRef.current
+    lastCapabilityNeedsConfigRef.current = capabilityNeedsConfig
     if (!prev && capabilityNeedsConfig) {
-      ensureActivityPanelOpen();
+      ensureActivityPanelOpen()
     }
-  }, [capabilityNeedsConfig, ensureActivityPanelOpen]);
-  const hasMessages = state.messages.length > 0;
+  }, [capabilityNeedsConfig, ensureActivityPanelOpen])
+  const hasMessages = state.messages.length > 0
   // Time-of-day greeting: seeded once on mount from the user's local clock so
   // the heading stays stable while they're on the page. State (not useMemo)
   // because the random pick would otherwise mismatch SSR ↔ client hydration.
-  const [welcomeGreeting, setWelcomeGreeting] = useState<string>(
-    "What would you like to learn?",
-  );
+  const [welcomeGreeting, setWelcomeGreeting] = useState<string>('What would you like to learn?')
   useEffect(() => {
-    const hour = new Date().getHours();
-    let bucket: string[];
+    const hour = new Date().getHours()
+    let bucket: string[]
     if (hour >= 5 && hour < 12) {
       bucket = [
-        "Good morning.",
+        'Good morning.',
         "Morning — let's learn something.",
-        "What would you like to learn?",
-      ];
+        'What would you like to learn?',
+      ]
     } else if (hour >= 12 && hour < 17) {
       bucket = [
-        "Good afternoon.",
+        'Good afternoon.',
         "Afternoon — what's on your mind?",
-        "What would you like to learn?",
-      ];
+        'What would you like to learn?',
+      ]
     } else if (hour >= 17 && hour < 22) {
       bucket = [
-        "Good evening.",
-        "Evening — what shall we explore?",
-        "What would you like to learn?",
-      ];
+        'Good evening.',
+        'Evening — what shall we explore?',
+        'What would you like to learn?',
+      ]
     } else {
-      bucket = [
-        "It's late today.",
-        "Burning the midnight oil?",
-        "What would you like to learn?",
-      ];
+      bucket = ["It's late today.", 'Burning the midnight oil?', 'What would you like to learn?']
     }
-    setWelcomeGreeting(bucket[Math.floor(Math.random() * bucket.length)]);
-  }, []);
+    setWelcomeGreeting(bucket[Math.floor(Math.random() * bucket.length)])
+  }, [])
   const firstUserTitle = useMemo(
     () =>
       state.messages
-        .find((msg) => msg.role === "user")
+        .find(msg => msg.role === 'user')
         ?.content.trim()
-        .replace(/\s+/g, " ")
-        .slice(0, 80) || "",
-    [state.messages],
-  );
-  const persistedSessionTitle = state.sessionTitle.trim();
+        .replace(/\s+/g, ' ')
+        .slice(0, 80) || '',
+    [state.messages]
+  )
+  const persistedSessionTitle = state.sessionTitle.trim()
   const isPlaceholderSessionTitle =
-    !persistedSessionTitle || /^new (chat|conversation)$/i.test(persistedSessionTitle);
+    !persistedSessionTitle || /^new (chat|conversation)$/i.test(persistedSessionTitle)
   const displaySessionTitle =
-    (!isPlaceholderSessionTitle && persistedSessionTitle) ||
-    firstUserTitle ||
-    t("New chat");
-  const autoTitleSessionRef = useRef<string | null>(null);
-  const autoGeneratedTitleRef = useRef<string | null>(null);
+    (!isPlaceholderSessionTitle && persistedSessionTitle) || firstUserTitle || t('New chat')
+  const autoTitleSessionRef = useRef<string | null>(null)
+  const autoGeneratedTitleRef = useRef<string | null>(null)
   const isAutoGeneratedSessionTitle =
     isPlaceholderSessionTitle ||
     persistedSessionTitle === autoGeneratedTitleRef.current ||
-    [t("Exam"), t("Quiz"), "Exam", "Quiz"].includes(persistedSessionTitle);
+    [t('Exam'), t('Quiz'), 'Exam', 'Quiz'].includes(persistedSessionTitle)
   useEffect(() => {
-    if (
-      !state.sessionId ||
-      (!isExamMode && !isQuizMode) ||
-      !isAutoGeneratedSessionTitle
-    ) {
-      return;
+    if (!state.sessionId || (!isExamMode && !isQuizMode) || !isAutoGeneratedSessionTitle) {
+      return
     }
     const title =
       isExamMode && selectedExamPaperName.trim()
         ? selectedExamPaperName.trim()
-        : t(isExamMode ? "Exam" : "Quiz");
-    const key = `${state.sessionId}:${title}`;
-    if (autoTitleSessionRef.current === key) return;
-    autoTitleSessionRef.current = key;
-    autoGeneratedTitleRef.current = title;
+        : t(isExamMode ? 'Exam' : 'Quiz')
+    const key = `${state.sessionId}:${title}`
+    if (autoTitleSessionRef.current === key) return
+    autoTitleSessionRef.current = key
+    autoGeneratedTitleRef.current = title
     void renameSessionTitle(title).catch(() => {
       if (autoTitleSessionRef.current === key) {
-        autoTitleSessionRef.current = null;
-        autoGeneratedTitleRef.current = null;
+        autoTitleSessionRef.current = null
+        autoGeneratedTitleRef.current = null
       }
-    });
+    })
   }, [
     isAutoGeneratedSessionTitle,
     isExamMode,
@@ -787,68 +695,65 @@ export default function ChatPage() {
     selectedExamPaperName,
     state.sessionId,
     t,
-  ]);
-  const canRenameSession = Boolean(state.sessionId);
-  const titleInputRef = useRef<HTMLInputElement | null>(null);
-  const skipTitleCommitRef = useRef(false);
-  const [sessionTitleDraft, setSessionTitleDraft] =
-    useState(displaySessionTitle);
-  const [sessionTitleEditing, setSessionTitleEditing] = useState(false);
-  const [sessionTitleSaving, setSessionTitleSaving] = useState(false);
-  const [sessionTitleError, setSessionTitleError] = useState<string | null>(
-    null,
-  );
+  ])
+  const canRenameSession = Boolean(state.sessionId)
+  const titleInputRef = useRef<HTMLInputElement | null>(null)
+  const skipTitleCommitRef = useRef(false)
+  const [sessionTitleDraft, setSessionTitleDraft] = useState(displaySessionTitle)
+  const [sessionTitleEditing, setSessionTitleEditing] = useState(false)
+  const [sessionTitleSaving, setSessionTitleSaving] = useState(false)
+  const [sessionTitleError, setSessionTitleError] = useState<string | null>(null)
   useEffect(() => {
-    if (sessionTitleEditing) return;
-    setSessionTitleDraft(displaySessionTitle);
-  }, [displaySessionTitle, sessionTitleEditing]);
+    if (sessionTitleEditing) return
+    setSessionTitleDraft(displaySessionTitle)
+  }, [displaySessionTitle, sessionTitleEditing])
   useEffect(() => {
-    if (!sessionTitleEditing) return;
+    if (!sessionTitleEditing) return
     window.requestAnimationFrame(() => {
-      titleInputRef.current?.focus();
-      titleInputRef.current?.select();
-    });
-  }, [sessionTitleEditing]);
+      titleInputRef.current?.focus()
+      titleInputRef.current?.select()
+    })
+  }, [sessionTitleEditing])
   const startSessionTitleEdit = useCallback(() => {
-    if (!canRenameSession) return;
-    skipTitleCommitRef.current = false;
-    setSessionTitleError(null);
-    setSessionTitleDraft(displaySessionTitle);
-    setSessionTitleEditing(true);
-  }, [canRenameSession, displaySessionTitle]);
+    if (!canRenameSession) return
+    skipTitleCommitRef.current = false
+    setSessionTitleError(null)
+    setSessionTitleDraft(displaySessionTitle)
+    setSessionTitleEditing(true)
+  }, [canRenameSession, displaySessionTitle])
   const cancelSessionTitleEdit = useCallback(() => {
-    skipTitleCommitRef.current = true;
-    setSessionTitleDraft(displaySessionTitle);
-    setSessionTitleError(null);
-    setSessionTitleEditing(false);
-  }, [displaySessionTitle]);
+    skipTitleCommitRef.current = true
+    setSessionTitleDraft(displaySessionTitle)
+    setSessionTitleError(null)
+    setSessionTitleEditing(false)
+  }, [displaySessionTitle])
   const commitSessionTitleEdit = useCallback(async () => {
     if (skipTitleCommitRef.current) {
-      skipTitleCommitRef.current = false;
-      return;
+      skipTitleCommitRef.current = false
+      return
     }
-    const next = sessionTitleDraft.trim();
+    const next = sessionTitleDraft.trim()
     if (!next) {
-      setSessionTitleDraft(displaySessionTitle);
-      setSessionTitleEditing(false);
-      return;
+      setSessionTitleDraft(displaySessionTitle)
+      setSessionTitleEditing(false)
+      return
     }
     if (!canRenameSession || next === persistedSessionTitle) {
-      setSessionTitleDraft(next || displaySessionTitle);
-      setSessionTitleEditing(false);
-      return;
+      setSessionTitleDraft(next || displaySessionTitle)
+      setSessionTitleEditing(false)
+      return
     }
-    setSessionTitleSaving(true);
-    setSessionTitleError(null);
+    setSessionTitleSaving(true)
+    setSessionTitleError(null)
     try {
-      await renameSessionTitle(next);
-      setSessionTitleEditing(false);
+      await renameSessionTitle(next)
+      setSessionTitleEditing(false)
     } catch (error) {
-      console.error("Failed to rename session:", error);
-      setSessionTitleError(t("Rename failed"));
-      titleInputRef.current?.focus();
+      console.error('Failed to rename session:', error)
+      setSessionTitleError(t('Rename failed'))
+      titleInputRef.current?.focus()
     } finally {
-      setSessionTitleSaving(false);
+      setSessionTitleSaving(false)
     }
   }, [
     canRenameSession,
@@ -857,113 +762,106 @@ export default function ChatPage() {
     renameSessionTitle,
     sessionTitleDraft,
     t,
-  ]);
+  ])
   const handleSessionTitleKeyDown = useCallback(
     (event: KeyboardEvent<HTMLInputElement>) => {
-      if (event.key === "Enter") {
-        event.preventDefault();
-        void commitSessionTitleEdit();
-      } else if (event.key === "Escape") {
-        event.preventDefault();
-        cancelSessionTitleEdit();
+      if (event.key === 'Enter') {
+        event.preventDefault()
+        void commitSessionTitleEdit()
+      } else if (event.key === 'Escape') {
+        event.preventDefault()
+        cancelSessionTitleEdit()
       }
     },
-    [cancelSessionTitleEdit, commitSessionTitleEdit],
-  );
-  const { ref: composerRef, height: composerHeight } =
-    useMeasuredHeight<HTMLDivElement>();
-  const researchValidation = useMemo(
-    () => validateResearchConfig(researchConfig),
-    [researchConfig],
-  );
+    [cancelSessionTitleEdit, commitSessionTitleEdit]
+  )
+  const { ref: composerRef, height: composerHeight } = useMeasuredHeight<HTMLDivElement>()
+  const researchValidation = useMemo(() => validateResearchConfig(researchConfig), [researchConfig])
   const notebookReferenceGroups = useMemo(() => {
-    const groups = new Map<string, { notebookName: string; count: number }>();
-    selectedNotebookRecords.forEach((record) => {
-      const existing = groups.get(record.notebookId);
+    const groups = new Map<string, { notebookName: string; count: number }>()
+    selectedNotebookRecords.forEach(record => {
+      const existing = groups.get(record.notebookId)
       if (existing) {
-        existing.count += 1;
+        existing.count += 1
       } else {
         groups.set(record.notebookId, {
           notebookName: record.notebookName,
           count: 1,
-        });
+        })
       }
-    });
+    })
     return Array.from(groups.entries()).map(([notebookId, value]) => ({
       notebookId,
       ...value,
-    }));
-  }, [selectedNotebookRecords]);
+    }))
+  }, [selectedNotebookRecords])
   const notebookReferencesPayload = useMemo(() => {
-    const grouped = new Map<string, string[]>();
-    selectedNotebookRecords.forEach((record) => {
-      const current = grouped.get(record.notebookId) || [];
-      current.push(record.id);
-      grouped.set(record.notebookId, current);
-    });
+    const grouped = new Map<string, string[]>()
+    selectedNotebookRecords.forEach(record => {
+      const current = grouped.get(record.notebookId) || []
+      current.push(record.id)
+      grouped.set(record.notebookId, current)
+    })
     return Array.from(grouped.entries()).map(([notebook_id, record_ids]) => ({
       notebook_id,
       record_ids,
-    }));
-  }, [selectedNotebookRecords]);
+    }))
+  }, [selectedNotebookRecords])
   const bookReferencesPayload = useMemo(
     () => selectedBooksToPayload(selectedBookReferences),
-    [selectedBookReferences],
-  );
+    [selectedBookReferences]
+  )
   // Chat-history and imported-agent references are both just session ids and
   // share one backend field. Merge + de-dupe them here.
   const historyReferencesPayload = useMemo(
     () =>
       Array.from(
         new Set([
-          ...selectedHistorySessions.map((session) => session.sessionId),
-          ...selectedAgentSessions.map((session) => session.sessionId),
-        ]),
+          ...selectedHistorySessions.map(session => session.sessionId),
+          ...selectedAgentSessions.map(session => session.sessionId),
+        ])
       ),
-    [selectedHistorySessions, selectedAgentSessions],
-  );
+    [selectedHistorySessions, selectedAgentSessions]
+  )
   const questionNotebookReferencesPayload = useMemo(
-    () => selectedQuestionEntries.map((entry) => entry.id),
-    [selectedQuestionEntries],
-  );
-  const memoryReferencesPayload = useMemo(
-    () => [...selectedMemoryFiles],
-    [selectedMemoryFiles],
-  );
+    () => selectedQuestionEntries.map(entry => entry.id),
+    [selectedQuestionEntries]
+  )
+  const memoryReferencesPayload = useMemo(() => [...selectedMemoryFiles], [selectedMemoryFiles])
   const chatSaveMessages = useMemo(
     () =>
-      state.messages.map((msg) => ({
+      state.messages.map(msg => ({
         role: msg.role,
         content: msg.content,
         capability: msg.capability,
       })),
-    [state.messages],
-  );
+    [state.messages]
+  )
   const chatSavePayload = useMemo(() => {
-    if (!state.messages.length) return null;
+    if (!state.messages.length) return null
     const title =
       state.messages
-        .find((msg) => msg.role === "user")
+        .find(msg => msg.role === 'user')
         ?.content.trim()
-        .slice(0, 80) || "Chat Session";
+        .slice(0, 80) || 'Chat Session'
     return {
-      recordType: "chat" as const,
+      recordType: 'chat' as const,
       title,
       // The actual transcript / userQuery are rebuilt inside SaveToNotebookModal
       // from the user's selected subset of messages. We still provide a
       // sensible fallback for non-selection callers.
-      userQuery: "",
-      output: "",
+      userQuery: '',
+      output: '',
       metadata: {
-        source: "chat",
-        capability: state.activeCapability || "chat",
+        source: 'chat',
+        capability: state.activeCapability || 'chat',
         ui_language: state.language,
         session_id: state.sessionId,
         total_message_count: state.messages.length,
       },
-    };
-  }, [state.activeCapability, state.language, state.messages, state.sessionId]);
-  const lastMessage = state.messages[state.messages.length - 1];
+    }
+  }, [state.activeCapability, state.language, state.messages, state.sessionId])
+  const lastMessage = state.messages[state.messages.length - 1]
   const {
     containerRef: messagesContainerRef,
     endRef: messagesEndRef,
@@ -976,28 +874,28 @@ export default function ChatPage() {
     messageCount: state.messages.length,
     lastMessageContent: lastMessage?.content,
     lastEventCount: lastMessage?.events?.length,
-  });
+  })
   const copyAssistantMessage = useCallback(async (content: string) => {
-    if (!content.trim()) return;
+    if (!content.trim()) return
     try {
-      await navigator.clipboard.writeText(content);
+      await navigator.clipboard.writeText(content)
     } catch (error) {
-      console.error("Failed to copy assistant message:", error);
+      console.error('Failed to copy assistant message:', error)
     }
-  }, []);
+  }, [])
   /* ---- URL-driven session loading ---- */
 
   const navigateToHome = useCallback(() => {
-    router.replace("/home", { scroll: false });
-  }, [router]);
+    router.replace('/home', { scroll: false })
+  }, [router])
 
   /** Abort in-flight load + navigate home. */
   const cancelSessionLoad = useCallback(() => {
-    loadAbortRef.current?.abort();
-    loadAbortRef.current = null;
-    setSessionLoading(false);
-    navigateToHome();
-  }, [navigateToHome]);
+    loadAbortRef.current?.abort()
+    loadAbortRef.current = null
+    setSessionLoading(false)
+    navigateToHome()
+  }, [navigateToHome])
 
   /**
    * Shared helper: kick off a load. The user can cancel via the ✕ button;
@@ -1005,28 +903,28 @@ export default function ChatPage() {
    */
   const startSessionLoad = useCallback(
     (sid: string) => {
-      loadAbortRef.current?.abort();
-      const ctrl = new AbortController();
-      loadAbortRef.current = ctrl;
-      setSessionLoading(true);
+      loadAbortRef.current?.abort()
+      const ctrl = new AbortController()
+      loadAbortRef.current = ctrl
+      setSessionLoading(true)
 
       void loadSession(sid, ctrl.signal)
         .then(() => {
           if (!ctrl.signal.aborted) {
-            loadAbortRef.current = null;
-            setSessionLoading(false);
+            loadAbortRef.current = null
+            setSessionLoading(false)
           }
         })
         .catch(() => {
           if (!ctrl.signal.aborted) {
-            loadAbortRef.current = null;
-            setSessionLoading(false);
-            navigateToHome();
+            loadAbortRef.current = null
+            setSessionLoading(false)
+            navigateToHome()
           }
-        });
+        })
     },
-    [loadSession, navigateToHome],
-  );
+    [loadSession, navigateToHome]
+  )
 
   // Initial mount — load the session from the URL.
   // Uses a ref-based flag so Strict Mode double-mount doesn't break the flow:
@@ -1035,295 +933,279 @@ export default function ChatPage() {
   // deliberately OMITTED from cleanup — cancelSessionLoad handles
   // user-initiated cancellation.
   useEffect(() => {
-    if (initialLoadRef.current) return;
-    initialLoadRef.current = true;
+    if (initialLoadRef.current) return
+    initialLoadRef.current = true
     if (sessionIdParam) {
-      startSessionLoad(sessionIdParam);
+      startSessionLoad(sessionIdParam)
     } else {
-      newSession();
+      newSession()
     }
     return () => {
-      initialLoadRef.current = false;
-    };
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+      initialLoadRef.current = false
+    }
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   // The UnifiedChatProvider initializes its draft session in its own mount
   // effect. Apply the paper preset on the next macrotask so that initialization
   // cannot replace the capability/config immediately afterwards.
   useEffect(() => {
-    const paperId = originalPaperIdParam?.trim();
-    if (sessionIdParam || !paperId || originalPaperSetupRef.current) return;
+    const paperId = originalPaperIdParam?.trim()
+    if (sessionIdParam || !paperId || originalPaperSetupRef.current) return
     const timer = window.setTimeout(() => {
-      if (originalPaperSetupRef.current) return;
-      originalPaperSetupRef.current = true;
+      if (originalPaperSetupRef.current) return
+      originalPaperSetupRef.current = true
       // Legacy links are still accepted, but Original Paper is now an Exam
       // concern; never reopen it inside the ordinary Quiz capability.
-      setCapability("exam");
-      setQuizConfig((previous) => ({
+      setCapability('exam')
+      setQuizConfig(previous => ({
         ...normalizeQuizConfig(previous),
-        mode: "original_paper",
+        mode: 'original_paper',
         paper_id: paperId,
-        paper_library_id: "",
-        paper_path: "",
-      }));
-      setCapabilityConfigConfirmed(false);
-    }, 0);
-    return () => window.clearTimeout(timer);
-  }, [originalPaperIdParam, sessionIdParam, setCapability]);
+        paper_library_id: '',
+        paper_path: '',
+      }))
+      setCapabilityConfigConfirmed(false)
+    }, 0)
+    return () => window.clearTimeout(timer)
+  }, [originalPaperIdParam, sessionIdParam, setCapability])
 
   useEffect(() => {
-    const paperId = examPaperIdParam?.trim();
-    if (sessionIdParam || !paperId || examSetupRef.current) return;
+    const paperId = examPaperIdParam?.trim()
+    if (sessionIdParam || !paperId || examSetupRef.current) return
     const timer = window.setTimeout(() => {
-      if (examSetupRef.current) return;
-      examSetupRef.current = true;
-      setCapability("exam");
-      setQuizConfig((previous) => ({
+      if (examSetupRef.current) return
+      examSetupRef.current = true
+      setCapability('exam')
+      setQuizConfig(previous => ({
         ...normalizeQuizConfig(previous),
-        mode: "original_paper",
+        mode: 'original_paper',
         paper_id: paperId,
-        paper_library_id: examLibraryIdParam?.trim() || "",
-        paper_path: "",
-      }));
-      setCapabilityConfigConfirmed(false);
-    }, 0);
-    return () => window.clearTimeout(timer);
-  }, [examLibraryIdParam, examPaperIdParam, sessionIdParam, setCapability]);
+        paper_library_id: examLibraryIdParam?.trim() || '',
+        paper_path: '',
+      }))
+      setCapabilityConfigConfirmed(false)
+    }, 0)
+    return () => window.clearTimeout(timer)
+  }, [examLibraryIdParam, examPaperIdParam, sessionIdParam, setCapability])
 
   // When URL param changes (sidebar navigation), load the corresponding session
-  const prevSessionIdParam = useRef(sessionIdParam);
+  const prevSessionIdParam = useRef(sessionIdParam)
   useEffect(() => {
-    if (sessionIdParam === prevSessionIdParam.current) return;
-    prevSessionIdParam.current = sessionIdParam;
+    if (sessionIdParam === prevSessionIdParam.current) return
+    prevSessionIdParam.current = sessionIdParam
     // Abort any in-flight session load from the previous param
-    loadAbortRef.current?.abort();
-    loadAbortRef.current = null;
+    loadAbortRef.current?.abort()
+    loadAbortRef.current = null
     if (sessionIdParam) {
       if (sessionIdParam === state.sessionId) {
-        setSessionLoading(false);
-        return;
+        setSessionLoading(false)
+        return
       }
-      startSessionLoad(sessionIdParam);
+      startSessionLoad(sessionIdParam)
     } else {
-      newSession();
-      setSessionLoading(false);
+      newSession()
+      setSessionLoading(false)
     }
-  }, [sessionIdParam, startSessionLoad, newSession, state.sessionId]);
+  }, [sessionIdParam, startSessionLoad, newSession, state.sessionId])
 
   // When a new session_id is assigned by the server, update the URL
   useEffect(() => {
     if (state.sessionId && !sessionIdParam) {
-      router.replace(`/home/${state.sessionId}`, { scroll: false });
+      router.replace(`/home/${state.sessionId}`, { scroll: false })
     }
-  }, [state.sessionId, sessionIdParam, router]);
+  }, [state.sessionId, sessionIdParam, router])
 
   useEffect(() => {
-    setActiveSessionId(state.sessionId || sessionIdParam || null);
-  }, [state.sessionId, sessionIdParam, setActiveSessionId]);
+    setActiveSessionId(state.sessionId || sessionIdParam || null)
+  }, [state.sessionId, sessionIdParam, setActiveSessionId])
 
-  const refreshKnowledgeBases = useCallback(
-    async (options?: { force?: boolean }) => {
-      try {
-        const list = await listKnowledgeBases({ force: options?.force });
-        setKnowledgeBases(list);
-      } catch {
-        setKnowledgeBases([]);
-      }
-    },
-    [],
-  );
+  const refreshKnowledgeBases = useCallback(async (options?: { force?: boolean }) => {
+    try {
+      const list = await listKnowledgeBases({ force: options?.force })
+      setKnowledgeBases(list)
+    } catch {
+      setKnowledgeBases([])
+    }
+  }, [])
 
   const refreshPaperLibraries = useCallback(async () => {
     try {
-      setPaperLibraries(await listPaperLibraries({ force: true }));
+      setPaperLibraries(await listPaperLibraries({ force: true }))
     } catch {
-      setPaperLibraries([]);
+      setPaperLibraries([])
     }
-  }, []);
+  }, [])
 
   useEffect(() => {
-    if (isExamMode) void refreshPaperLibraries();
-  }, [isExamMode, refreshPaperLibraries]);
+    if (isExamMode) void refreshPaperLibraries()
+  }, [isExamMode, refreshPaperLibraries])
 
   /* Load KBs */
   useEffect(() => {
-    void refreshKnowledgeBases({ force: true });
-  }, [refreshKnowledgeBases]);
+    void refreshKnowledgeBases({ force: true })
+  }, [refreshKnowledgeBases])
 
-  const refreshUserEnabledTools = useCallback(
-    async (options?: { force?: boolean }) => {
-      try {
-        const list = await getEnabledOptionalTools({ force: options?.force });
-        setUserEnabledTools(list);
-      } catch {
-        setUserEnabledTools([]);
-      }
-    },
-    [],
-  );
+  const refreshUserEnabledTools = useCallback(async (options?: { force?: boolean }) => {
+    try {
+      const list = await getEnabledOptionalTools({ force: options?.force })
+      setUserEnabledTools(list)
+    } catch {
+      setUserEnabledTools([])
+    }
+  }, [])
 
   /* Load user tool prefs */
   useEffect(() => {
-    void refreshUserEnabledTools({ force: true });
-  }, [refreshUserEnabledTools]);
+    void refreshUserEnabledTools({ force: true })
+  }, [refreshUserEnabledTools])
 
   const refreshLLMOptions = useCallback(async () => {
-    setLLMOptionsLoading(true);
+    setLLMOptionsLoading(true)
     try {
-      const payload = await listLLMOptions();
-      setLLMOptions(payload.options);
-      setActiveLLMDefault(payload.active);
-      setLLMOptionsError(false);
+      const payload = await listLLMOptions()
+      setLLMOptions(payload.options)
+      setActiveLLMDefault(payload.active)
+      setLLMOptionsError(false)
     } catch {
-      setLLMOptionsError(true);
-      setLLMOptions([]);
-      setActiveLLMDefault(null);
+      setLLMOptionsError(true)
+      setLLMOptions([])
+      setActiveLLMDefault(null)
     } finally {
-      setLLMOptionsLoading(false);
+      setLLMOptionsLoading(false)
     }
-  }, []);
+  }, [])
 
   useEffect(() => {
-    void refreshLLMOptions();
-  }, [refreshLLMOptions]);
+    void refreshLLMOptions()
+  }, [refreshLLMOptions])
 
   useEffect(() => {
-    if (state.llmSelection || !activeLLMDefault) return;
-    setLLMSelection(activeLLMDefault);
-  }, [activeLLMDefault, setLLMSelection, state.llmSelection]);
+    if (state.llmSelection || !activeLLMDefault) return
+    setLLMSelection(activeLLMDefault)
+  }, [activeLLMDefault, setLLMSelection, state.llmSelection])
 
   useEffect(() => {
-    if (typeof window === "undefined") return;
+    if (typeof window === 'undefined') return
     const refresh = () => {
-      void refreshKnowledgeBases({ force: true });
-      void refreshLLMOptions();
+      void refreshKnowledgeBases({ force: true })
+      void refreshLLMOptions()
       // Picks up toggles the user changed in another tab (/settings/tools).
-      invalidateEnabledOptionalToolsCache();
-      void refreshUserEnabledTools({ force: true });
-    };
+      invalidateEnabledOptionalToolsCache()
+      void refreshUserEnabledTools({ force: true })
+    }
     const refreshWhenVisible = () => {
-      if (document.visibilityState === "visible") refresh();
-    };
-    window.addEventListener("focus", refresh);
-    window.addEventListener("pageshow", refresh);
-    document.addEventListener("visibilitychange", refreshWhenVisible);
+      if (document.visibilityState === 'visible') refresh()
+    }
+    window.addEventListener('focus', refresh)
+    window.addEventListener('pageshow', refresh)
+    document.addEventListener('visibilitychange', refreshWhenVisible)
     return () => {
-      window.removeEventListener("focus", refresh);
-      window.removeEventListener("pageshow", refresh);
-      document.removeEventListener("visibilitychange", refreshWhenVisible);
-    };
-  }, [refreshKnowledgeBases, refreshLLMOptions, refreshUserEnabledTools]);
+      window.removeEventListener('focus', refresh)
+      window.removeEventListener('pageshow', refresh)
+      document.removeEventListener('visibilitychange', refreshWhenVisible)
+    }
+  }, [refreshKnowledgeBases, refreshLLMOptions, refreshUserEnabledTools])
 
   useEffect(() => {
-    setCapabilityConfigs(loadCapabilityPlaygroundConfigs());
-  }, []);
+    setCapabilityConfigs(loadCapabilityPlaygroundConfigs())
+  }, [])
 
   /* URL query params (capability, tool) */
   useEffect(() => {
-    if (typeof window === "undefined") return;
-    const p = new URLSearchParams(window.location.search);
-    const qc = p.get("capability");
-    const qt = p.getAll("tool");
-    if (qc !== null) handleSelectCapability(qc || "");
+    if (typeof window === 'undefined') return
+    const p = new URLSearchParams(window.location.search)
+    const qc = p.get('capability')
+    const qt = p.getAll('tool')
+    if (qc !== null) handleSelectCapability(qc || '')
     else if (qt.length) {
-      const valid = qt.filter((t): t is ToolName =>
-        ALL_TOOLS.some((d) => d.name === t),
-      );
-      if (valid.length) setTools(Array.from(new Set(valid)));
+      const valid = qt.filter((t): t is ToolName => ALL_TOOLS.some(d => d.name === t))
+      if (valid.length) setTools(Array.from(new Set(valid)))
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [])
 
   useEffect(() => {
     const handler = (e: MouseEvent) => {
-      const t = e.target as Node;
+      const t = e.target as Node
       if (
         capMenuRef.current &&
         !capMenuRef.current.contains(t) &&
         capBtnRef.current &&
         !capBtnRef.current.contains(t)
       )
-        setCapMenuOpen(false);
+        setCapMenuOpen(false)
       if (
         spaceMenuRef.current &&
         !spaceMenuRef.current.contains(t) &&
         spaceBtnRef.current &&
         !spaceBtnRef.current.contains(t)
       )
-        setSpaceMenuOpen(false);
-    };
-    document.addEventListener("mousedown", handler);
-    return () => document.removeEventListener("mousedown", handler);
-  }, []);
+        setSpaceMenuOpen(false)
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [])
 
   // Keep state.enabledTools = (user's toggleable set) ∩ (capability's allowed
   // set). Re-runs when the user flips a toggle in /settings/tools or when
   // the active capability changes. The composer no longer owns this — the
   // /settings/tools page is the single switchboard.
   useEffect(() => {
-    if (userEnabledTools === null) return;
-    const allowed = new Set(activeCap.allowedTools);
-    const next = userEnabledTools.filter((tool) =>
-      allowed.has(tool as ToolName),
-    );
-    const current = state.enabledTools;
-    const same =
-      current.length === next.length &&
-      current.every((tool, idx) => tool === next[idx]);
-    if (!same) setTools(next);
-  }, [activeCap.allowedTools, setTools, state.enabledTools, userEnabledTools]);
+    if (userEnabledTools === null) return
+    const allowed = new Set(activeCap.allowedTools)
+    const next = userEnabledTools.filter(tool => allowed.has(tool as ToolName))
+    const current = state.enabledTools
+    const same = current.length === next.length && current.every((tool, idx) => tool === next[idx])
+    if (!same) setTools(next)
+  }, [activeCap.allowedTools, setTools, state.enabledTools, userEnabledTools])
 
   /* ---- handlers ---- */
 
   const handleSelectCapability = useCallback(
     (value: string) => {
-      const cap =
-        CAPABILITIES.find((c) => c.value === value) ?? CAPABILITIES[0];
-      const storageKey = cap.value || "chat";
+      const cap = CAPABILITIES.find(c => c.value === value) ?? CAPABILITIES[0]
+      const storageKey = cap.value || 'chat'
       const config = resolveCapabilityPlaygroundConfig(
         capabilityConfigs,
         storageKey,
-        cap.allowedTools,
-      );
-      autoStartCapabilityRef.current = null;
-      if (cap.value === "deep_question" && quizConfig.mode === "original_paper") {
-        setQuizConfig((previous) => ({
+        cap.allowedTools
+      )
+      autoStartCapabilityRef.current = null
+      if (cap.value === 'deep_question' && quizConfig.mode === 'original_paper') {
+        setQuizConfig(previous => ({
           ...previous,
-          mode: "custom",
-          paper_id: "",
-          paper_library_id: "",
-          paper_path: "",
-        }));
-        setQuizPdf(null);
+          mode: 'custom',
+          paper_id: '',
+          paper_library_id: '',
+          paper_path: '',
+        }))
+        setQuizPdf(null)
       }
-      setCapability(cap.value || null);
+      setCapability(cap.value || null)
       // Per-capability tool selection now derives from the user's saved
       // settings (/settings/tools) intersected with the capability's
       // allow-list. Playground-saved configs still override when the user
       // explicitly pinned tools in the playground for this capability.
-      const baseline =
-        userEnabledTools === null ? cap.allowedTools : userEnabledTools;
+      const baseline = userEnabledTools === null ? cap.allowedTools : userEnabledTools
       const enabledToolsForCap = capabilityConfigs[storageKey]
         ? [...config.enabledTools]
-        : baseline.filter((tool) =>
-            cap.allowedTools.includes(tool as ToolName),
-          );
-      setTools(enabledToolsForCap);
-      if (config.knowledgeBase) setKBs([config.knowledgeBase]);
+        : baseline.filter(tool => cap.allowedTools.includes(tool as ToolName))
+      setTools(enabledToolsForCap)
+      if (config.knowledgeBase) setKBs([config.knowledgeBase])
       // Switching capability invalidates any prior config confirmation —
       // the new capability has its own form that needs explicit confirm.
-      setCapabilityConfigConfirmed(false);
-      setCapMenuOpen(false);
+      setCapabilityConfigConfirmed(false)
+      setCapMenuOpen(false)
       // Explicit selection of a config-needing capability always pops the
       // right-side config card — even when already in that capability (the
       // transition-based auto-open can't fire then).
       if (
-        cap.value === "exam" ||
-        cap.value === "deep_question" ||
-        cap.value === "visualize" ||
-        cap.value === "deep_research"
+        cap.value === 'exam' ||
+        cap.value === 'deep_question' ||
+        cap.value === 'visualize' ||
+        cap.value === 'deep_research'
       ) {
-        ensureActivityPanelOpen();
+        ensureActivityPanelOpen()
       }
     },
     [
@@ -1334,128 +1216,125 @@ export default function ChatPage() {
       setKBs,
       setTools,
       userEnabledTools,
-    ],
-  );
+    ]
+  )
 
   const fileToAttachment = useCallback(
     (f: File): Promise<PendingAttachment> =>
       new Promise((resolve, reject) => {
         readFileAsDataUrl(f)
-          .then((raw) => {
+          .then(raw => {
             // SVG: treat as file (text extraction on server, vision models
             // reject SVG) but keep the data URL so the chip can render a
             // thumbnail via a raw <img> tag.
-            const svg = isSvgFilename(f.name) || f.type === "image/svg+xml";
-            const isImage = !svg && f.type.startsWith("image/");
-            const b64 = extractBase64FromDataUrl(raw);
+            const svg = isSvgFilename(f.name) || f.type === 'image/svg+xml'
+            const isImage = !svg && f.type.startsWith('image/')
+            const b64 = extractBase64FromDataUrl(raw)
             resolve({
-              type: isImage ? "image" : "file",
+              type: isImage ? 'image' : 'file',
               filename: f.name,
               base64: b64,
               previewUrl: isImage || svg ? raw : undefined,
               size: f.size,
               mimeType: f.type || undefined,
-            });
+            })
           })
-          .catch(reject);
+          .catch(reject)
       }),
-    [],
-  );
+    []
+  )
 
   const showAttachmentError = useCallback((message: string) => {
-    setAttachmentError(message);
+    setAttachmentError(message)
     if (attachmentErrorTimer.current) {
-      clearTimeout(attachmentErrorTimer.current);
+      clearTimeout(attachmentErrorTimer.current)
     }
     attachmentErrorTimer.current = setTimeout(() => {
-      setAttachmentError(null);
-      attachmentErrorTimer.current = null;
-    }, 4000);
-  }, []);
+      setAttachmentError(null)
+      attachmentErrorTimer.current = null
+    }, 4000)
+  }, [])
 
   const filterAndReportFiles = useCallback(
     (files: File[]): File[] => {
-      let runningTotal = attachments.reduce((s, a) => s + (a.size ?? 0), 0);
-      const accepted: File[] = [];
+      let runningTotal = attachments.reduce((s, a) => s + (a.size ?? 0), 0)
+      const accepted: File[] = []
       const rejected: {
-        name: string;
-        reason: "unsupported" | "too_large" | "quota";
-      }[] = [];
+        name: string
+        reason: 'unsupported' | 'too_large' | 'quota'
+      }[] = []
       for (const f of files) {
-        const kind = classifyFile(f);
+        const kind = classifyFile(f)
         if (!kind) {
-          rejected.push({ name: f.name, reason: "unsupported" });
-          continue;
+          rejected.push({ name: f.name, reason: 'unsupported' })
+          continue
         }
         if (f.size > attachmentLimits.maxFileBytes) {
-          rejected.push({ name: f.name, reason: "too_large" });
-          continue;
+          rejected.push({ name: f.name, reason: 'too_large' })
+          continue
         }
         if (runningTotal + f.size > attachmentLimits.maxTotalBytes) {
-          rejected.push({ name: f.name, reason: "quota" });
-          break;
+          rejected.push({ name: f.name, reason: 'quota' })
+          break
         }
-        runningTotal += f.size;
-        accepted.push(f);
+        runningTotal += f.size
+        accepted.push(f)
       }
       if (rejected.length) {
-        const first = rejected[0];
-        let msg: string;
-        if (first.reason === "too_large") {
-          msg = t("File too large: {{name}}", { name: first.name });
-        } else if (first.reason === "quota") {
-          msg = t("Too many files, skipped some");
+        const first = rejected[0]
+        let msg: string
+        if (first.reason === 'too_large') {
+          msg = t('File too large: {{name}}', { name: first.name })
+        } else if (first.reason === 'quota') {
+          msg = t('Too many files, skipped some')
         } else {
-          msg = t("Unsupported file type: {{name}}", { name: first.name });
+          msg = t('Unsupported file type: {{name}}', { name: first.name })
         }
-        showAttachmentError(msg);
+        showAttachmentError(msg)
       }
-      return accepted;
+      return accepted
     },
-    [attachments, attachmentLimits, showAttachmentError, t],
-  );
+    [attachments, attachmentLimits, showAttachmentError, t]
+  )
 
   const handlePaste = useCallback(
     async (event: React.ClipboardEvent) => {
-      const items = Array.from(event.clipboardData.items);
+      const items = Array.from(event.clipboardData.items)
       const files = items
-        .filter((item) => item.kind === "file")
-        .map((item) => item.getAsFile())
-        .filter((f): f is File => f !== null);
-      const accepted = filterAndReportFiles(files);
-      if (!accepted.length) return;
-      event.preventDefault();
-      const next = await Promise.all(accepted.map(fileToAttachment));
-      setAttachments((prev) => [...prev, ...next]);
+        .filter(item => item.kind === 'file')
+        .map(item => item.getAsFile())
+        .filter((f): f is File => f !== null)
+      const accepted = filterAndReportFiles(files)
+      if (!accepted.length) return
+      event.preventDefault()
+      const next = await Promise.all(accepted.map(fileToAttachment))
+      setAttachments(prev => [...prev, ...next])
     },
-    [fileToAttachment, filterAndReportFiles],
-  );
+    [fileToAttachment, filterAndReportFiles]
+  )
 
   const removeAttachment = useCallback((index: number) => {
-    setAttachments((prev) => prev.filter((_, i) => i !== index));
-  }, []);
+    setAttachments(prev => prev.filter((_, i) => i !== index))
+  }, [])
 
   const handlePreviewPendingAttachment = useCallback(
     (index: number) => {
-      const a = attachments[index];
-      if (!a) return;
+      const a = attachments[index]
+      if (!a) return
       setPreviewSource({
         filename: a.filename,
         mimeType: a.mimeType,
         type: a.type,
         base64: a.base64,
         size: a.size,
-      });
+      })
     },
-    [attachments],
-  );
+    [attachments]
+  )
 
   // Fold all messages once per state.messages change to power the
   // SessionActivityPanel on the right (tools, KBs, space refs, attachments).
-  const sessionActivity = useMemo(
-    () => buildSessionActivity(state.messages),
-    [state.messages],
-  );
+  const sessionActivity = useMemo(() => buildSessionActivity(state.messages), [state.messages])
 
   /**
    * Capability-config card rendered at the bottom of the Activity panel.
@@ -1470,15 +1349,13 @@ export default function ChatPage() {
    * wired through `capabilityConfigConfirmed` / `handleConfirmCapabilityConfig`.
    */
   const capabilityConfigSection = useMemo(() => {
-    if (!capabilityNeedsConfig) return null;
+    if (!capabilityNeedsConfig) return null
     if (isQuizMode || isExamMode) {
       return (
         <CapabilityConfigCard
-          capability={isExamMode ? "exam" : "deep_question"}
+          capability={isExamMode ? 'exam' : 'deep_question'}
           confirmed={capabilityConfigConfirmed}
-          canConfirm={
-            isExamMode ? quizConfig.paper_id.trim().length > 0 : true
-          }
+          canConfirm={isExamMode ? quizConfig.paper_id.trim().length > 0 : true}
           onConfirm={handleConfirmCapabilityConfig}
         >
           <QuizConfigPanel
@@ -1490,7 +1367,7 @@ export default function ChatPage() {
             onPaperNameChange={handleExamPaperNameChange}
           />
         </CapabilityConfigCard>
-      );
+      )
     }
     if (isVisualizeMode) {
       return (
@@ -1500,17 +1377,14 @@ export default function ChatPage() {
           canConfirm
           onConfirm={handleConfirmCapabilityConfig}
         >
-          <VisualizeConfigPanel
-            value={visualizeConfig}
-            onChange={handleChangeVisualizeConfig}
-          />
+          <VisualizeConfigPanel value={visualizeConfig} onChange={handleChangeVisualizeConfig} />
         </CapabilityConfigCard>
-      );
+      )
     }
     // Research: forward validation errors so the user sees what's missing
     // before they hit Confirm. `canConfirm` only flips false when there's
     // an actual error (e.g. mode/depth not selected).
-    const researchErrorMessages = Object.values(researchValidation.errors);
+    const researchErrorMessages = Object.values(researchValidation.errors)
     return (
       <CapabilityConfigCard
         capability="deep_research"
@@ -1525,7 +1399,7 @@ export default function ChatPage() {
           onChange={handleChangeResearchConfig}
         />
       </CapabilityConfigCard>
-    );
+    )
   }, [
     capabilityNeedsConfig,
     isQuizMode,
@@ -1543,112 +1417,106 @@ export default function ChatPage() {
     researchConfig,
     researchValidation.errors,
     handleChangeResearchConfig,
-  ]);
+  ])
 
   // Clicking an attachment (from the Activity home or from a chat message)
   // routes into the panel as a new file tab. It auto-opens and the
   // preference is persisted so a follow-up click feels instant.
   const handlePreviewMessageAttachment = useCallback((a: MessageAttachment) => {
-    viewerPanelRef.current?.openFileTab(a);
-  }, []);
+    viewerPanelRef.current?.openFileTab(a)
+  }, [])
 
   // Event-delegated link interception inside the messages container. When
   // the user clicks an http(s) link in an assistant message, we open it as
   // a Viewer tab instead of letting the browser navigate / open a new tab.
   // Cmd/ctrl/shift + click keep their standard meaning (open in browser).
   const handleMessagesClick = useCallback((event: React.MouseEvent) => {
-    if (event.defaultPrevented) return;
-    if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey)
-      return;
-    if (event.button !== 0) return;
-    const target = event.target as HTMLElement | null;
-    if (!target) return;
-    const anchor = target.closest<HTMLAnchorElement>("a[href]");
-    if (!anchor) return;
-    const href = anchor.getAttribute("href");
-    if (!href) return;
-    if (!/^https?:\/\//i.test(href)) return;
-    event.preventDefault();
-    viewerPanelRef.current?.openWebTab(href);
-  }, []);
+    if (event.defaultPrevented) return
+    if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return
+    if (event.button !== 0) return
+    const target = event.target as HTMLElement | null
+    if (!target) return
+    const anchor = target.closest<HTMLAnchorElement>('a[href]')
+    if (!anchor) return
+    const href = anchor.getAttribute('href')
+    if (!href) return
+    if (!/^https?:\/\//i.test(href)) return
+    event.preventDefault()
+    viewerPanelRef.current?.openWebTab(href)
+  }, [])
 
   const handleClosePreview = useCallback(() => {
-    setPreviewSource(null);
-  }, []);
+    setPreviewSource(null)
+  }, [])
 
   const handleDragEnter = useCallback((e: React.DragEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    dragCounter.current += 1;
-    if (e.dataTransfer.types.includes("Files")) setDragging(true);
-  }, []);
+    e.preventDefault()
+    e.stopPropagation()
+    dragCounter.current += 1
+    if (e.dataTransfer.types.includes('Files')) setDragging(true)
+  }, [])
 
   const handleDragLeave = useCallback((e: React.DragEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    dragCounter.current -= 1;
-    if (dragCounter.current === 0) setDragging(false);
-  }, []);
+    e.preventDefault()
+    e.stopPropagation()
+    dragCounter.current -= 1
+    if (dragCounter.current === 0) setDragging(false)
+  }, [])
 
   const handleDragOver = useCallback((e: React.DragEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-  }, []);
+    e.preventDefault()
+    e.stopPropagation()
+  }, [])
 
   const handleDrop = useCallback(
     async (e: React.DragEvent) => {
-      e.preventDefault();
-      e.stopPropagation();
-      setDragging(false);
-      dragCounter.current = 0;
-      const accepted = filterAndReportFiles(Array.from(e.dataTransfer.files));
-      if (!accepted.length) return;
-      const next = await Promise.all(accepted.map(fileToAttachment));
-      setAttachments((prev) => [...prev, ...next]);
+      e.preventDefault()
+      e.stopPropagation()
+      setDragging(false)
+      dragCounter.current = 0
+      const accepted = filterAndReportFiles(Array.from(e.dataTransfer.files))
+      if (!accepted.length) return
+      const next = await Promise.all(accepted.map(fileToAttachment))
+      setAttachments(prev => [...prev, ...next])
     },
-    [fileToAttachment, filterAndReportFiles],
-  );
+    [fileToAttachment, filterAndReportFiles]
+  )
 
   const handleAddFiles = useCallback(
     async (files: File[]) => {
-      const accepted = filterAndReportFiles(files);
-      if (!accepted.length) return;
-      const next = await Promise.all(accepted.map(fileToAttachment));
-      setAttachments((prev) => [...prev, ...next]);
+      const accepted = filterAndReportFiles(files)
+      if (!accepted.length) return
+      const next = await Promise.all(accepted.map(fileToAttachment))
+      setAttachments(prev => [...prev, ...next])
     },
-    [fileToAttachment, filterAndReportFiles],
-  );
+    [fileToAttachment, filterAndReportFiles]
+  )
 
   // Connected subagents are stored as ``type: subagent`` KBs. Derive the
   // selected one before the send callback so the callback can depend on the
   // current selection instead of capturing an undeclared-later value.
   const agentNameSet = useMemo(
-    () =>
-      new Set(
-        knowledgeBases
-          .filter((kb) => kb.metadata?.type === "subagent")
-          .map((kb) => kb.name),
-      ),
-    [knowledgeBases],
-  );
+    () => new Set(knowledgeBases.filter(kb => kb.metadata?.type === 'subagent').map(kb => kb.name)),
+    [knowledgeBases]
+  )
   const selectedAgent = useMemo(
-    () => state.knowledgeBases.find((name) => agentNameSet.has(name)) ?? null,
-    [state.knowledgeBases, agentNameSet],
-  );
+    () => state.knowledgeBases.find(name => agentNameSet.has(name)) ?? null,
+    [state.knowledgeBases, agentNameSet]
+  )
   // How many times DeepTutor may consult the selected agent this turn. Seeded
   // from the configured default; the composer's stepper overrides it per turn.
-  const [subagentBudget, setSubagentBudget] = useState<number | null>(null);
+  const [subagentBudget, setSubagentBudget] = useState<number | null>(null)
   useEffect(() => {
     void getSubagentSettings()
-      .then((settings) => setSubagentBudget(settings.consult_budget))
-      .catch(() => undefined);
-  }, []);
+      .then(settings => setSubagentBudget(settings.consult_budget))
+      .catch(() => undefined)
+  }, [])
 
   const handleSend = useCallback(
     async (
       content: string,
       configOverride?: Record<string, unknown>,
-      options?: SendMessageOptions,
+      options?: SendMessageOptions
     ) => {
       if (
         (!content &&
@@ -1660,50 +1528,48 @@ export default function ChatPage() {
           !selectedMemoryFiles.length) ||
         state.isStreaming
       )
-        return;
+        return
 
-      let extraAttachments = attachments.map((a) => ({
+      let extraAttachments = attachments.map(a => ({
         type: a.type,
         filename: a.filename,
         base64: a.base64,
         mime_type: a.mimeType,
-      }));
-      let config: Record<string, unknown> | undefined;
+      }))
+      let config: Record<string, unknown> | undefined
 
       if (isQuizMode || isExamMode) {
         config = isExamMode
           ? resolveExamWSConfig({ examActive: examHasQuestions, quizConfig })
-          : resolveQuizWSConfig({ quizActive: quizHasQuestions, quizConfig });
-        if (quizConfig.mode === "mimic" && quizPdf) {
-          const b64 = extractBase64FromDataUrl(
-            await readFileAsDataUrl(quizPdf),
-          );
+          : resolveQuizWSConfig({ quizActive: quizHasQuestions, quizConfig })
+        if (quizConfig.mode === 'mimic' && quizPdf) {
+          const b64 = extractBase64FromDataUrl(await readFileAsDataUrl(quizPdf))
           extraAttachments = [
             ...extraAttachments,
             {
-              type: "pdf",
+              type: 'pdf',
               filename: quizPdf.name,
               base64: b64,
-              mime_type: "application/pdf",
+              mime_type: 'application/pdf',
             },
-          ];
+          ]
         }
       }
-      if (isVisualizeMode) config = buildVisualizeWSConfig(visualizeConfig);
+      if (isVisualizeMode) config = buildVisualizeWSConfig(visualizeConfig)
       if (isResearchMode) {
-        if (!researchValidation.valid) return;
-        config = buildResearchWSConfig(researchConfig);
+        if (!researchValidation.valid) return
+        config = buildResearchWSConfig(researchConfig)
       }
       if (configOverride) {
-        config = { ...(config ?? {}), ...configOverride };
+        config = { ...(config ?? {}), ...configOverride }
       }
       // When a connected agent is selected, carry the per-turn consult budget
       // (how many times DeepTutor may ask it) so the subagent capability uses it.
       if (selectedAgent && subagentBudget) {
-        config = { ...(config ?? {}), subagent_consult_budget: subagentBudget };
+        config = { ...(config ?? {}), subagent_consult_budget: subagentBudget }
       }
 
-      const memoryPayload = [...memoryReferencesPayload];
+      const memoryPayload = [...memoryReferencesPayload]
       const messageContent =
         content ||
         (selectedNotebookRecords.length ||
@@ -1712,11 +1578,11 @@ export default function ChatPage() {
         selectedAgentSessions.length ||
         selectedQuestionEntries.length ||
         memoryPayload.length
-          ? t("Please use the selected context to help with this request.")
-          : "") ||
-        (attachments.some((a) => a.type === "image")
-          ? t("Please analyze the attached image(s).")
-          : "");
+          ? t('Please use the selected context to help with this request.')
+          : '') ||
+        (attachments.some(a => a.type === 'image')
+          ? t('Please analyze the attached image(s).')
+          : '')
       // Persona is NOT passed per-call here: it is a session-level
       // preference (state.personaSelection) that sendMessage resolves and
       // sends with every turn.
@@ -1729,17 +1595,17 @@ export default function ChatPage() {
         { ...options, bookReferences: bookReferencesPayload },
         questionNotebookReferencesPayload,
         undefined,
-        memoryPayload,
-      );
-      shouldAutoScrollRef.current = true;
-      setAttachments([]);
-      setSelectedBookReferences([]);
-      setSelectedNotebookRecords([]);
-      setSelectedHistorySessions([]);
-      setSelectedAgentSessions([]);
-      setSelectedQuestionEntries([]);
-      setSelectedMemoryFiles([]);
-      return startedTurn;
+        memoryPayload
+      )
+      shouldAutoScrollRef.current = true
+      setAttachments([])
+      setSelectedBookReferences([])
+      setSelectedNotebookRecords([])
+      setSelectedHistorySessions([])
+      setSelectedAgentSessions([])
+      setSelectedQuestionEntries([])
+      setSelectedMemoryFiles([])
+      return startedTurn
     },
     [
       attachments,
@@ -1771,43 +1637,36 @@ export default function ChatPage() {
       subagentBudget,
       t,
       visualizeConfig,
-    ],
-  );
+    ]
+  )
 
   // Quiz and Exam are configuration-first capabilities: once the user
   // confirms a valid right-side form, start the turn immediately instead of
   // leaving the workspace empty while waiting for a second Send click.
   useEffect(() => {
-    const capability = autoStartCapabilityRef.current;
-    if (!capability || !capabilityConfigConfirmed || state.isStreaming) return;
+    const capability = autoStartCapabilityRef.current
+    if (!capability || !capabilityConfigConfirmed || state.isStreaming) return
     if (activeCap.value !== capability) {
-      autoStartCapabilityRef.current = null;
-      return;
+      autoStartCapabilityRef.current = null
+      return
     }
-    autoStartCapabilityRef.current = null;
+    autoStartCapabilityRef.current = null
     // Explicit start/restart: override the proctor routing for this turn so
     // Confirm always (re)runs the selected paper / generates fresh questions.
     void handleSend(
-      capability === "exam" ? t("Start Exam") : t("Generate Quiz"),
-      capability === "exam"
-        ? { mode: "original_paper", paper_id: quizConfig.paper_id }
-        : buildQuizWSConfig(quizConfig),
-    );
-  }, [
-    activeCap.value,
-    capabilityConfigConfirmed,
-    handleSend,
-    quizConfig,
-    state.isStreaming,
-    t,
-  ]);
+      capability === 'exam' ? t('Start Exam') : t('Generate Quiz'),
+      capability === 'exam'
+        ? { mode: 'original_paper', paper_id: quizConfig.paper_id }
+        : buildQuizWSConfig(quizConfig)
+    )
+  }, [activeCap.value, capabilityConfigConfirmed, handleSend, quizConfig, state.isStreaming, t])
 
   const handleConfirmOutline = useCallback(
     (
       outline: OutlineItem[],
       _topic: string,
       originalConfig?: Record<string, unknown> | null,
-      originalSnapshot?: MessageRequestSnapshot | null,
+      originalSnapshot?: MessageRequestSnapshot | null
     ) => {
       const config: Record<string, unknown> = {
         ...(originalConfig ?? {
@@ -1815,16 +1674,15 @@ export default function ChatPage() {
           depth: researchConfig.depth,
         }),
         confirmed_outline: outline,
-      };
-      const requestSnapshotOverride: MessageRequestSnapshot | undefined =
-        originalSnapshot
-          ? {
-              ...originalSnapshot,
-              content: _topic,
-              capability: "deep_research",
-              config,
-            }
-          : undefined;
+      }
+      const requestSnapshotOverride: MessageRequestSnapshot | undefined = originalSnapshot
+        ? {
+            ...originalSnapshot,
+            content: _topic,
+            capability: 'deep_research',
+            config,
+          }
+        : undefined
       sendMessage(
         _topic,
         originalSnapshot?.attachments ?? [],
@@ -1839,210 +1697,174 @@ export default function ChatPage() {
         },
         originalSnapshot?.questionNotebookReferences,
         originalSnapshot?.persona,
-        originalSnapshot?.memoryReferences,
-      );
-      shouldAutoScrollRef.current = true;
+        originalSnapshot?.memoryReferences
+      )
+      shouldAutoScrollRef.current = true
     },
-    [researchConfig, sendMessage, shouldAutoScrollRef],
-  );
+    [researchConfig, sendMessage, shouldAutoScrollRef]
+  )
 
   const handleRegenerateMessage = useCallback(() => {
-    regenerateLastMessage();
-  }, [regenerateLastMessage]);
+    regenerateLastMessage()
+  }, [regenerateLastMessage])
 
   const handleToggleKB = useCallback(
     (name: string) => {
-      const current = state.knowledgeBases;
-      setKBs(
-        current.includes(name)
-          ? current.filter((kb) => kb !== name)
-          : [...current, name],
-      );
+      const current = state.knowledgeBases
+      setKBs(current.includes(name) ? current.filter(kb => kb !== name) : [...current, name])
     },
-    [setKBs, state.knowledgeBases],
-  );
+    [setKBs, state.knowledgeBases]
+  )
   const handleSelectPaperLibrary = useCallback(
     (libraryId: string) => {
-      if (quizConfig.paper_library_id === libraryId) return;
+      if (quizConfig.paper_library_id === libraryId) return
       handleChangeQuizConfig({
         ...quizConfig,
-        mode: "original_paper",
+        mode: 'original_paper',
         paper_library_id: libraryId,
-        paper_id: "",
-        paper_path: "",
-      });
+        paper_id: '',
+        paper_path: '',
+      })
     },
-    [handleChangeQuizConfig, quizConfig],
-  );
+    [handleChangeQuizConfig, quizConfig]
+  )
   // Real knowledge bases and connected subagents render as separate composer
   // controls even though both travel through the knowledge_bases request path.
   const kbOptions = useMemo(
-    () => knowledgeBases.filter((kb) => kb.metadata?.type !== "subagent"),
-    [knowledgeBases],
-  );
+    () => knowledgeBases.filter(kb => kb.metadata?.type !== 'subagent'),
+    [knowledgeBases]
+  )
   const agentOptions = useMemo(
     () =>
       knowledgeBases
-        .filter((kb) => kb.metadata?.type === "subagent")
-        .map((kb) => ({ name: kb.name, kind: kb.metadata?.agent_kind })),
-    [knowledgeBases],
-  );
+        .filter(kb => kb.metadata?.type === 'subagent')
+        .map(kb => ({ name: kb.name, kind: kb.metadata?.agent_kind })),
+    [knowledgeBases]
+  )
   const selectedKbOnly = useMemo(
-    () => state.knowledgeBases.filter((n) => !agentNameSet.has(n)),
-    [state.knowledgeBases, agentNameSet],
-  );
+    () => state.knowledgeBases.filter(n => !agentNameSet.has(n)),
+    [state.knowledgeBases, agentNameSet]
+  )
   const handleSelectAgent = useCallback(
     (name: string | null) => {
       // Single-select: clear any selected agent, then set the new one (if any).
-      const withoutAgents = state.knowledgeBases.filter(
-        (n) => !agentNameSet.has(n),
-      );
-      setKBs(name ? [...withoutAgents, name] : withoutAgents);
+      const withoutAgents = state.knowledgeBases.filter(n => !agentNameSet.has(n))
+      setKBs(name ? [...withoutAgents, name] : withoutAgents)
     },
-    [setKBs, state.knowledgeBases, agentNameSet],
-  );
+    [setKBs, state.knowledgeBases, agentNameSet]
+  )
   // Honor `?agent=<name>` once its connection KB has loaded: preselect it so a
   // partner opened from the partner list starts the chat already targeting it.
   useEffect(() => {
-    if (agentPreselectDoneRef.current) return;
-    const name = pendingAgentRef.current;
-    if (!name || !agentNameSet.has(name)) return;
-    agentPreselectDoneRef.current = true;
-    handleSelectAgent(name);
-  }, [agentNameSet, handleSelectAgent]);
+    if (agentPreselectDoneRef.current) return
+    const name = pendingAgentRef.current
+    if (!name || !agentNameSet.has(name)) return
+    agentPreselectDoneRef.current = true
+    handleSelectAgent(name)
+  }, [agentNameSet, handleSelectAgent])
   const handleSelectNotebookPicker = useCallback(() => {
-    setShowNotebookPicker(true);
-  }, []);
+    setShowNotebookPicker(true)
+  }, [])
   const handleSelectBookPicker = useCallback(() => {
-    setShowBookPicker(true);
-  }, []);
+    setShowBookPicker(true)
+  }, [])
   const handleSelectHistoryPicker = useCallback(() => {
-    setShowHistoryPicker(true);
-  }, []);
+    setShowHistoryPicker(true)
+  }, [])
   const handleSelectAgentsPicker = useCallback(() => {
-    setShowAgentsPicker(true);
-  }, []);
+    setShowAgentsPicker(true)
+  }, [])
   const handleSelectQuestionBankPicker = useCallback(() => {
-    setShowQuestionBankPicker(true);
-  }, []);
+    setShowQuestionBankPicker(true)
+  }, [])
   const handleSelectPersonaPicker = useCallback(() => {
     // The @space "Persona" entry now opens the session persona selector.
-    setPersonaSelectorOpen(true);
-  }, []);
+    setPersonaSelectorOpen(true)
+  }, [])
   const handleSelectMemoryPicker = useCallback(() => {
-    setShowMemoryPicker(true);
-  }, []);
+    setShowMemoryPicker(true)
+  }, [])
   const handleRemoveHistory = useCallback((sessionId: string) => {
-    setSelectedHistorySessions((prev) =>
-      prev.filter((item) => item.sessionId !== sessionId),
-    );
-  }, []);
+    setSelectedHistorySessions(prev => prev.filter(item => item.sessionId !== sessionId))
+  }, [])
   const handleRemoveAgent = useCallback((sessionId: string) => {
-    setSelectedAgentSessions((prev) =>
-      prev.filter((item) => item.sessionId !== sessionId),
-    );
-  }, []);
+    setSelectedAgentSessions(prev => prev.filter(item => item.sessionId !== sessionId))
+  }, [])
   const handleRemoveNotebook = useCallback((notebookId: string) => {
-    setSelectedNotebookRecords((prev) =>
-      prev.filter((record) => record.notebookId !== notebookId),
-    );
-  }, []);
+    setSelectedNotebookRecords(prev => prev.filter(record => record.notebookId !== notebookId))
+  }, [])
   const handleRemoveBookReference = useCallback((bookId: string) => {
-    setSelectedBookReferences((prev) =>
-      prev.filter((record) => record.bookId !== bookId),
-    );
-  }, []);
+    setSelectedBookReferences(prev => prev.filter(record => record.bookId !== bookId))
+  }, [])
   const handleRemoveQuestion = useCallback((entryId: number) => {
-    setSelectedQuestionEntries((prev) =>
-      prev.filter((entry) => entry.id !== entryId),
-    );
-  }, []);
+    setSelectedQuestionEntries(prev => prev.filter(entry => entry.id !== entryId))
+  }, [])
   const handleClearPersona = useCallback(() => {
-    setPersonaSelection("");
-  }, [setPersonaSelection]);
+    setPersonaSelection('')
+  }, [setPersonaSelection])
 
   const handleToggleMemoryFile = useCallback((file: SpaceMemoryFile) => {
-    setSelectedMemoryFiles((prev) =>
-      prev.includes(file)
-        ? prev.filter((item) => item !== file)
-        : [...prev, file],
-    );
-  }, []);
+    setSelectedMemoryFiles(prev =>
+      prev.includes(file) ? prev.filter(item => item !== file) : [...prev, file]
+    )
+  }, [])
 
   const handleCloseNotebookPicker = useCallback(() => {
-    setShowNotebookPicker(false);
-  }, []);
+    setShowNotebookPicker(false)
+  }, [])
   const handleCloseBookPicker = useCallback(() => {
-    setShowBookPicker(false);
-  }, []);
-  const handleApplyBookReferences = useCallback(
-    (references: SelectedBookReference[]) => {
-      setSelectedBookReferences(references);
-    },
-    [],
-  );
-  const handleApplyNotebookRecords = useCallback(
-    (records: SelectedRecord[]) => {
-      setSelectedNotebookRecords(records);
-    },
-    [],
-  );
+    setShowBookPicker(false)
+  }, [])
+  const handleApplyBookReferences = useCallback((references: SelectedBookReference[]) => {
+    setSelectedBookReferences(references)
+  }, [])
+  const handleApplyNotebookRecords = useCallback((records: SelectedRecord[]) => {
+    setSelectedNotebookRecords(records)
+  }, [])
   const handleCloseHistoryPicker = useCallback(() => {
-    setShowHistoryPicker(false);
-  }, []);
-  const handleApplyHistorySessions = useCallback(
-    (sessions: SelectedHistorySession[]) => {
-      setSelectedHistorySessions(sessions);
-    },
-    [],
-  );
+    setShowHistoryPicker(false)
+  }, [])
+  const handleApplyHistorySessions = useCallback((sessions: SelectedHistorySession[]) => {
+    setSelectedHistorySessions(sessions)
+  }, [])
   const handleCloseAgentsPicker = useCallback(() => {
-    setShowAgentsPicker(false);
-  }, []);
-  const handleApplyAgentSessions = useCallback(
-    (sessions: SelectedHistorySession[]) => {
-      setSelectedAgentSessions(sessions);
-    },
-    [],
-  );
+    setShowAgentsPicker(false)
+  }, [])
+  const handleApplyAgentSessions = useCallback((sessions: SelectedHistorySession[]) => {
+    setSelectedAgentSessions(sessions)
+  }, [])
   const handleCloseQuestionBankPicker = useCallback(() => {
-    setShowQuestionBankPicker(false);
-  }, []);
-  const handleApplyQuestionEntries = useCallback(
-    (entries: SelectedQuestionEntry[]) => {
-      setSelectedQuestionEntries(entries);
-    },
-    [],
-  );
+    setShowQuestionBankPicker(false)
+  }, [])
+  const handleApplyQuestionEntries = useCallback((entries: SelectedQuestionEntry[]) => {
+    setSelectedQuestionEntries(entries)
+  }, [])
   const handleCloseMemoryPicker = useCallback(() => {
-    setShowMemoryPicker(false);
-  }, []);
+    setShowMemoryPicker(false)
+  }, [])
   const handleApplyMemoryFiles = useCallback((files: SpaceMemoryFile[]) => {
-    setSelectedMemoryFiles(files);
-  }, []);
+    setSelectedMemoryFiles(files)
+  }, [])
   const handleCloseSaveModal = useCallback(() => {
-    setShowSaveModal(false);
-  }, []);
+    setShowSaveModal(false)
+  }, [])
 
   const handleDownloadMarkdown = useCallback(() => {
-    if (!state.messages.length) return;
+    if (!state.messages.length) return
     const title =
       state.messages
-        .find((msg) => msg.role === "user")
+        .find(msg => msg.role === 'user')
         ?.content.trim()
-        .slice(0, 80) || "Chat Session";
-    downloadChatMarkdown(state.messages, { title });
-  }, [state.messages]);
+        .slice(0, 80) || 'Chat Session'
+    downloadChatMarkdown(state.messages, { title })
+  }, [state.messages])
 
   return (
     <QuizFollowupProvider>
       <GeogebraTabProvider>
         <QuizFollowupBridge viewerPanelRef={viewerPanelRef} />
         <GeogebraTabBridge viewerPanelRef={viewerPanelRef} />
-        <SubagentTabWatcher
-          messages={state.messages}
-          viewerPanelRef={viewerPanelRef}
-        />
+        <SubagentTabWatcher messages={state.messages} viewerPanelRef={viewerPanelRef} />
         <div
           // When the preview drawer is open AND the viewport is wide enough,
           // push the chat content to the left by the drawer's width so the two
@@ -2051,8 +1873,8 @@ export default function ChatPage() {
           // the remaining ~30 px would be useless. The actual padding +
           // transition lives in `chat-preview-shell` (globals.css) so we can
           // hand-tune it without fighting Tailwind's arbitrary-value parser.
-          data-preview-open={previewSource ? "true" : "false"}
-          data-viewer-open={viewerPanelOpen ? "true" : "false"}
+          data-preview-open={previewSource ? 'true' : 'false'}
+          data-viewer-open={viewerPanelOpen ? 'true' : 'false'}
           className="chat-preview-shell flex h-full flex-col overflow-hidden bg-[var(--background)]"
         >
           <div className="mx-auto flex w-full max-w-[960px] flex-wrap items-center justify-between gap-x-3 gap-y-1.5 px-6 pt-3 pb-0">
@@ -2061,11 +1883,11 @@ export default function ChatPage() {
                 <input
                   ref={titleInputRef}
                   value={sessionTitleDraft}
-                  onChange={(event) => setSessionTitleDraft(event.target.value)}
+                  onChange={event => setSessionTitleDraft(event.target.value)}
                   onBlur={() => void commitSessionTitleEdit()}
                   onKeyDown={handleSessionTitleKeyDown}
                   disabled={sessionTitleSaving}
-                  aria-label={t("Session title")}
+                  aria-label={t('Session title')}
                   className="min-w-0 flex-1 rounded-xl border border-[var(--border)] bg-[var(--background)] px-3 py-1.5 font-serif text-[17px] font-semibold tracking-[-0.01em] text-[var(--foreground)] shadow-sm outline-none transition focus:border-[var(--ring)] focus:ring-2 focus:ring-[var(--ring)]/20 disabled:opacity-60"
                   maxLength={100}
                 />
@@ -2076,8 +1898,8 @@ export default function ChatPage() {
                   disabled={!canRenameSession}
                   title={
                     canRenameSession
-                      ? t("Click to rename session")
-                      : t("Start a conversation to rename")
+                      ? t('Click to rename session')
+                      : t('Start a conversation to rename')
                   }
                   className="inline-flex min-w-0 max-w-full items-center gap-2 rounded-xl px-2 py-1 text-left font-serif text-[17px] font-semibold tracking-[-0.01em] text-[var(--foreground)] transition hover:bg-[var(--muted)]/55 disabled:cursor-default disabled:hover:bg-transparent"
                 >
@@ -2089,7 +1911,7 @@ export default function ChatPage() {
               )}
               {sessionTitleSaving ? (
                 <span className="shrink-0 text-xs text-[var(--muted-foreground)]">
-                  {t("Saving...")}
+                  {t('Saving...')}
                 </span>
               ) : null}
               {sessionTitleError ? (
@@ -2103,21 +1925,21 @@ export default function ChatPage() {
                 onClick={() => setShowSaveModal(true)}
                 disabled={!chatSavePayload}
                 icon={BookmarkPlus}
-                label={t("Save to Notebook")}
+                label={t('Save to Notebook')}
               />
               <HeaderActionButton
                 onClick={handleDownloadMarkdown}
                 disabled={!state.messages.length}
                 icon={Download}
-                label={t("Download Markdown")}
-                title={t("Download chat history as Markdown")}
+                label={t('Download Markdown')}
+                title={t('Download chat history as Markdown')}
               />
               <HeaderActionButton
                 onClick={toggleViewerPanel}
                 active={viewerPanelOpen}
                 icon={PanelRight}
-                label={t("Activity")}
-                title={t("Session activity, attachments & previews")}
+                label={t('Activity')}
+                title={t('Session activity, attachments & previews')}
               />
             </div>
           </div>
@@ -2155,7 +1977,7 @@ export default function ChatPage() {
                 // header and composer (siblings outside this scrollport) on
                 // classic-scrollbar platforms; plain `stable` would shift it
                 // ~half a scrollbar-width left of them.
-                className={`w-full flex-1 min-h-0 overflow-y-auto [scrollbar-gutter:stable_both-edges] ${hasMessages ? "pt-6" : "pt-2 pb-6"}`}
+                className={`w-full flex-1 min-h-0 overflow-y-auto [scrollbar-gutter:stable_both-edges] ${hasMessages ? 'pt-6' : 'pt-2 pb-6'}`}
                 style={
                   hasMessages
                     ? (() => {
@@ -2167,12 +1989,12 @@ export default function ChatPage() {
                         // can still see only a faded sliver of text. paddingBottom
                         // is sized so the fade falls over empty space.
                         const maskImage =
-                          "linear-gradient(to bottom, transparent 0px, #000 32px, #000 calc(100% - 40px), transparent 100%)";
+                          'linear-gradient(to bottom, transparent 0px, #000 32px, #000 calc(100% - 40px), transparent 100%)'
                         return {
-                          paddingBottom: "48px",
+                          paddingBottom: '48px',
                           WebkitMaskImage: maskImage,
                           maskImage,
-                        };
+                        }
                       })()
                     : undefined
                 }
@@ -2236,10 +2058,8 @@ export default function ChatPage() {
               isVisualizeMode={isVisualizeMode}
               isExamMode={isExamMode}
               paperLibraries={paperLibraries}
-              selectedPaperLibraryId={
-                isExamMode ? quizConfig.paper_library_id : ""
-              }
-              selectedPaperId={isExamMode ? quizConfig.paper_id : ""}
+              selectedPaperLibraryId={isExamMode ? quizConfig.paper_library_id : ''}
+              selectedPaperId={isExamMode ? quizConfig.paper_id : ''}
               onSelectPaperLibrary={handleSelectPaperLibrary}
               capabilityNeedsConfig={capabilityNeedsConfig}
               capabilityConfigConfirmed={capabilityConfigConfirmed}
@@ -2285,7 +2105,7 @@ export default function ChatPage() {
               className="shrink-0"
               style={{
                 flexGrow: hasMessages ? 0 : 1.4,
-                transition: "flex-grow 650ms cubic-bezier(0.16, 1, 0.3, 1)",
+                transition: 'flex-grow 650ms cubic-bezier(0.16, 1, 0.3, 1)',
               }}
             />
           </div>
@@ -2344,7 +2164,7 @@ export default function ChatPage() {
         </div>
       </GeogebraTabProvider>
     </QuizFollowupProvider>
-  );
+  )
 }
 
 /**
@@ -2356,16 +2176,16 @@ export default function ChatPage() {
 function QuizFollowupBridge({
   viewerPanelRef,
 }: {
-  viewerPanelRef: React.MutableRefObject<SessionViewerPanelHandle | null>;
+  viewerPanelRef: React.MutableRefObject<SessionViewerPanelHandle | null>
 }) {
-  const controller = useQuizFollowupController();
+  const controller = useQuizFollowupController()
   useEffect(() => {
-    controller.setOpenTabHandler((ctx) => {
-      viewerPanelRef.current?.openQuizFollowupTab(ctx);
-    });
-    return () => controller.setOpenTabHandler(null);
-  }, [controller, viewerPanelRef]);
-  return null;
+    controller.setOpenTabHandler(ctx => {
+      viewerPanelRef.current?.openQuizFollowupTab(ctx)
+    })
+    return () => controller.setOpenTabHandler(null)
+  }, [controller, viewerPanelRef])
+  return null
 }
 
 /**
@@ -2376,17 +2196,17 @@ function QuizFollowupBridge({
 function GeogebraTabBridge({
   viewerPanelRef,
 }: {
-  viewerPanelRef: React.MutableRefObject<SessionViewerPanelHandle | null>;
+  viewerPanelRef: React.MutableRefObject<SessionViewerPanelHandle | null>
 }) {
-  const controller = useGeogebraTabOpener();
+  const controller = useGeogebraTabOpener()
   useEffect(() => {
-    if (!controller) return;
-    controller.setOpenHandler((payload) => {
-      viewerPanelRef.current?.openGeogebraTab(payload);
-    });
-    return () => controller.setOpenHandler(null);
-  }, [controller, viewerPanelRef]);
-  return null;
+    if (!controller) return
+    controller.setOpenHandler(payload => {
+      viewerPanelRef.current?.openGeogebraTab(payload)
+    })
+    return () => controller.setOpenHandler(null)
+  }, [controller, viewerPanelRef])
+  return null
 }
 
 /**
@@ -2400,37 +2220,35 @@ function SubagentTabWatcher({
   messages,
   viewerPanelRef,
 }: {
-  messages: { events?: StreamEvent[] }[];
-  viewerPanelRef: React.MutableRefObject<SessionViewerPanelHandle | null>;
+  messages: { events?: StreamEvent[] }[]
+  viewerPanelRef: React.MutableRefObject<SessionViewerPanelHandle | null>
 }) {
   useEffect(() => {
     // Group by turn so all of one turn's consults (DeepTutor may ask the agent
     // several questions in a row, each its own tool call) land in one tab as a
     // single running dialogue; fall back to the call id when no turn is set.
-    const groups = new Map<string, { label: string; events: StreamEvent[] }>();
+    const groups = new Map<string, { label: string; events: StreamEvent[] }>()
     for (const msg of messages) {
       for (const ev of msg.events ?? []) {
-        const meta = (ev.metadata ?? {}) as Record<string, unknown>;
-        if (meta.trace_kind !== "subagent_event") continue;
-        const key = String(meta.turn_id || meta.call_id || meta.trace_id || "");
-        if (!key) continue;
-        const existing = groups.get(key);
-        const label = String(
-          meta.subagent_name || existing?.label || "Subagent",
-        );
+        const meta = (ev.metadata ?? {}) as Record<string, unknown>
+        if (meta.trace_kind !== 'subagent_event') continue
+        const key = String(meta.turn_id || meta.call_id || meta.trace_id || '')
+        if (!key) continue
+        const existing = groups.get(key)
+        const label = String(meta.subagent_name || existing?.label || 'Subagent')
         if (existing) {
-          existing.label = label;
-          existing.events.push(ev);
+          existing.label = label
+          existing.events.push(ev)
         } else {
-          groups.set(key, { label, events: [ev] });
+          groups.set(key, { label, events: [ev] })
         }
       }
     }
     for (const [key, group] of groups) {
-      viewerPanelRef.current?.openSubagentTab(key, group.label, group.events);
+      viewerPanelRef.current?.openSubagentTab(key, group.label, group.events)
     }
-  }, [messages, viewerPanelRef]);
-  return null;
+  }, [messages, viewerPanelRef])
+  return null
 }
 
 /**
@@ -2450,12 +2268,12 @@ function HeaderActionButton({
   label,
   title,
 }: {
-  onClick: () => void;
-  disabled?: boolean;
-  active?: boolean;
-  icon: LucideIcon;
-  label: string;
-  title?: string;
+  onClick: () => void
+  disabled?: boolean
+  active?: boolean
+  icon: LucideIcon
+  label: string
+  title?: string
 }) {
   return (
     <Tooltip label={title ?? label} side="bottom">
@@ -2466,12 +2284,12 @@ function HeaderActionButton({
         aria-pressed={active}
         className={`inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg transition-[background-color,color,transform] duration-150 active:scale-90 disabled:cursor-not-allowed disabled:opacity-40 ${
           active
-            ? "bg-[var(--primary)]/10 text-[var(--primary)]"
-            : "text-[var(--muted-foreground)] hover:bg-[var(--muted)]/55 hover:text-[var(--foreground)] disabled:hover:bg-transparent disabled:hover:text-[var(--muted-foreground)]"
+            ? 'bg-[var(--primary)]/10 text-[var(--primary)]'
+            : 'text-[var(--muted-foreground)] hover:bg-[var(--muted)]/55 hover:text-[var(--foreground)] disabled:hover:bg-transparent disabled:hover:text-[var(--muted-foreground)]'
         }`}
       >
         <Icon size={16} strokeWidth={1.7} className="shrink-0" />
       </button>
     </Tooltip>
-  );
+  )
 }

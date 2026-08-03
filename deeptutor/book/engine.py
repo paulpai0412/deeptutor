@@ -31,11 +31,13 @@ which the WebSocket router fans out to clients.
 from __future__ import annotations
 
 import asyncio
+from asyncio import CancelledError, QueueEmpty
 from dataclasses import dataclass, field
 import logging
 import time
 from typing import Any
 
+from deeptutor.core.i18n import parse_language
 from deeptutor.core.stream_bus import StreamBus
 
 from .agents.ideation_agent import IdeationAgent
@@ -74,6 +76,11 @@ from .streaming import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _book_text(language: str, *, en: str, zh: str, zh_tw: str) -> str:
+    locale = parse_language(language)
+    return zh_tw if locale == "zh-TW" else zh if locale == "zh" else en
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -409,34 +416,47 @@ class BookEngine:
             first
             and (
                 first.content_type == ContentType.OVERVIEW
-                or (first.__pydantic_extra__ or {}).get("auto_overview") is True
+                or bool((first.__pydantic_extra__ or {}).get("auto_overview"))
             )
         )
         if already:
             return spine
 
-        overview_title = "本书导览" if book.language == "zh" else "How to read this book"
-        objectives = (
-            [
-                "了解整本书的章节脉络",
-                "掌握各章之间的概念依赖关系",
-                "选择最合适的阅读顺序",
-            ]
-            if book.language == "zh"
-            else [
-                "See the full chapter map at a glance",
-                "Understand how concepts depend on each other",
-                "Pick the reading path that fits your goals",
-            ]
+        overview_title = _book_text(
+            book.language,
+            en="How to read this book",
+            zh="本书导览",
+            zh_tw="本書導覽",
         )
+        objectives = [
+            _book_text(
+                book.language,
+                en="See the full chapter map at a glance",
+                zh="了解整本书的章节脉络",
+                zh_tw="了解整本書的章節脈絡",
+            ),
+            _book_text(
+                book.language,
+                en="Understand how concepts depend on each other",
+                zh="掌握各章之间的概念依赖关系",
+                zh_tw="掌握各章之間的概念相依關係",
+            ),
+            _book_text(
+                book.language,
+                en="Pick the reading path that fits your goals",
+                zh="选择最合适的阅读顺序",
+                zh_tw="選擇最適合的閱讀順序",
+            ),
+        ]
         overview = Chapter(
             title=overview_title,
             learning_objectives=objectives,
             content_type=ContentType.OVERVIEW,
-            summary=(
-                "Auto-generated overview of the book's concept graph and chapter index."
-                if book.language != "zh"
-                else "自动生成的概念图与章节索引，作为本书的入口。"
+            summary=_book_text(
+                book.language,
+                en="Auto-generated overview of the book's concept graph and chapter index.",
+                zh="自动生成的概念图与章节索引，作为本书的入口。",
+                zh_tw="自動產生的概念圖與章節索引，作為本書的入口。",
             ),
             order=0,
         )
@@ -469,7 +489,9 @@ class BookEngine:
         if overview_page is None or overview_page.status == PageStatus.READY:
             return
 
-        zh = book.language == "zh"
+        locale = parse_language(book.language)
+        zh = locale.startswith("zh")
+        zh_tw = locale == "zh-TW"
         chapter_index = [
             {
                 "id": ch.id,
@@ -487,11 +509,17 @@ class BookEngine:
         # 1) Intro text block (pre-rendered, status=READY)
         intro_md = (
             (
-                f"# {book.title or '本书'}\n\n"
+                f"# {book.title or ('本書' if zh_tw else '本书')}\n\n"
                 f"{(book.proposal.description if book.proposal else '') or ''}\n\n"
-                f"下方的概念图展示了本书 {len(spine.concept_graph.nodes)} 个核心概念以及"
-                f"它们之间的依赖关系；再下方是 {len(chapter_index)} 个章节的入口。"
-                f"你可以按从上到下的顺序阅读，也可以根据自己的兴趣或先验知识选择切入点。"
+                + (
+                    f"下方的概念圖展示了本書 {len(spine.concept_graph.nodes)} 個核心概念及其"
+                    f"相依關係；再下方是 {len(chapter_index)} 個章節的入口。"
+                    "你可以依照由上而下的順序閱讀，也可以根據自己的興趣或先備知識選擇切入點。"
+                    if zh_tw
+                    else f"下方的概念图展示了本书 {len(spine.concept_graph.nodes)} 个核心概念以及"
+                    f"它们之间的依赖关系；再下方是 {len(chapter_index)} 个章节的入口。"
+                    "你可以按从上到下的顺序阅读，也可以根据自己的兴趣或先验知识选择切入点。"
+                )
             )
             if zh
             else (
@@ -507,7 +535,12 @@ class BookEngine:
         intro_block = Block(
             type=BlockType.TEXT,
             status=BlockStatus.READY,
-            title=("如何阅读这本书" if zh else "How to read this book"),
+            title=_book_text(
+                book.language,
+                en="How to read this book",
+                zh="如何阅读这本书",
+                zh_tw="如何閱讀這本書",
+            ),
             params={"role": "overview_intro"},
             payload={"content": intro_md, "format": "markdown"},
         )
@@ -518,7 +551,12 @@ class BookEngine:
         graph_block = Block(
             type=BlockType.CONCEPT_GRAPH,
             status=BlockStatus.READY,
-            title=("概念图" if zh else "Concept map"),
+            title=_book_text(
+                book.language,
+                en="Concept map",
+                zh="概念图",
+                zh_tw="概念圖",
+            ),
             params={
                 "concept_graph": spine.concept_graph.model_dump(),
                 "chapter_index": chapter_index,
@@ -550,11 +588,21 @@ class BookEngine:
             if entry.get("summary"):
                 line += f" — {entry['summary']}"
             index_lines.append(line)
-        index_md = ("## 章节索引\n\n" if zh else "## Chapter index\n\n") + "\n".join(index_lines)
+        index_md = _book_text(
+            book.language,
+            en="## Chapter index\n\n",
+            zh="## 章节索引\n\n",
+            zh_tw="## 章節索引\n\n",
+        ) + "\n".join(index_lines)
         index_block = Block(
             type=BlockType.TEXT,
             status=BlockStatus.READY,
-            title=("章节索引" if zh else "Chapter index"),
+            title=_book_text(
+                book.language,
+                en="Chapter index",
+                zh="章节索引",
+                zh_tw="章節索引",
+            ),
             params={"role": "chapter_index"},
             payload={"content": index_md, "format": "markdown"},
         )
@@ -667,7 +715,7 @@ class BookEngine:
                 while not runtime.queue.empty():
                     try:
                         runtime.queue.get_nowait()
-                    except asyncio.QueueEmpty:
+                    except QueueEmpty:
                         break
 
         for page in self.storage.list_pages(book_id):
@@ -838,7 +886,7 @@ class BookEngine:
         while True:
             try:
                 page_id = await asyncio.wait_for(runtime.queue.get(), timeout=2.0)
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 async with runtime.lock:
                     if runtime.queue.empty():
                         runtime.worker = None
@@ -869,7 +917,7 @@ class BookEngine:
                     knowledge_bases=book.knowledge_bases,
                     language=book.language,
                 )
-            except asyncio.CancelledError:
+            except CancelledError:
                 raise
             except Exception as exc:
                 logger.warning(
@@ -1046,17 +1094,14 @@ class BookEngine:
 
             generator = get_block_registry().get(block_type)
             if generator is not None:
+                book = self.storage.load_book(book_id)
                 ctx = BlockContext(
                     book_id=book_id,
                     chapter=chapter,
                     page=page,
                     block=block,
-                    language=self.storage.load_book(book_id).language
-                    if self.storage.load_book(book_id)
-                    else "en",
-                    knowledge_bases=self.storage.load_book(book_id).knowledge_bases
-                    if self.storage.load_book(book_id)
-                    else [],
+                    language=book.language if book else "en",
+                    knowledge_bases=book.knowledge_bases if book else [],
                 )
                 bus = stream or StreamBus()
                 bstream = BookStream(bus)

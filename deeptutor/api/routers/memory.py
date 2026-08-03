@@ -66,22 +66,6 @@ def _validate_doc_key(layer: Layer, key: str) -> None:
         raise HTTPException(status_code=404, detail=f"unknown L3 slot {key!r}")
 
 
-def _localized_run_payload(run: Any, payload: dict[str, Any]) -> dict[str, Any]:
-    """Localize prose in memory-run SSE payloads for Traditional Chinese users."""
-    language = str(getattr(run, "language", "") or "")
-    if language.lower().replace("_", "-") in {
-        "zh-tw",
-        "zh-hant",
-        "zh-hk",
-        "tw",
-        "traditional",
-    }:
-        from deeptutor.i18n.zh_tw import convert_nested
-
-        return convert_nested(payload)
-    return payload
-
-
 def _validate_layer(layer: str) -> Layer:
     if layer not in {"L2", "L3"}:
         raise HTTPException(status_code=400, detail="layer must be L2 or L3")
@@ -446,10 +430,7 @@ async def stream_run_events(run_id: str, since: int = 0):
                 yield (
                     "data: "
                     + json.dumps(
-                        _localized_run_payload(
-                            run,
-                            {"seq": ev.seq, "ts": ev.ts, **ev.payload},
-                        ),
+                        {"seq": ev.seq, "ts": ev.ts, **ev.payload},
                         ensure_ascii=False,
                     )
                     + "\n\n"
@@ -462,10 +443,7 @@ async def stream_run_events(run_id: str, since: int = 0):
                     yield (
                         "data: "
                         + json.dumps(
-                            _localized_run_payload(
-                                run,
-                                {"seq": ev.seq, "ts": ev.ts, **ev.payload},
-                            ),
+                            {"seq": ev.seq, "ts": ev.ts, **ev.payload},
                             ensure_ascii=False,
                         )
                         + "\n\n"
@@ -521,7 +499,7 @@ def _legacy_run_stream(req: RunStartRequest) -> StreamingResponse:
                 yield (
                     "data: "
                     + json.dumps(
-                        _localized_run_payload(run, {**ev.payload, "seq": ev.seq}),
+                        {**ev.payload, "seq": ev.seq},
                         ensure_ascii=False,
                     )
                     + "\n\n"

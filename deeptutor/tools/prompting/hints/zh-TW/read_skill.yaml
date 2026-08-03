@@ -1,0 +1,6 @@
+short_description: "讀取某個技能的完整手冊（SKILL.md）或技能包內的參考檔案。"
+when_to_use: "目前任務命中「Skills」清單中某個技能時使用。先讀取該技能，再按其指引執行任務。"
+input_format: "`name` — 與清單中完全一致的技能名。可選 `file` — 包內檔案路徑（如 `references/api.md`），預設 SKILL.md。"
+guideline: "只讀取與目前任務相關的技能。若 SKILL.md 指向某個 references/ 檔案，先讀取該檔案再行動。"
+note: "清單中標註 `(unavailable: ...)` 的技能在依賴滿足前無法使用——應如實說明，不要猜測執行。"
+phase: "exploration"

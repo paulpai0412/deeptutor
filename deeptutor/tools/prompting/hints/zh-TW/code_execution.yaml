@@ -1,0 +1,12 @@
+short_description: "在隔離沙箱中執行一段程式碼（python/c/cpp），回傳 stdout/stderr。"
+when_to_use: "當計算、演算法校驗或數值驗證比純手算更可靠時使用。"
+input_format: "`language`（python、c 或 cpp）+ `code`——完整、可直接執行的原始碼。可選 `stdin` 與 `timeout`（秒，預設 30）。"
+guideline: "自行寫出完整原始碼並把結果列印到 stdout；程式碼執行適合做客觀驗證，不應替代文字說明。"
+note: "在本回合 workspace 內執行，與 `exec` 共用同一套 OS 級隔離沙箱；未設定沙箱後端時不可用。把產生檔案儲存到工作目錄即可作為產物輸出。"
+phase: "verification"
+aliases:
+  - name: run_code
+    description: "執行一段程式碼（python/c/cpp），用於計算、驗證或視覺化。"
+    input_format: "`language` + `code`；可選 `stdin`、`timeout`。"
+    when_to_use: "適合做客觀校驗、快速計算或小規模實驗。"
+    phase: "verification"

@@ -1,0 +1,7 @@
+status:
+  code_prepared: "Manim 程式碼已準備完成。"
+  retry: "第 {attempt} 次重試：{error}"
+  rendering: "正在以 quality={quality} 渲染 {mode}。"
+  artifacts_one: "已準備 {count} 個產物。"
+  artifacts_many: "已準備 {count} 個產物。"
+  llm_call_failed: "LLM 呼叫失敗。"

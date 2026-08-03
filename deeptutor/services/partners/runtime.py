@@ -21,6 +21,7 @@ Event → IM mapping:
 from __future__ import annotations
 
 import asyncio
+from asyncio import CancelledError
 import base64
 import hashlib
 import json
@@ -101,7 +102,7 @@ class PartnerRunner:
                 )
                 self._tasks.add(task)
                 task.add_done_callback(self._tasks.discard)
-        except asyncio.CancelledError:
+        except CancelledError:
             for task in list(self._tasks):
                 task.cancel()
             raise
@@ -236,7 +237,6 @@ class PartnerRunner:
         so the channel doesn't send it twice).
         """
         from deeptutor.runtime.orchestrator import ChatOrchestrator
-        from deeptutor.i18n.stream import localize_stream_event
         from deeptutor.services.model_selection.runtime import (
             activate_llm_selection,
             reset_llm_selection,
@@ -289,7 +289,6 @@ class PartnerRunner:
             with user_context(partner_user(self.partner_id, name=self.config.name)):
                 orchestrator = ChatOrchestrator()
                 async for event in orchestrator.handle(context):
-                    event = localize_stream_event(event, context.language)
                     if on_event is not None:
                         await on_event(event)
                     meta = event.metadata or {}

@@ -7,8 +7,16 @@ from pathlib import Path, PurePosixPath
 from typing import Any
 import uuid
 
-from fastapi import APIRouter, BackgroundTasks, File, Form, HTTPException, Query, UploadFile
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi import (  # type: ignore[import-not-found]
+    APIRouter,
+    BackgroundTasks,
+    File,
+    Form,
+    HTTPException,
+    Query,
+    UploadFile,
+)
+from fastapi.responses import FileResponse, StreamingResponse  # type: ignore[import-not-found]
 from pydantic import BaseModel, Field
 
 from deeptutor.api.utils.task_id_manager import TaskIDManager
@@ -697,7 +705,8 @@ async def open_paper_source(paper_id: str):
         raise HTTPException(status_code=404, detail="Paper not found") from exc
     return FileResponse(
         path,
-        media_type="application/pdf",
+        media_type=mimetypes.guess_type(record.original_filename)[0]
+        or "application/octet-stream",
         filename=record.original_filename,
         content_disposition_type="inline",
     )

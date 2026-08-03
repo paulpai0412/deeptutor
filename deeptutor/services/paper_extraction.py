@@ -103,7 +103,7 @@ async def extract_paper(
     staging_dir = None
     try:
         with capture_task_logs(task_id):
-            progress("processing", 10, "Parsing PDF text layer.")
+            progress("processing", 10, "Parsing paper document.")
             parser_instance = parser or get_parse_service()
             parse_kwargs: dict[str, Any] = {
                 "on_output": lambda line: progress("processing", 20, str(line)),
@@ -126,7 +126,7 @@ async def extract_paper(
             )
             if not parsed.markdown.strip():
                 raise PaperExtractionError(
-                    "This PDF has no usable text layer; scanned PDFs are not supported."
+                    "This paper has no usable text; scanned documents are not supported."
                 )
 
             progress("processing", 35, "Sending the complete parsed document to the primary LLM.")
@@ -139,7 +139,7 @@ async def extract_paper(
                 parsed.blocks,
                 parsed.asset_dir,
                 str(getattr(config, "api_key", "")),
-                getattr(config, "base_url", None),
+                str(getattr(config, "base_url", "") or ""),
                 str(config.model),
                 getattr(config, "api_version", None),
                 getattr(config, "binding", None),
@@ -161,7 +161,7 @@ async def extract_paper(
                 ),
             )
             if not questions:
-                raise PaperExtractionError("No usable questions were extracted from this PDF.")
+                raise PaperExtractionError("No usable questions were extracted from this paper.")
             if not bool(raw_result.get("complete", True)):
                 warnings.append("The primary LLM response did not cover the complete document.")
             if invalid_count:
@@ -221,7 +221,11 @@ def _ensure_context_fits(parsed: ParsedDocument, config: Any, max_tokens: int) -
         return
     block_text = str(parsed.blocks or [])
     estimated_input_tokens = (len(parsed.markdown) + len(block_text)) // 4 + 512
-    if estimated_input_tokens + max_tokens >= int(context_window):
+    try:
+        context_limit = int(context_window)
+    except (TypeError, ValueError) as exc:
+        raise PaperExtractionError("The active primary LLM context window is invalid.") from exc
+    if estimated_input_tokens + max_tokens >= context_limit:
         raise PaperExtractionError(
             "The parsed paper exceeds the active primary LLM context window; "
             "the document was not truncated or split."
@@ -353,10 +357,11 @@ def _normalize_question(
         visual_warnings = [visual_warnings]
     if isinstance(visual_warnings, list):
         warnings.extend(f"Visual review: {str(item)}" for item in visual_warnings if str(item).strip())
+    visual_verified = raw_question.get("visual_verified")
     if (
         raw_question.get("image_uncertain")
         or raw_question.get("visual_uncertain")
-        or raw_question.get("visual_verified") is False
+        or (isinstance(visual_verified, bool) and not visual_verified)
     ):
         warnings.append("Visual meaning could not be verified automatically; review the image manually.")
     confidence = raw_question.get("image_confidence", raw_question.get("visual_confidence"))

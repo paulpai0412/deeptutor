@@ -19,6 +19,7 @@ from deeptutor.capabilities.obsidian.binding import obsidian_vault_refs, vault_f
 from deeptutor.capabilities.obsidian.tools import OBSIDIAN_TOOL_NAMES
 from deeptutor.capabilities.protocol import KnowledgeCapability, PromptBlock
 from deeptutor.core.context import UnifiedContext
+from deeptutor.core.i18n import parse_language
 
 
 class ObsidianCapability(KnowledgeCapability):
@@ -82,8 +83,10 @@ def _prompt_text(prompts: dict[str, Any], path: tuple[str, ...]) -> str:
 
 
 def _load_system_prompt(language: str) -> str:
-    lang = "zh" if language.lower().startswith("zh") else "en"
-    prompt = resources.files(__package__).joinpath("prompts", lang, "system.md")
+    lang = parse_language(language)
+    prompt = resources.files("deeptutor.capabilities.obsidian").joinpath(
+        "prompts", lang, "system.md"
+    )
     return prompt.read_text(encoding="utf-8").strip()
 
 

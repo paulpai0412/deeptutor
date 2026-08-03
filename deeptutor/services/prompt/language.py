@@ -82,6 +82,8 @@ def append_language_directive(system_prompt: str | None, language: str | None) -
     """Append the language directive to an existing system prompt."""
     base = (system_prompt or "").rstrip()
     directive = language_directive(language).strip()
+    if "[Language]" in base or "[語言要求 / Language]" in base or "[语言要求 / Language]" in base:
+        return base
     if not base:
         return directive
     return f"{base}\n\n{directive}"

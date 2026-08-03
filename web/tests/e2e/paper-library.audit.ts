@@ -450,7 +450,7 @@ test.describe("Paper Library :: Knowledge Center navigation", () => {
       { name: "notes.txt", mimeType: "text/plain", buffer: Buffer.from("notes") },
     ]);
     await expect(page.getByText(/1 ready, 1 will be skipped/)).toBeVisible();
-    await page.getByRole("button", { name: "Upload PDFs", exact: true }).click();
+    await page.getByRole("button", { name: "Upload", exact: true }).click();
     await expect(page).toHaveURL(/tab=papers&library=library-2&section=add/);
     await expect(page.getByText("Latest upload status", { exact: true })).toBeVisible();
     await expect(page.getByText("root.pdf", { exact: true })).toBeVisible();

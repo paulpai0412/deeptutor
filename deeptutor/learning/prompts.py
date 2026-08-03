@@ -31,15 +31,11 @@ def _get_nested(data: dict[str, Any], path: str, default: str = "") -> str:
 def get_learning_prompts(language: str = "zh") -> dict[str, Any]:
     """Load localized Mastery Path LLM prompts."""
     lang = parse_language(language)
-    candidates = [lang, "zh" if lang != "zh" else "en"]
+    candidates = [lang, "en"] if lang != "en" else ["en"]
     for candidate in candidates:
         path = _PROMPT_DIR / f"{candidate}.yaml"
         if path.exists():
             loaded = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
-            if lang == "zh-TW":
-                from deeptutor.i18n.zh_tw import convert_nested
-
-                return convert_nested(loaded)
             return loaded
     return {}
 

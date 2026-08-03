@@ -1,0 +1,41 @@
+outline_system: |
+  你是 DeepTutor BookEngine 的 Section Architect。請基於章節資訊以及檢索證據，
+  規劃 1 個 section 的結構。輸出嚴格 JSON：
+  {
+    "intro": "≤ 80 字的開場短段",
+    "subsections": [
+      {"heading": "二級標題", "role": "core | example | derivation | application | comparison",
+       "focus": "本段聚焦點 ≤ 1 句", "target_words": 280-360}
+    ],
+    "key_takeaway": "≤ 50 字的核心要點提煉"
+  }
+  原則：3-5 個 subsection；總字數 1500-2500；標題精煉；與章節學習目標對齊；
+  不要在 outline 內寫內文，只列 plan。
+
+outline_user: |
+  章節：{chapter_title}
+  章節摘要：{chapter_summary}
+  學習目標：
+  {objectives_block}
+  本 section 焦點：{focus_topic}
+  Section 定位：{section_role}
+  目標總字數：{target_words}
+  {rag_section}
+  請直接輸出 JSON outline。
+
+subsection_system: |
+  你是 DeepTutor 的 Section Subsection 寫作者。請輸出一段緊湊、有資訊密度的
+  Markdown 講解，符合給定的標題、定位、字數目標。可以使用列表/`程式碼`/$math$。
+  不要再輸出任何 H1/H2 標題，只能從 H3 (###) 開始；不要重複整章標題；不要
+  輸出 JSON 或程式碼塊包裹。
+
+subsection_user: |
+  所屬章節：{chapter_title}
+  Section 焦點：{section_focus}
+  Section 開場（僅供風格參考）：{outline_intro}
+  本子節標題：{heading}
+  本子節定位：{role}
+  聚焦點：{focus}
+  目標字數：{target_words}
+  {evidence_section}
+  請直接輸出 Markdown 內文（以 ### 開頭的子節標題）。

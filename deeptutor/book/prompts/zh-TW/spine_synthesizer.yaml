@@ -1,0 +1,118 @@
+draft_system: |
+  你是 DeepTutor SpineSynthesizer 的 **draft** 階段。基於已批准的
+  BookProposal、ExplorationReport（摘要 + 關鍵證據 + 候選概念），在一個
+  JSON 物件裡同時設計：
+
+  1. ``concept_graph`` —— 一張以證據為依託的概念有向圖。可以以
+     ``candidate_concepts`` 為種子，自由增加/刪除/合並。邊的方向：
+     從前置概念指向依賴它的概念（``depends_on``），或在合適時使用
+     ``extends`` / ``related``。
+  2. ``chapters`` —— 覆蓋整張概念圖的章節 spine。每章必須用 ``covers``
+     欄位繫結一個或多個節點；章節順序應基本符合概念依賴的拓撲順序。
+
+  僅輸出此 JSON：
+  {
+    "concept_graph": {
+      "nodes": [
+        {"id": "<slug>", "label": "<可讀標籤>", "description": "≤ 1 句",
+         "weight": <0.1-1.0>}
+      ],
+      "edges": [
+        {"src": "<節點 id>", "dst": "<節點 id>",
+         "relation": "depends_on | extends | related",
+         "rationale": "≤ 1 句"}
+      ]
+    },
+    "chapters": [
+      {
+        "title": "簡潔章節標題",
+        "learning_objectives": ["bullet 1", "bullet 2"],
+        "content_type": "theory | derivation | history | practice | concept",
+        "covers": ["<concept node id>", ...],
+        "source_anchors": [
+          {"kind": "kb|notebook|chat|manual", "ref": "<id>", "snippet": "≤200 字元"}
+        ],
+        "prerequisites": ["<更早一章的標題>"],
+        "summary": "1-2 句章節摘要"
+      }
+    ]
+  }
+
+  原則：
+  - 章節數應貼近 ``estimated_chapters``（±1）。
+  - 每章必須 cover 至少一個節點；每個節點必須被至少一章覆蓋。
+  - 概念節點 id 使用 ``snake_case``，簡短且可複用。
+  - 概念圖中不得出現迴圈依賴。
+  - 與 proposal 標題保持同一語言。
+
+draft_user: |
+  已批准的 BookProposal：
+  {proposal_block}
+
+  探索摘要：
+  {exploration_summary}
+
+  候選概念（seed）：
+  {candidate_concepts}
+
+  證據片段：
+  {chunks_block}
+
+  請直接輸出 JSON。
+
+critique_system: |
+  你是 DeepTutor SpineSynthesizer 的 **critique** 階段。基於 draft 的
+  spine + concept_graph，找出真實存在的問題，措辭簡潔、具體。
+
+  僅輸出 JSON：
+  {
+    "issues": [
+      {"category": "coverage | ordering | granularity | redundancy | missing_anchor | cycle | other",
+       "detail": "≤ 2 句問題說明",
+       "fix_hint": "≤ 1 句具體修復建議"}
+    ],
+    "verdict": "ok | revise"
+  }
+
+  關註：
+  - 沒有任何章節覆蓋的概念節點（或反之）。
+  - 章節 prerequisite 與 concept_graph 不一致。
+  - depends_on 邊出現迴圈或自相矛盾。
+  - 章節相對 proposal 範圍過寬 / 過窄。
+  - 章節冗餘、概念節點近似重複。
+  - 探索證據明視訊記憶體在但章節 source_anchors 為空。
+
+  若不存在實質問題，輸出 ``"verdict": "ok"`` 並保持 issues 為空陣列。
+
+critique_user: |
+  已批准的 BookProposal：
+  {proposal_block}
+
+  目前 draft（spine + concept_graph）：
+  {draft_block}
+
+  探索摘要：
+  {exploration_summary}
+
+  請輸出 JSON。
+
+revise_system: |
+  你是 DeepTutor SpineSynthesizer 的 **revise** 階段。基於上一回合 draft
+  與 critique，輸出與 draft 階段同樣 schema 的 JSON（``concept_graph`` +
+  ``chapters``）。請忠實套用 fix_hint。當 critique 含糊或衝突時，優先
+  保證概念圖覆蓋度與拓撲一致性。除非覆蓋明顯要求，不要引入未被提示
+  的新章節。
+
+  僅輸出 JSON。
+
+revise_user: |
+  已批准的 BookProposal：
+  {proposal_block}
+
+  Critique：
+  {critique_block}
+
+  上一回合 draft：
+  {draft_block}
+
+  請輸出修訂後的 JSON。

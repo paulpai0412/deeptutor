@@ -8,6 +8,7 @@ from typing import Any
 from deeptutor.capabilities.mastery.tools import MASTERY_TOOL_NAMES
 from deeptutor.capabilities.protocol import PromptBlock
 from deeptutor.core.context import UnifiedContext
+from deeptutor.core.i18n import parse_language
 
 
 class MasteryLoopCapability:
@@ -65,8 +66,10 @@ def _prompt_text(prompts: dict[str, Any], path: tuple[str, ...]) -> str:
 
 
 def _load_system_prompt(language: str) -> str:
-    lang = "zh" if language.lower().startswith("zh") else "en"
-    prompt = resources.files(__package__).joinpath("prompts", lang, "system.md")
+    lang = parse_language(language)
+    prompt = resources.files("deeptutor.capabilities.mastery").joinpath(
+        "prompts", lang, "system.md"
+    )
     return prompt.read_text(encoding="utf-8").strip()
 
 

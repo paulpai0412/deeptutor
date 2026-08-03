@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
-from typing import AsyncGenerator
+from typing import Any, AsyncGenerator
 
+from deeptutor.core.i18n import parse_language
 from deeptutor.services.llm import clean_thinking_tags, get_llm_config, get_token_limit_kwargs
 from deeptutor.services.llm import stream as llm_stream
 from deeptutor.services.prompt.manager import get_prompt_manager
@@ -20,7 +21,7 @@ class NotebookSummarizeAgent:
     """Generate concise summaries for notebook records."""
 
     def __init__(self, language: str = "en") -> None:
-        self.language = "zh" if str(language or "en").lower().startswith("zh") else "en"
+        self.language = parse_language(language)
         self.llm_config = get_llm_config()
         self.model = getattr(self.llm_config, "model", None)
         self.api_key = getattr(self.llm_config, "api_key", None)
@@ -28,8 +29,8 @@ class NotebookSummarizeAgent:
         self.api_version = getattr(self.llm_config, "api_version", None)
         self.binding = getattr(self.llm_config, "binding", None) or "openai"
         self.extra_headers = getattr(self.llm_config, "extra_headers", None) or {}
-        # Prompts live under deeptutor/agents/notebook/prompts/{en,zh}/summarize_agent.yaml
-        # so the notebook summarizer follows the same bilingual convention as
+        # Prompts live under deeptutor/agents/notebook/prompts/{en,zh,zh-TW}/summarize_agent.yaml
+        # so the notebook summarizer follows the same locale convention as
         # the rest of the agents and never hard-codes prompt strings here.
         self._prompts = get_prompt_manager().load_prompts(
             "notebook", "summarize_agent", self.language
@@ -72,7 +73,7 @@ class NotebookSummarizeAgent:
             output=output,
             metadata=metadata or {},
         )
-        kwargs = {"temperature": 0.2}
+        kwargs: dict[str, Any] = {"temperature": 0.2}
         if self.model:
             kwargs.update(get_token_limit_kwargs(self.model, 300))
 

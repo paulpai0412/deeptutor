@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 from typing import Any, Awaitable, Callable
 
+from deeptutor.core.i18n import parse_language
 from deeptutor.core.stream import StreamEvent, StreamEventType
 from deeptutor.core.trace import build_trace_metadata, derive_trace_metadata, new_call_id
 from deeptutor.services.llm import clean_thinking_tags, get_llm_config, get_token_limit_kwargs
@@ -28,15 +29,15 @@ class NotebookAnalysisAgent:
     """Analyze selected notebook records before the main capability runs."""
 
     def __init__(self, language: str = "en") -> None:
-        self.language = "zh" if str(language or "en").lower().startswith("zh") else "en"
+        self.language = parse_language(language)
         self.llm_config = get_llm_config()
         self.model = getattr(self.llm_config, "model", None)
         self.api_key = getattr(self.llm_config, "api_key", None)
         self.base_url = getattr(self.llm_config, "base_url", None)
         self.api_version = getattr(self.llm_config, "api_version", None)
         self.binding = getattr(self.llm_config, "binding", None) or "openai"
-        # Prompts come from deeptutor/agents/notebook/prompts/{en,zh}/analysis_agent.yaml
-        # so the three-stage notebook reasoning loop stays bilingual without
+        # Prompts come from deeptutor/agents/notebook/prompts/{en,zh,zh-TW}/analysis_agent.yaml
+        # so the three-stage notebook reasoning loop stays localized without
         # carrying language-specific text in this file.
         self._prompts = get_prompt_manager().load_prompts(
             "notebook", "analysis_agent", self.language

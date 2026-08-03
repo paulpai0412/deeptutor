@@ -1,0 +1,19 @@
+# Visualize capability status messages (Chinese)
+# Loaded by StatusI18n from the `status:` section.
+status:
+  analyzing: "正在分析視覺化需求..."
+  render_type_detected: "渲染型別：{render_type} — {description}"
+  generating: "正在產生視覺化程式碼..."
+  code_generated: "程式碼已產生。"
+  validation_passed: "透過本機校驗，看起來沒問題。"
+  repairing: "正在修復一處校驗問題..."
+  code_repaired: "已修復：{notes}"
+  repair_incomplete: "已嘗試修復；仍有遺留問題：{error}"
+  repair_skipped_error: "跳過修復——直接使用草稿。"
+  html_invalid_fallback: "HTML 未透過校驗；使用兜底模板。"
+  manim_code_prepared: "Manim 程式碼已準備好。"
+  manim_rendering: "正在渲染 {mode}，質量={quality}。"
+  manim_retry: "重試 {attempt}：{error}"
+  manim_artifacts_one: "已準備 {count} 個產物。"
+  manim_artifacts_many: "已準備 {count} 個產物。"
+  llm_call_failed: "LLM 呼叫失敗。"

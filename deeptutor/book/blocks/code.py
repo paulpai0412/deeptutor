@@ -14,7 +14,7 @@ from typing import Any
 
 from ..models import BlockType, SourceAnchor
 from ._llm_writer import llm_json
-from ._prompts import get_book_prompt, load_book_prompts
+from ._prompts import book_text, get_book_prompt, load_book_prompts
 from .base import BlockContext, BlockGenerator, GenerationFailure
 
 
@@ -32,7 +32,7 @@ class CodeGenerator(BlockGenerator):
         intent = str(params.get("intent") or "demonstrate")
 
         prompts = load_book_prompts("code", ctx.language)
-        none_label = "(无)" if ctx.language == "zh" else "(none)"
+        none_label = book_text(ctx.language, en="(none)", zh="(无)", zh_tw="(無)")
         user_prompt = get_book_prompt(prompts, "user_template").format(
             chapter_title=chapter_title,
             chapter_summary=chapter_summary or none_label,
@@ -53,6 +53,8 @@ class CodeGenerator(BlockGenerator):
             raise GenerationFailure("LLM did not return any code.")
         if "<think" in code.lower() or "</think" in code.lower():
             raise GenerationFailure("prompt leak detected in generated code.")
+        raw_metadata = data.get("_metadata")
+        metadata = raw_metadata if isinstance(raw_metadata, dict) else {}
         return (
             {
                 "language": str(data.get("language") or language).strip() or language,
@@ -61,7 +63,7 @@ class CodeGenerator(BlockGenerator):
                 "intent": intent,
             },
             [],
-            data.get("_metadata") if isinstance(data.get("_metadata"), dict) else {},
+            metadata,
         )
 
 

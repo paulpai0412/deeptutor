@@ -25,9 +25,11 @@ import asyncio
 import logging
 from typing import Any
 
+from deeptutor.core.i18n import parse_language
+
 from ..models import BlockType, SourceAnchor, SourceChunk
 from ._llm_writer import llm_json, llm_text
-from ._prompts import get_book_prompt, load_book_prompts
+from ._prompts import book_text, get_book_prompt, load_book_prompts
 from ._rag_helpers import optional_rag_lookup
 from .base import BlockContext, BlockGenerator, GenerationFailure
 
@@ -44,8 +46,15 @@ def _clip(text: str, limit: int) -> str:
     return text[:limit].rstrip() + "…"
 
 
+def _int_or_default(value: Any, default: int) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
 def _none_label(language: str) -> str:
-    return "(无)" if language == "zh" else "(none)"
+    return book_text(language, en="(none)", zh="(无)", zh_tw="(無)")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -65,7 +74,7 @@ class SectionGenerator(BlockGenerator):
         objectives: list[str] = params.get("objectives") or ctx.chapter.learning_objectives or []
         focus_topic: str = str(params.get("focus") or chapter_title)
         section_role: str = str(params.get("role") or "core")
-        target_words: int = int(params.get("target_words") or 1800)
+        target_words = _int_or_default(params.get("target_words") or 1800, 1800)
 
         # Pull local evidence first; fall back to a single live RAG call only
         # when the cached sweep returned nothing.
@@ -252,7 +261,10 @@ class SectionGenerator(BlockGenerator):
         heading = sub.get("heading") or ""
         role = sub.get("role") or "core"
         focus = sub.get("focus") or ""
-        target_words = int(sub.get("target_words") or _DEFAULT_SUBSECTION_WORDS)
+        target_words = _int_or_default(
+            sub.get("target_words") or _DEFAULT_SUBSECTION_WORDS,
+            _DEFAULT_SUBSECTION_WORDS,
+        )
 
         # Pick chunks whose query / text overlaps the heading or focus.
         haystack = f"{heading} {focus}".lower()
@@ -273,8 +285,19 @@ class SectionGenerator(BlockGenerator):
 
         prompts = load_book_prompts("section", ctx.language)
         none_label = _none_label(ctx.language)
-        same_as_heading = "(同标题)" if ctx.language == "zh" else "(same as heading)"
-        evidence_section = f"\nReference evidence:\n{evidence_block}\n" if evidence_block else ""
+        same_as_heading = book_text(
+            ctx.language,
+            en="(same as heading)",
+            zh="(同标题)",
+            zh_tw="(同標題)",
+        )
+        evidence_label = book_text(
+            ctx.language,
+            en="Reference evidence",
+            zh="参考资料",
+            zh_tw="參考資料",
+        )
+        evidence_section = f"\n{evidence_label}:\n{evidence_block}\n" if evidence_block else ""
         user_prompt = get_book_prompt(prompts, "subsection_user").format(
             chapter_title=chapter_title,
             section_focus=section_focus,
@@ -313,14 +336,27 @@ def _fallback_outline(
     target_words: int,
     language: str,
 ) -> dict[str, Any]:
-    if language == "zh":
-        roles = [
-            ("核心定义", "core"),
-            ("典型例子", "example"),
-            ("应用 / 比较", "application"),
-        ]
-        intro = f"本节围绕“{focus_topic}”展开。"
-        takeaway = "记住核心定义，并能在例子中识别其应用。"
+    if parse_language(language).startswith("zh"):
+        traditional = parse_language(language) == "zh-TW"
+        roles = (
+            [
+                ("核心定義", "core"),
+                ("典型範例", "example"),
+                ("應用／比較", "application"),
+            ]
+            if traditional
+            else [
+                ("核心定义", "core"),
+                ("典型例子", "example"),
+                ("应用 / 比较", "application"),
+            ]
+        )
+        intro = f"本節圍繞「{focus_topic}」展開。" if traditional else f"本节围绕“{focus_topic}”展开。"
+        takeaway = (
+            "記住核心定義，並能在範例中辨識其應用。"
+            if traditional
+            else "记住核心定义，并能在例子中识别其应用。"
+        )
     else:
         roles = [
             ("Core idea", "core"),

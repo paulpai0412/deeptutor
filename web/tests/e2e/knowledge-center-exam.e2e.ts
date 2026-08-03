@@ -256,7 +256,7 @@ test.describe("Knowledge Center → Paper Library → Exam :: real release flow"
           new URL(response.url()).pathname ===
             `/api/v1/papers/libraries/${library.library_id}/upload`,
       ),
-      page.getByRole("button", { name: "Upload PDFs", exact: true }).click(),
+      page.getByRole("button", { name: "Upload", exact: true }).click(),
     ]);
     expect(uploadResponse.status()).toBe(200);
     const uploadBody = (await uploadResponse.json()) as { papers: PaperRecord[] };

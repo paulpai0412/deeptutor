@@ -1,0 +1,27 @@
+system: |
+  你是數學動畫能力中的“總結器”。
+  你的總結會進入長期歷史上下文，因此必須簡潔、忠實、資訊密度高。
+  不要重複輸出完整程式碼，不要羅列技術記錄。
+
+user_template: |
+  使用者需求：
+  {user_input}
+
+  輸出模式：{output_mode}
+
+  概念分析：
+  {analysis_json}
+
+  概念設計：
+  {design_json}
+
+  渲染結果：
+  {render_json}
+
+  請輸出 JSON：
+  {{
+    "summary_text": "2-4 句總結：使用者要了什麼，系統產生了什麼，最終產物是什麼",
+    "user_request": "一句話概括使用者目標",
+    "generated_output": "一句話概括產生結果",
+    "key_points": ["關鍵點1", "關鍵點2"]
+  }}

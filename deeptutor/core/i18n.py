@@ -37,6 +37,9 @@ _MESSAGES: dict[str, dict[str, str]] = {
         "sandbox.command_blocked": "Error: command blocked by safety guard (dangerous pattern).",
         "sandbox.disabled_for_account": "Code execution is disabled for your account.",
         "sandbox.no_backend": "no sandbox backend available",
+        "chat.searching_knowledge_base": "Searching knowledge base: {name}...",
+        "chat.searching_web": "Searching the web...",
+        "chat.generating_response": "Generating response...",
     },
     "zh": {
         "api.content_required": "content 不能为空",
@@ -60,6 +63,9 @@ _MESSAGES: dict[str, dict[str, str]] = {
         "sandbox.command_blocked": "错误：命令被安全防护拦截（匹配危险模式）。",
         "sandbox.disabled_for_account": "你的账号已禁用代码执行。",
         "sandbox.no_backend": "没有可用的沙箱后端",
+        "chat.searching_knowledge_base": "正在搜索知识库：{name}...",
+        "chat.searching_web": "正在搜索网络...",
+        "chat.generating_response": "正在生成回复...",
     },
     "zh-TW": {
         "api.content_required": "content 不能為空",
@@ -83,8 +89,14 @@ _MESSAGES: dict[str, dict[str, str]] = {
         "sandbox.command_blocked": "錯誤：命令遭安全防護攔截（符合危險模式）。",
         "sandbox.disabled_for_account": "你的帳號已停用程式碼執行。",
         "sandbox.no_backend": "沒有可用的沙箱後端",
+        "chat.searching_knowledge_base": "正在搜尋知識庫：{name}...",
+        "chat.searching_web": "正在搜尋網路...",
+        "chat.generating_response": "正在產生回覆...",
     },
 }
+
+
+parse_language = _parse_language
 
 
 def current_language(default: str = "en") -> str:
@@ -107,4 +119,4 @@ def t(key: str, default: str = "", *, language: str | None = None, **kwargs: Any
     return text
 
 
-__all__ = ["current_language", "t"]
+__all__ = ["current_language", "parse_language", "t"]
