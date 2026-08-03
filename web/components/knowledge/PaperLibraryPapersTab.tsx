@@ -307,7 +307,12 @@ export default function PaperLibraryPapersTab({
                 questions: previous.questions.map((question) =>
                   question.question_id === updated.question_id
                     ? updated
-                    : question,
+                    : {
+                        ...question,
+                        images: question.images.filter(
+                          (image) => !updated.images.includes(image),
+                        ),
+                      },
                 ),
               }
             : previous,

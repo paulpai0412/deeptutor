@@ -1,6 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useState } from 'react'
+import Image from 'next/image'
 import { useRouter } from 'next/navigation'
 import {
   ArrowLeft,
@@ -10,7 +11,6 @@ import {
   Pencil,
   Search,
   Trash2,
-  X,
 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import PaperLibraryUploadSection from '@/components/knowledge/PaperLibraryUploadSection'
@@ -112,6 +112,103 @@ export function PaperReview({
   )
   const [error, setError] = useState<string | null>(null)
 
+  const handleImageAssignment = async (image: string, questionId: string) => {
+    const owners = paper.questions.filter(question => {
+      const draft = drafts[question.question_id] ?? {
+        questionNumber: question.question_number,
+        answer: question.answer,
+        images: question.images,
+      }
+      return draft.images.includes(image)
+    })
+
+    if (questionId) {
+      const question = paper.questions.find(item => item.question_id === questionId)
+      if (!question) return
+      const draft = drafts[questionId] ?? {
+        questionNumber: question.question_number,
+        answer: question.answer,
+        images: question.images,
+      }
+      await onSave(questionId, draft.questionNumber, draft.answer, [
+        ...draft.images.filter(item => item !== image),
+        image,
+      ])
+    } else {
+      for (const question of owners) {
+        const draft = drafts[question.question_id]
+        await onSave(
+          question.question_id,
+          draft.questionNumber,
+          draft.answer,
+          draft.images.filter(item => item !== image)
+        )
+      }
+    }
+
+    setDrafts(previous =>
+      Object.fromEntries(
+        paper.questions.map(question => {
+          const draft = previous[question.question_id] ?? {
+            questionNumber: question.question_number,
+            answer: question.answer,
+            images: question.images,
+          }
+          return [
+            question.question_id,
+            {
+              ...draft,
+              images:
+                question.question_id === questionId
+                  ? [...draft.images.filter(item => item !== image), image]
+                  : draft.images.filter(item => item !== image),
+            },
+          ]
+        })
+      )
+    )
+  }
+
+  const assignedImages = new Set(Object.values(drafts).flatMap(draft => draft.images))
+  const unassignedImages = paper.assets.filter(image => !assignedImages.has(image))
+  const renderImage = (image: string, questionId = '') => (
+    <figure key={image} className="min-w-0 rounded-lg bg-[var(--muted)]/30 p-2">
+      <div className="relative h-40 w-full rounded-md border border-[var(--border)] bg-[var(--background)]">
+        <Image
+          src={apiUrl(paperAssetPath(paper.paper_id, image))}
+          alt={`${t('Image')}: ${image}`}
+          fill
+          unoptimized
+          className="object-contain"
+        />
+      </div>
+      <figcaption className="mt-1 truncate text-[10px] text-[var(--muted-foreground)]">
+        {image}
+      </figcaption>
+      <select
+        value={questionId}
+        disabled={savingQuestionId !== null}
+        aria-label={`${t('Image')}: ${image}`}
+        onChange={event => {
+          setError(null)
+          void handleImageAssignment(image, event.target.value).catch(cause => {
+            setError(cause instanceof Error ? cause.message : String(cause))
+          })
+        }}
+        className="mt-2 w-full rounded-md border border-[var(--border)] bg-[var(--background)] px-2 py-1.5 text-[11px] text-[var(--foreground)] outline-none disabled:opacity-50"
+      >
+        <option value="">{t('None')}</option>
+        {paper.questions.map(question => (
+          <option key={question.question_id} value={question.question_id}>
+            {t('Question')}{' '}
+            {drafts[question.question_id]?.questionNumber ?? question.question_number}
+          </option>
+        ))}
+      </select>
+    </figure>
+  )
+
+
   return (
     <div className="space-y-4">
       <button
@@ -168,6 +265,17 @@ export function PaperReview({
         <p className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-[12px] text-red-700 dark:border-red-900/50 dark:bg-red-950/20 dark:text-red-300">
           {error}
         </p>
+      )}
+
+      {unassignedImages.length > 0 && (
+        <section className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
+          <h3 className="text-[12px] font-medium text-[var(--foreground)]">
+            {t('Unassigned images')} · {unassignedImages.length}
+          </h3>
+          <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            {unassignedImages.map(image => renderImage(image))}
+          </div>
+        </section>
       )}
 
       {paper.questions.length === 0 ? (
@@ -233,49 +341,8 @@ export function PaperReview({
                 )}
 
                 {draft.images.length > 0 && (
-                  <div className="mt-3 rounded-lg bg-[var(--muted)]/30 p-3">
-                    <p className="mb-2 text-[11px] text-[var(--muted-foreground)]">
-                      {t('Related images')}
-                    </p>
-                    <div className="grid gap-3 sm:grid-cols-2">
-                      {draft.images.map(image => (
-                        <figure key={image} className="group relative min-w-0">
-                          <img
-                            src={apiUrl(paperAssetPath(paper.paper_id, image))}
-                            alt={`${t('Related image')}: ${image}`}
-                            loading="lazy"
-                            className="max-h-72 w-full rounded-md border border-[var(--border)] bg-[var(--background)] object-contain"
-                          />
-                          <button
-                            type="button"
-                            onClick={() => {
-                              const images = draft.images.filter(item => item !== image)
-                              setDrafts(previous => ({
-                                ...previous,
-                                [question.question_id]: { ...draft, images },
-                              }))
-                              setError(null)
-                              void onSave(
-                                question.question_id,
-                                draft.questionNumber,
-                                draft.answer,
-                                images,
-                              ).catch(cause => {
-                                setError(cause instanceof Error ? cause.message : String(cause))
-                              })
-                            }}
-                            className="absolute right-1 top-1 inline-flex items-center gap-1 rounded-md bg-black/65 px-1.5 py-1 text-[10px] text-white opacity-0 transition-opacity group-hover:opacity-100"
-                            title={t('Remove image association')}
-                          >
-                            <X size={10} />
-                            {t('Remove')}
-                          </button>
-                          <figcaption className="mt-1 truncate text-[10px] text-[var(--muted-foreground)]">
-                            {image}
-                          </figcaption>
-                        </figure>
-                      ))}
-                    </div>
+                  <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                    {draft.images.map(image => renderImage(image, question.question_id))}
                   </div>
                 )}
 
@@ -432,7 +499,12 @@ export default function PaperLibraryPanel({
             ? {
                 ...previous,
                 questions: previous.questions.map(question =>
-                  question.question_id === updated.question_id ? updated : question,
+                  question.question_id === updated.question_id
+                    ? updated
+                    : {
+                        ...question,
+                        images: question.images.filter(image => !updated.images.includes(image)),
+                      },
                 ),
               }
             : previous,
@@ -687,15 +759,18 @@ export default function PaperLibraryPanel({
                       {t('Retry')}
                     </button>
                   )}
-                  <a
-                    href={apiUrl(paperSourcePath(paper.paper_id))}
-                    target="_blank"
-                    rel="noreferrer"
+                  <button
+                    type="button"
+                    onClick={() => window.open(
+                      apiUrl(paperSourcePath(paper.paper_id)),
+                      '_blank',
+                      'noopener,noreferrer',
+                    )}
                     className="inline-flex items-center gap-1 text-[var(--primary)] hover:underline"
                   >
                     <ExternalLink size={11} />
                     {t('Open PDF')}
-                  </a>
+                  </button>
                   {libraryId && libraries.length > 1 && paper.status !== 'processing' && (
                     <select
                       value=""

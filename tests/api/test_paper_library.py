@@ -3,12 +3,16 @@ from __future__ import annotations
 import asyncio
 from io import BytesIO
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from pypdf import PdfWriter
 import pytest
 
 FastAPI = pytest.importorskip("fastapi").FastAPI
-TestClient = pytest.importorskip("fastapi.testclient").TestClient
+if TYPE_CHECKING:
+    from fastapi.testclient import TestClient
+else:
+    TestClient = pytest.importorskip("fastapi.testclient").TestClient
 
 from deeptutor.api.routers import paper_library
 from deeptutor.services.paper_library import PaperLibraryService
@@ -320,7 +324,7 @@ def test_detail_and_question_correction_api(client: TestClient) -> None:
     assert updated.json()["answer"] == ""
 
 
-def test_library_question_image_unlink_api(client: TestClient, tmp_path: Path) -> None:
+def test_library_question_image_pairing_api(client: TestClient, tmp_path: Path) -> None:
     library = client.post("/api/v1/papers/libraries", json={"name": "Review"}).json()
     library_id = library["library_id"]
     uploaded = client.post(
@@ -331,29 +335,51 @@ def test_library_question_image_unlink_api(client: TestClient, tmp_path: Path) -
     source_dir = tmp_path / "assets"
     source_dir.mkdir()
     (source_dir / "keep.png").write_bytes(b"keep")
-    (source_dir / "wrong.png").write_bytes(b"wrong")
+    (source_dir / "move.png").write_bytes(b"move")
+    (source_dir / "unpaired.png").write_bytes(b"unpaired")
     service.persist_assets(uploaded["paper_id"], source_dir)
     service.save_questions(
         uploaded["paper_id"],
-        [{
-            "question_id": "q-1",
-            "question_number": "1",
-            "question_text": "Figure",
-            "question_type": "written",
-            "images": ["keep.png", "wrong.png"],
-        }],
+        [
+            {
+                "question_id": "q-1",
+                "question_number": "1",
+                "question_text": "First figure",
+                "question_type": "written",
+                "images": ["keep.png", "move.png"],
+            },
+            {
+                "question_id": "q-2",
+                "question_number": "2",
+                "question_text": "Second figure",
+                "question_type": "written",
+                "images": [],
+            },
+        ],
         status="ready",
     )
 
+    detail = client.get(f"/api/v1/papers/{uploaded['paper_id']}")
+    assert detail.status_code == 200
+    assert detail.json()["assets"] == ["keep.png", "move.png", "unpaired.png"]
+
     updated = client.patch(
-        f"/api/v1/papers/libraries/{library_id}/papers/{uploaded['paper_id']}/questions/q-1",
-        json={"question_number": "1", "answer": "", "images": ["keep.png"]},
+        f"/api/v1/papers/libraries/{library_id}/papers/{uploaded['paper_id']}/questions/q-2",
+        json={
+            "question_number": "2",
+            "answer": "",
+            "images": ["move.png", "unpaired.png"],
+        },
     )
     assert updated.status_code == 200
-    assert updated.json()["images"] == ["keep.png"]
+    assert updated.json()["images"] == ["move.png", "unpaired.png"]
+
+    detail = client.get(f"/api/v1/papers/{uploaded['paper_id']}").json()
+    assert detail["questions"][0]["images"] == ["keep.png"]
+    assert detail["questions"][1]["images"] == ["move.png", "unpaired.png"]
     assert client.get(
-        f"/api/v1/papers/{uploaded['paper_id']}/assets/wrong.png"
-    ).status_code == 404
+        f"/api/v1/papers/{uploaded['paper_id']}/assets/move.png"
+    ).status_code == 200
 
 
 def test_upload_rejects_oversized_pdf(

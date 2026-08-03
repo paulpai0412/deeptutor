@@ -491,7 +491,10 @@ class PaperLibraryService:
             if record.status == PAPER_STATUS_PROCESSING:
                 raise PaperBusyError("Paper extraction is still processing.")
             paper_dir = self._paper_dir(paper_id)
-            shutil.rmtree(paper_dir)
+            try:
+                shutil.rmtree(paper_dir)
+            except OSError as exc:
+                raise PaperLibraryError(f"Failed to delete paper: {paper_id}") from exc
 
     def rename_paper(self, paper_id: str, display_name: str) -> PaperRecord:
         """Update only a paper's user-facing display name."""
@@ -523,6 +526,17 @@ class PaperLibraryService:
         self.get_paper(paper_id)
         return self._paper_dir(paper_id) / _ASSETS_DIRNAME
 
+    def list_assets(self, paper_id: str) -> list[str]:
+        """List extracted images, including images not assigned to a question."""
+        root = self.asset_dir(paper_id)
+        if not root.exists():
+            return []
+        return sorted(
+            path.relative_to(root).as_posix()
+            for path in root.rglob("*")
+            if path.is_file() and path.suffix.lower() in _ASSET_SUFFIXES
+        )
+
     def persist_assets(self, paper_id: str, source_dir: Path | None) -> list[str]:
         """Copy parser image assets into the paper's private asset directory.
 
@@ -545,7 +559,10 @@ class PaperLibraryService:
             self.get_paper(paper_id)
             stage_root = self._staging_dir(paper_id, task_id)
             if stage_root.exists():
-                shutil.rmtree(stage_root)
+                try:
+                    shutil.rmtree(stage_root)
+                except OSError as exc:
+                    raise PaperLibraryError("Failed to replace extraction staging data.") from exc
             stage_root.mkdir(parents=True, exist_ok=True)
             names = self._copy_assets(source_dir, stage_root / _ASSETS_DIRNAME)
             return stage_root, names
@@ -583,7 +600,10 @@ class PaperLibraryService:
         path = self._paper_dir(paper_id) / _QUESTIONS_FILENAME
         if not path.is_file():
             return []
-        payload = json.loads(path.read_text(encoding="utf-8"))
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError, json.JSONDecodeError) as exc:
+            raise PaperLibraryError("Paper questions could not be read.") from exc
         questions = payload.get("questions", []) if isinstance(payload, dict) else []
         if not isinstance(questions, list):
             raise ValueError("paper questions must be a list")
@@ -644,7 +664,7 @@ class PaperLibraryService:
             progress = {
                 "stage": stage,
                 "message": message,
-                "percent": max(0, min(100, int(percent))),
+                "percent": max(0, min(100, percent)),
                 "current": 1 if percent >= 100 else 0,
                 "total": 1,
                 "task_id": task_id or record.task_id,
@@ -879,7 +899,7 @@ class PaperLibraryService:
         answer: str | None,
         images: list[str] | None = None,
     ) -> dict[str, Any]:
-        """Save manual corrections and optional image unlinking immediately."""
+        """Save manual corrections and keep each image assigned to at most one question."""
         normalized_number = str(question_number or "").strip()
         if not normalized_number:
             raise PaperValidationError("Question number cannot be empty.")
@@ -906,37 +926,29 @@ class PaperLibraryService:
                 }
                 if normalized_images is not None:
                     updated_question["images"] = normalized_images
+                    claimed = set(normalized_images)
+                    for other_index, other_question in enumerate(questions):
+                        if other_index == index:
+                            continue
+                        current_images = _sanitize_asset_references(
+                            other_question.get("images", [])
+                        )
+                        remaining_images = [
+                            image for image in current_images if image not in claimed
+                        ]
+                        if remaining_images != current_images:
+                            questions[other_index] = {
+                                **other_question,
+                                "images": remaining_images,
+                            }
                 questions[index] = updated_question
                 atomic_write_json(
                     self._paper_dir(paper_id) / _QUESTIONS_FILENAME,
                     {"schema_version": PAPER_SCHEMA_VERSION, "questions": questions},
                 )
                 self._write_record(replace(record, updated_at=_utc_now()))
-                if normalized_images is not None:
-                    self._cleanup_orphaned_assets(paper_id, questions)
                 return updated_question
         raise FileNotFoundError(f"Question not found: {question_id}")
-
-    def _cleanup_orphaned_assets(
-        self,
-        paper_id: str,
-        questions: list[dict[str, Any]],
-    ) -> None:
-        """Best-effort cleanup of image files no question references."""
-        referenced = {
-            image
-            for question in questions
-            for image in _sanitize_asset_references(question.get("images", []))
-        }
-        try:
-            root = self.asset_dir(paper_id)
-            for path in root.rglob("*"):
-                if path.is_file() and path.suffix.lower() in _ASSET_SUFFIXES:
-                    relative = path.relative_to(root).as_posix()
-                    if relative not in referenced:
-                        path.unlink(missing_ok=True)
-        except OSError:
-            return
 
     def _write_record(self, record: PaperRecord) -> None:
         atomic_write_json(self._paper_dir(record.paper_id) / _METADATA_FILENAME, record.to_dict())
@@ -1057,11 +1069,11 @@ class PaperLibraryService:
                 ):
                     continue
                 if journal and journal.get("phase") == "committed":
-                    shutil.rmtree(transaction_dir, ignore_errors=True)
+                    _remove_path(transaction_dir)
                 elif journal:
                     _rollback_transaction(paper_dir, transaction_dir, journal)
                 else:
-                    shutil.rmtree(transaction_dir, ignore_errors=True)
+                    _remove_path(transaction_dir)
             try:
                 if not any(staging_root.iterdir()):
                     staging_root.rmdir()
@@ -1135,36 +1147,39 @@ class PaperLibraryService:
 
     @staticmethod
     def _read_record(metadata_path: Path) -> PaperRecord:
-        payload = json.loads(metadata_path.read_text(encoding="utf-8"))
-        if not isinstance(payload, dict):
-            raise ValueError("paper metadata must be an object")
-        return PaperRecord(
-            paper_id=str(payload["paper_id"]),
-            display_name=str(payload["display_name"]),
-            original_filename=str(payload["original_filename"]),
-            source_hash=str(payload["source_hash"]),
-            status=str(payload["status"]),
-            question_count=int(payload.get("question_count", 0)),
-            warning_count=int(payload.get("warning_count", 0)),
-            created_at=str(payload["created_at"]),
-            updated_at=str(payload["updated_at"]),
-            error=str(payload.get("error", "")),
-            warnings=[str(item) for item in payload.get("warnings", []) if str(item).strip()],
-            progress=(
-                dict(payload.get("progress", {}))
-                if isinstance(payload.get("progress", {}), dict)
-                else {}
-            ),
-            task_id=str(payload.get("task_id", "")),
-            parser_engine=str(payload.get("parser_engine", "")),
-            library_id=str(payload.get("library_id", LEGACY_LIBRARY_ID)),
-            folder_path=normalize_folder_path(payload.get("folder_path", "")),
-            extraction_config=(
-                dict(payload.get("extraction_config", {}))
-                if isinstance(payload.get("extraction_config", {}), dict)
-                else {}
-            ),
-        )
+        try:
+            payload = json.loads(metadata_path.read_text(encoding="utf-8"))
+            if not isinstance(payload, dict):
+                raise ValueError("paper metadata must be an object")
+            return PaperRecord(
+                paper_id=str(payload["paper_id"]),
+                display_name=str(payload["display_name"]),
+                original_filename=str(payload["original_filename"]),
+                source_hash=str(payload["source_hash"]),
+                status=str(payload["status"]),
+                question_count=int(payload.get("question_count", 0)),
+                warning_count=int(payload.get("warning_count", 0)),
+                created_at=str(payload["created_at"]),
+                updated_at=str(payload["updated_at"]),
+                error=str(payload.get("error", "")),
+                warnings=[str(item) for item in payload.get("warnings", []) if str(item).strip()],
+                progress=(
+                    dict(payload.get("progress", {}))
+                    if isinstance(payload.get("progress", {}), dict)
+                    else {}
+                ),
+                task_id=str(payload.get("task_id", "")),
+                parser_engine=str(payload.get("parser_engine", "")),
+                library_id=str(payload.get("library_id", LEGACY_LIBRARY_ID)),
+                folder_path=normalize_folder_path(payload.get("folder_path", "")),
+                extraction_config=(
+                    dict(payload.get("extraction_config", {}))
+                    if isinstance(payload.get("extraction_config", {}), dict)
+                    else {}
+                ),
+            )
+        except (OSError, KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
+            raise PaperLibraryError(f"Paper metadata could not be read: {metadata_path}") from exc
 
     def _paper_dir(self, paper_id: str) -> Path:
         if not _UUID_RE.fullmatch(str(paper_id)):
@@ -1314,7 +1329,7 @@ def _rollback_transaction(
             os.replace(backup_path, formal_path)
         elif old_move_started and not bool(old_exists.get(name, False)):
             _remove_path(formal_path)
-    shutil.rmtree(transaction_dir, ignore_errors=True)
+    _remove_path(transaction_dir)
 
 
 def _remove_path(path: Path) -> None:

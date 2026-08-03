@@ -2880,6 +2880,7 @@
   "PDF parser": "PDF parser",
   "Use active LLM": "使用当前启用的 LLM",
   "Remove image association": "移除图片关联",
+  "Unassigned images": "未关联图片",
   "Exam": "考试",
   "Exam settings": "考试设置",
   "Loading libraries...": "正在加载试卷库…",

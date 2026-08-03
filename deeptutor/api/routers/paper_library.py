@@ -98,6 +98,7 @@ class PaperSummary(BaseModel):
 
 class PaperDetail(PaperSummary):
     questions: list[PaperQuestion] = Field(default_factory=list)
+    assets: list[str] = Field(default_factory=list)
 
 
 class PaperListResponse(BaseModel):
@@ -149,13 +150,20 @@ def _summary(record) -> PaperSummary:
 
 
 def _detail(service: PaperLibraryService, record) -> PaperDetail:
-    return PaperDetail(**record.to_dict(), questions=service.get_questions(record.paper_id))
+    return PaperDetail(
+        **record.to_dict(),
+        questions=[
+            PaperQuestion(**question) for question in service.get_questions(record.paper_id)
+        ],
+        assets=service.list_assets(record.paper_id),
+    )
 
 
 def _validate_library_settings(settings: dict[str, Any] | None) -> dict[str, Any]:
     """Validate and redact the small, durable extraction settings contract."""
     raw = dict(settings or {})
-    if raw.get("llm_enabled") is False:
+    llm_enabled = raw.get("llm_enabled")
+    if isinstance(llm_enabled, bool) and not llm_enabled:
         raise PaperValidationError("Structured paper extraction requires an LLM.")
 
     parser_engine = str(raw.get("parser_engine") or "").strip().lower()

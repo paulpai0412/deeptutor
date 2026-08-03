@@ -152,7 +152,7 @@ export interface PaperLibraryQuestion {
 }
 
 export interface PaperLibraryDetail extends PaperLibraryRecord {
-  questions: PaperLibraryQuestion[];
+  questions: PaperLibraryQuestion[];  assets: string[];
 }
 
 export interface PaperPaperListResponse {

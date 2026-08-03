@@ -168,14 +168,14 @@ def test_persisted_assets_are_relative_and_path_safe(paper_library: PaperLibrary
         paper_library.asset_path(paper.paper_id, "missing.png")
 
 
-def test_question_image_unlink_persists_and_cleans_orphaned_asset(
+def test_question_image_can_be_reassigned_and_unassigned(
     paper_library: PaperLibraryService, tmp_path: Path
 ) -> None:
     paper = paper_library.add_pdf("review-images.pdf", PDF_BYTES)
     source_dir = tmp_path / "images"
     source_dir.mkdir()
     (source_dir / "keep.png").write_bytes(b"keep")
-    (source_dir / "remove.png").write_bytes(b"remove")
+    (source_dir / "move.png").write_bytes(b"move")
     paper_library.persist_assets(paper.paper_id, source_dir)
     paper_library.save_questions(
         paper.paper_id,
@@ -183,26 +183,42 @@ def test_question_image_unlink_persists_and_cleans_orphaned_asset(
             {
                 "question_id": "q-1",
                 "question_number": "1",
-                "question_text": "See figure",
+                "question_text": "First figure",
                 "question_type": "written",
-                "images": ["keep.png", "remove.png"],
-            }
+                "images": ["keep.png", "move.png"],
+            },
+            {
+                "question_id": "q-2",
+                "question_number": "2",
+                "question_text": "Second figure",
+                "question_type": "written",
+                "images": [],
+            },
         ],
         status="ready",
     )
 
-    updated = paper_library.update_question(
+    paper_library.update_question(
         paper.paper_id,
-        "q-1",
-        question_number="1",
+        "q-2",
+        question_number="2",
         answer="",
-        images=["keep.png"],
+        images=["move.png"],
     )
 
-    assert updated["images"] == ["keep.png"]
-    assert paper_library.asset_path(paper.paper_id, "keep.png").is_file()
-    with pytest.raises(FileNotFoundError):
-        paper_library.asset_path(paper.paper_id, "remove.png")
+    questions = paper_library.get_questions(paper.paper_id)
+    assert questions[0]["images"] == ["keep.png"]
+    assert questions[1]["images"] == ["move.png"]
+
+    paper_library.update_question(
+        paper.paper_id,
+        "q-2",
+        question_number="2",
+        answer="",
+        images=[],
+    )
+    assert paper_library.list_assets(paper.paper_id) == ["keep.png", "move.png"]
+    assert paper_library.asset_path(paper.paper_id, "move.png").is_file()
 
 
 def test_processing_paper_cannot_be_deleted(paper_library: PaperLibraryService) -> None:
