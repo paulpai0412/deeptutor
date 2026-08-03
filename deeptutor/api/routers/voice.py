@@ -449,7 +449,15 @@ async def _serve_codex_realtime(ws: WebSocket) -> None:
             if provider_turn.get("delegation_id") == handoff_id:
                 provider_turn["handoff_response_sent"] = True
                 provider_turn["provider_output_done"] = False
-            if handoff_modes.get(handoff_id) == "session":
+            mode = handoff_modes.get(handoff_id, "delegation")
+            provider_turn["audio_logged"] = False
+            logger.info(
+                "Realtime Voice speech appended: handoff=%s mode=%s chars=%d",
+                handoff_id,
+                mode,
+                len(text),
+            )
+            if mode == "session":
                 # Synthetic transcript handoff: no provider delegation item
                 # exists, so speech returns through a session-level speakable
                 # append (the Frameless Bidi appendSpeech contract).
@@ -698,6 +706,12 @@ async def _serve_codex_realtime(ws: WebSocket) -> None:
                 if not provider_stream_active:
                     provider_stream_active = True
                     logger.info("Realtime Voice provider stream active")
+                if (
+                    provider_event.get("type") == "output_audio.delta"
+                    and not provider_turn.get("audio_logged")
+                ):
+                    provider_turn["audio_logged"] = True
+                    logger.info("Realtime Voice provider audio output started")
                 for normalized in normalize_codex_event(provider_event):
                     event_type = normalized.get("type")
                     if event_type == "handoff":
