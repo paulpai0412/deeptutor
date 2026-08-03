@@ -675,8 +675,21 @@ async def _serve_codex_realtime(ws: WebSocket) -> None:
         nonlocal closed
         assert session is not None
         provider_stream_active = False
+        provider_event_sequence = 0
         try:
             async for provider_event in session.events():
+                provider_event_sequence += 1
+                raw_type = str(provider_event.get("type") or "")
+                role = ""
+                if raw_type == "turn.done" and isinstance(provider_event.get("turn"), dict):
+                    role = str(provider_event["turn"].get("role") or "")
+                if raw_type != "output_audio.delta":
+                    logger.info(
+                        "Realtime Voice provider event: seq=%d type=%s role=%s",
+                        provider_event_sequence,
+                        raw_type,
+                        role,
+                    )
                 if provider_event.get("type") == "error":
                     error = provider_event.get("error")
                     error_message = provider_event.get("message")
@@ -769,6 +782,24 @@ async def _serve_codex_realtime(ws: WebSocket) -> None:
             if closed:
                 break
             message_type = message.get("type") if isinstance(message, dict) else None
+            if message_type == "client_diagnostic":
+                event = str(message.get("event") or "").strip()
+                allowed_events = {
+                    "remote_track",
+                    "provider_audio_delta",
+                    "audio_play_resolved",
+                    "audio_play_failed",
+                    "audio_onplaying",
+                    "inbound_audio_stats",
+                }
+                if event in allowed_events:
+                    detail = " ".join(str(message.get("detail") or "").split())[:160]
+                    logger.info(
+                        "Realtime Voice client audio: event=%s detail=%s",
+                        event,
+                        detail,
+                    )
+                continue
             if message_type == "turn_started":
                 handoff_id = str(message.get("handoff_id") or "").strip()
                 turn_id = str(message.get("turn_id") or "").strip()

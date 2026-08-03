@@ -27,7 +27,7 @@ type RealtimeVoiceMessage = {
   message?: string;
   handoff_id?: string;
   session_id?: string;
-  mode?: "delegated";
+  mode?: "delegated" | "transcript";
   sdp?: string;
 };
 
@@ -154,6 +154,7 @@ export function useRealtimeVoiceSession(
   const handoffIdRef = useRef<string | null>(null);
   const transcriptCommittedRef = useRef(false);
   const sessionIdRef = useRef(options.sessionId);
+  const reportedAudioEventsRef = useRef(new Set<string>());
 
   useEffect(() => {
     sessionIdRef.current = options.sessionId;
@@ -239,6 +240,20 @@ export function useRealtimeVoiceSession(
     setState("interrupted");
   }, [clearSoftInterrupt, pauseRemoteAudio]);
 
+  const reportAudioEvent = useCallback((name: string, detail = "") => {
+    if (reportedAudioEventsRef.current.has(name)) return;
+    reportedAudioEventsRef.current.add(name);
+    const socket = socketRef.current;
+    if (socket?.readyState !== WebSocket.OPEN) return;
+    socket.send(
+      JSON.stringify({
+        type: "client_diagnostic",
+        event: name,
+        detail: detail.slice(0, 160),
+      }),
+    );
+  }, []);
+
   const primeRemoteAudio = useCallback(async (): Promise<boolean> => {
     const audio = remoteAudioRef.current;
     const stream = remoteStreamRef.current;
@@ -250,11 +265,19 @@ export function useRealtimeVoiceSession(
     if (audio.srcObject !== stream) audio.srcObject = stream;
     try {
       await audio.play();
+      reportAudioEvent(
+        "audio_play_resolved",
+        `paused=${audio.paused} muted=${audio.muted} volume=${audio.volume}`,
+      );
       return true;
-    } catch {
+    } catch (error) {
+      reportAudioEvent(
+        "audio_play_failed",
+        error instanceof Error ? `${error.name}: ${error.message}` : String(error),
+      );
       return false;
     }
-  }, []);
+  }, [reportAudioEvent]);
 
   const resumeRemoteAudio = useCallback(async (): Promise<boolean> => {
     const ready = await primeRemoteAudio();
@@ -308,6 +331,7 @@ export function useRealtimeVoiceSession(
     transcriptCommittedRef.current = false;
     mutedRef.current = false;
     intentionalCloseRef.current = false;
+    reportedAudioEventsRef.current.clear();
 
     if (
       typeof navigator === "undefined" ||
@@ -369,6 +393,7 @@ export function useRealtimeVoiceSession(
           if (payload.type === "output_audio.delta") {
             // The PCM/base64 field is intentionally ignored. WebRTC plays the
             // media track; React stores only this content-free receipt signal.
+            reportAudioEvent("provider_audio_delta");
             ignoreAudioRef.current = false;
             interruptionSentRef.current = false;
             if (!outputActiveRef.current) {
@@ -382,6 +407,16 @@ export function useRealtimeVoiceSession(
             payload.type === "turn.done" &&
             payload.turn?.role === "assistant"
           ) {
+            void peer.getStats().then((stats) => {
+              for (const report of stats.values()) {
+                if (report.type !== "inbound-rtp" || report.kind !== "audio") continue;
+                reportAudioEvent(
+                  "inbound_audio_stats",
+                  `packets=${report.packetsReceived ?? 0} bytes=${report.bytesReceived ?? 0} lost=${report.packetsLost ?? 0} energy=${report.totalAudioEnergy ?? 0}`,
+                );
+                break;
+              }
+            });
             assistantPendingRef.current = false;
             outputActiveRef.current = false;
             setState(mutedRef.current ? "muted" : "listening");
@@ -395,11 +430,19 @@ export function useRealtimeVoiceSession(
       peer.ontrack = (event) => {
         const remoteStream = event.streams[0];
         if (!remoteStream) return;
+        reportAudioEvent(
+          "remote_track",
+          `audio_tracks=${remoteStream.getAudioTracks().length}`,
+        );
         remoteStreamRef.current = remoteStream;
         const audio = remoteAudioRef.current ?? new Audio();
         audio.autoplay = true;
         audio.muted = false;
         audio.onplaying = () => {
+          reportAudioEvent(
+            "audio_onplaying",
+            `paused=${audio.paused} muted=${audio.muted} volume=${audio.volume}`,
+          );
           if (!outputActiveRef.current) {
             outputActiveRef.current = true;
             setAudioOutputReceived(true);
@@ -600,6 +643,7 @@ export function useRealtimeVoiceSession(
     pauseRemoteAudio,
     releaseAudio,
     releaseStream,
+    reportAudioEvent,
     requestSoftInterruption,
     resumeRemoteAudio,
     state,
