@@ -307,12 +307,10 @@ export function useRealtimeVoiceSession(
     softInterruptTimerRef.current = window.setTimeout(() => {
       softInterruptTimerRef.current = null;
       softSuppressedRef.current = false;
-      // False start: no turn took over and the answer is still going —
-      // resume it as if nothing happened.
-      if (outputActiveRef.current || assistantPendingRef.current) {
-        if (remoteAudioRef.current) remoteAudioRef.current.muted = false;
-        void resumeRemoteAudio();
-      }
+      // Re-arm the shared WebRTC element even if this answer ended during the
+      // grace window; future RTP uses the same track and does not fire ontrack.
+      if (remoteAudioRef.current) remoteAudioRef.current.muted = false;
+      void resumeRemoteAudio();
     }, 1200);
   }, [pauseRemoteAudio, resumeRemoteAudio]);
 

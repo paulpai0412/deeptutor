@@ -675,21 +675,8 @@ async def _serve_codex_realtime(ws: WebSocket) -> None:
         nonlocal closed
         assert session is not None
         provider_stream_active = False
-        provider_event_sequence = 0
         try:
             async for provider_event in session.events():
-                provider_event_sequence += 1
-                raw_type = str(provider_event.get("type") or "")
-                role = ""
-                if raw_type == "turn.done" and isinstance(provider_event.get("turn"), dict):
-                    role = str(provider_event["turn"].get("role") or "")
-                if raw_type != "output_audio.delta":
-                    logger.info(
-                        "Realtime Voice provider event: seq=%d type=%s role=%s",
-                        provider_event_sequence,
-                        raw_type,
-                        role,
-                    )
                 if provider_event.get("type") == "error":
                     error = provider_event.get("error")
                     error_message = provider_event.get("message")
@@ -900,4 +887,4 @@ async def realtime_voice_session(ws: WebSocket) -> None:
             except Exception:
                 pass
     finally:
-        reset_current_user(user_token)
+        reset_current_user(user_token)  # type: ignore[arg-type]  # sentinel returned above
