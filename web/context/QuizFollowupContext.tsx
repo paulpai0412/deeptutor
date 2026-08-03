@@ -122,6 +122,8 @@ export interface SendMessageInput {
   }>;
   config?: Record<string, unknown>;
   language?: string;
+  /** Backend capability for this turn; ordinary follow-ups remain deep_question. */
+  capability?: "deep_question" | "deep_solve";
   /** Selected knowledge bases (names) for this turn. */
   knowledgeBases?: string[];
   /** Notebook/book/history/question references — same shape the
@@ -160,7 +162,7 @@ export interface QuizFollowupController {
     sessionId: string,
     messages: HydratedFollowupMessage[],
   ): void;
-  /** Send a user turn through the chat capability for this question. */
+  /** Send a user turn through the selected capability for this question. */
   sendMessage(input: SendMessageInput): void;
   /**
    * Deliver an answer for a turn paused on ``ask_user``. Mirrors the main
@@ -420,11 +422,9 @@ export function QuizFollowupProvider({ children }: ProviderProps) {
         type: "start_turn",
         content,
         tools: [],
-        // Route quiz follow-ups through DeepQuestionCapability so its
-        // dedicated FollowupAgent receives the full question context,
-        // including answer choices and the learner's result. The right-side
-        // surface remains a chat UI; this is only the backend capability.
-        capability: "deep_question",
+        // Ordinary follow-ups use DeepQuestionCapability; the explicit Solve
+        // action opts into the full deep-solve loop on the same chat surface.
+        capability: input.capability ?? "deep_question",
         knowledge_bases: input.knowledgeBases ?? [],
         session_id: current.sessionId,
         attachments: input.attachments,

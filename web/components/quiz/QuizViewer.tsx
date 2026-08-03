@@ -3,6 +3,7 @@
 import { type ChangeEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   Bookmark,
+  BrainCircuit,
   Check,
   ChevronDown,
   ChevronLeft,
@@ -864,11 +865,43 @@ export default function QuizViewer({
     t,
   ])
 
+  const handleSolve = useCallback(() => {
+    if (!q) return
+    const key = getQuestionKey(q, idx)
+    const options = Object.entries(q.options ?? {})
+      .map(([option, text]) => `${option}. ${text}`)
+      .join('\n')
+    const attachments =
+      q.source_image_attachments && q.source_image_attachments.length > 0
+        ? q.source_image_attachments.map(image => ({
+            type: 'image',
+            url: image.url ?? undefined,
+            filename: image.filename ?? 'question.png',
+            mime_type: image.mime_type ?? 'image/png',
+          }))
+        : (q.source_images ?? []).map(url => ({
+            type: 'image',
+            url,
+            filename: 'question.png',
+            mime_type: 'image/png',
+          }))
+
+    handleOpenFollowup()
+    followupController.sendMessage({
+      questionKey: key,
+      content: [q.question, options].filter(Boolean).join('\n\n'),
+      attachments,
+      capability: 'deep_solve',
+      language,
+    })
+  }, [followupController, handleOpenFollowup, idx, language, q])
+
   if (!q) return null
 
   const currentEntryId = entryIds[questionKey]
   const currentBookmarked = bookmarked[questionKey] ?? false
   const showCategoryDropdown = categoryDropdownKey === questionKey
+  const solveStreaming = followupThreads[questionKey]?.isStreaming ?? false
 
   return (
     <div className="overflow-hidden rounded-xl border border-[var(--border)] bg-[var(--card)]">
@@ -1396,6 +1429,19 @@ export default function QuizViewer({
                   </button>
                 )
               })()}
+              <button
+                type="button"
+                onClick={handleSolve}
+                disabled={solveStreaming}
+                className="inline-flex items-center gap-1 rounded-lg border border-[var(--primary)]/60 bg-[var(--primary)]/10 px-2.5 py-1.5 text-[12px] font-medium text-[var(--primary)] transition-colors hover:bg-[var(--primary)]/15 disabled:opacity-50"
+              >
+                {solveStreaming ? (
+                  <Loader2 size={11} className="animate-spin" />
+                ) : (
+                  <BrainCircuit size={11} />
+                )}
+                {t('Solve')}
+              </button>
             </>
           )}
         </div>
