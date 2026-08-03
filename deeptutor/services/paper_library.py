@@ -27,7 +27,6 @@ from pypdf import PdfReader  # type: ignore[import-not-found]
 
 from deeptutor.services.file_io import atomic_write_json
 from deeptutor.services.path_service import get_path_service
-from deeptutor.utils.document_extractor import DocumentExtractionError, extract_text_from_bytes
 from deeptutor.utils.document_validator import DocumentValidator
 
 PAPER_SCHEMA_VERSION = 1
@@ -61,7 +60,7 @@ class PaperLibraryError(RuntimeError):
 
 
 class PaperValidationError(PaperLibraryError, ValueError):
-    """Raised when an uploaded paper is not a safe, valid document."""
+    """Raised when an uploaded paper is not a safe, valid PDF."""
 
 
 class PaperBusyError(PaperLibraryError):
@@ -347,8 +346,8 @@ class PaperLibraryService:
         folder_path: str = "",
         extraction_config: dict[str, Any] | None = None,
     ) -> PaperRecord:
-        """Store a validated paper, deduplicated within one library."""
-        safe_filename = self._validate_paper(filename, content)
+        """Store a validated PDF, deduplicated within one library."""
+        safe_filename = self._validate_pdf(filename, content)
         digest = hashlib.sha256(content).hexdigest()
         scope = str(library_id or LEGACY_LIBRARY_ID).strip() or LEGACY_LIBRARY_ID
         safe_folder = normalize_folder_path(folder_path)
@@ -1199,24 +1198,17 @@ class PaperLibraryService:
         return candidate
 
     @staticmethod
-    def _validate_paper(filename: str, content: bytes) -> str:
+    def _validate_pdf(filename: str, content: bytes) -> str:
         if not isinstance(content, bytes) or not content:
-            raise PaperValidationError("Paper file is empty.")
+            raise PaperValidationError("Paper PDF is empty.")
         try:
             safe_filename = DocumentValidator.validate_upload_safety(
                 filename,
                 len(content),
-                allowed_extensions={".doc", ".pdf"},
+                allowed_extensions={".pdf"},
             )
         except ValueError as exc:
             raise PaperValidationError(str(exc)) from exc
-
-        if Path(safe_filename).suffix == ".doc":
-            try:
-                extract_text_from_bytes(safe_filename, content, max_chars=None)
-            except DocumentExtractionError as exc:
-                raise PaperValidationError("Uploaded file is not a readable Word document.") from exc
-            return safe_filename
 
         if not content.startswith(b"%PDF-"):
             raise PaperValidationError("Uploaded file is not a valid PDF.")

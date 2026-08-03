@@ -16,8 +16,8 @@ import { DEFAULT_UPLOAD_POLICY, validateFiles } from '@/lib/knowledge-helpers'
 
 const PAPER_UPLOAD_POLICY: KnowledgeUploadPolicy = {
   ...DEFAULT_UPLOAD_POLICY,
-  extensions: ['.pdf', '.doc'],
-  accept: '.pdf,.doc,application/pdf,application/msword',
+  extensions: ['.pdf'],
+  accept: '.pdf,application/pdf',
 }
 
 function uploadStatusLabel(status: string, t: (key: string) => string): string {
@@ -59,8 +59,8 @@ export default function PaperLibraryUploadSection({
   const paperPolicy = useMemo<KnowledgeUploadPolicy>(
     () => ({
       ...uploadPolicy,
-      extensions: ['.pdf', '.doc'],
-      accept: '.pdf,.doc,application/pdf,application/msword',
+      extensions: ['.pdf'],
+      accept: '.pdf,application/pdf',
     }),
     [uploadPolicy]
   )

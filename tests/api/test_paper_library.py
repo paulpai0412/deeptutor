@@ -5,12 +5,12 @@ from io import BytesIO
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from pypdf import PdfWriter
-import pytest
+from pypdf import PdfWriter  # type: ignore[import-not-found]
+import pytest  # type: ignore[import-not-found]
 
 FastAPI = pytest.importorskip("fastapi").FastAPI
 if TYPE_CHECKING:
-    from fastapi.testclient import TestClient
+    from fastapi.testclient import TestClient  # type: ignore[import-not-found]
 else:
     TestClient = pytest.importorskip("fastapi.testclient").TestClient
 
@@ -27,9 +27,6 @@ def _make_pdf(*, width: float = 612) -> bytes:
 
 
 PDF_BYTES = _make_pdf()
-DOC_BYTES = (
-    Path(__file__).parents[1] / "fixtures" / "paper_library" / "legacy-question.doc"
-).read_bytes()
 
 
 @pytest.fixture
@@ -176,20 +173,20 @@ def test_upload_list_rename_and_read_source(client: TestClient) -> None:
     assert source.content == PDF_BYTES
 
 
-def test_upload_and_read_legacy_word_source(client: TestClient) -> None:
+def test_upload_rejects_legacy_word_source(client: TestClient) -> None:
     response = client.post(
         "/api/v1/papers/upload",
-        files={"files": ("legacy.doc", BytesIO(DOC_BYTES), "application/msword")},
+        files={"files": ("legacy.doc", BytesIO(b"legacy Word document"), "application/msword")},
     )
 
     assert response.status_code == 200
-    paper = response.json()["papers"][0]
-    assert paper["original_filename"] == "legacy.doc"
-
-    source = client.get(f"/api/v1/papers/{paper['paper_id']}/source")
-    assert source.status_code == 200
-    assert source.headers["content-type"].startswith("application/msword")
-    assert source.content == DOC_BYTES
+    assert response.json()["papers"] == []
+    assert response.json()["rejected"] == [
+        {
+            "filename": "legacy.doc",
+            "error": "Unsupported file type: .doc. Allowed types: .pdf",
+        }
+    ]
 
 
 def test_library_paper_rename_move_and_delete_api(client: TestClient) -> None:
@@ -248,7 +245,7 @@ def test_upload_reports_duplicates_and_rejects_non_pdf(client: TestClient) -> No
     assert response.json()["rejected"] == [
         {
             "filename": "notes.txt",
-            "error": "Unsupported file type: .txt. Allowed types: .doc, .pdf",
+            "error": "Unsupported file type: .txt. Allowed types: .pdf",
         },
         {"filename": "spoof.pdf", "error": "Uploaded file is not a readable PDF."},
     ]

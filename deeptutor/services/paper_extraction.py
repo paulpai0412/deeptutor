@@ -103,7 +103,7 @@ async def extract_paper(
     staging_dir = None
     try:
         with capture_task_logs(task_id):
-            progress("processing", 10, "Parsing paper document.")
+            progress("processing", 10, "Parsing PDF text layer.")
             parser_instance = parser or get_parse_service()
             parse_kwargs: dict[str, Any] = {
                 "on_output": lambda line: progress("processing", 20, str(line)),
@@ -126,7 +126,7 @@ async def extract_paper(
             )
             if not parsed.markdown.strip():
                 raise PaperExtractionError(
-                    "This paper has no usable text; scanned documents are not supported."
+                    "This PDF has no usable text layer; scanned PDFs are not supported."
                 )
 
             progress("processing", 35, "Sending the complete parsed document to the primary LLM.")
@@ -161,7 +161,7 @@ async def extract_paper(
                 ),
             )
             if not questions:
-                raise PaperExtractionError("No usable questions were extracted from this paper.")
+                raise PaperExtractionError("No usable questions were extracted from this PDF.")
             if not bool(raw_result.get("complete", True)):
                 warnings.append("The primary LLM response did not cover the complete document.")
             if invalid_count:

@@ -4,7 +4,7 @@ from io import BytesIO
 from pathlib import Path
 
 from pypdf import PdfWriter  # type: ignore[import-not-found]
-import pytest
+import pytest  # type: ignore[import-not-found]
 
 from deeptutor.api.utils.task_id_manager import TaskIDManager
 from deeptutor.multi_user.models import CurrentUser, UserScope
@@ -27,9 +27,6 @@ def _make_pdf(*, width: float = 612) -> bytes:
 
 
 PDF_BYTES = _make_pdf()
-DOC_BYTES = (
-    Path(__file__).parents[1] / "fixtures" / "paper_library" / "legacy-question.doc"
-).read_bytes()
 
 
 @pytest.fixture
@@ -50,12 +47,9 @@ def test_upload_creates_pending_private_paper(paper_library: PaperLibraryService
     assert paper_library.read_source(paper.paper_id) == PDF_BYTES
 
 
-def test_upload_accepts_legacy_word_doc(paper_library: PaperLibraryService) -> None:
-    paper = paper_library.add_pdf("legacy.doc", DOC_BYTES)
-
-    assert paper.original_filename == "legacy.doc"
-    assert paper_library.source_path(paper.paper_id).name == "source.doc"
-    assert paper_library.read_source(paper.paper_id) == DOC_BYTES
+def test_upload_rejects_legacy_word_doc(paper_library: PaperLibraryService) -> None:
+    with pytest.raises(PaperValidationError, match=r"Unsupported file type: \.doc"):
+        paper_library.add_pdf("legacy.doc", b"legacy Word document")
 
 
 def test_same_pdf_content_is_deduplicated(paper_library: PaperLibraryService) -> None:
