@@ -63,8 +63,8 @@ def deterministic_grade(
         return answer_key == correct_key
 
     if qtype == "concept":
-        truth = {"true": "true", "t": "true", "yes": "true", "1": "true", "對": "true", "正確": "true"}
-        truth.update({"false": "false", "f": "false", "no": "false", "0": "false", "錯": "false", "錯誤": "false"})
+        truth = {"true": "true", "t": "true", "yes": "true", "1": "true", "對": "true", "正確": "true", "○": "true"}
+        truth.update({"false": "false", "f": "false", "no": "false", "0": "false", "錯": "false", "錯誤": "false", "╳": "false"})
         normalized_answer = truth.get(answer.casefold())
         normalized_correct = truth.get(correct.casefold())
         return (

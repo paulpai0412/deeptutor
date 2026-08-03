@@ -107,7 +107,7 @@ export function resolveConceptAnswer(
   const normalized = String(correctAnswer || "")
     .trim()
     .toLowerCase();
-  if (normalized === "true") return "true";
-  if (normalized === "false") return "false";
+  if (normalized === "true" || normalized === "○") return "true";
+  if (normalized === "false" || normalized === "╳") return "false";
   return "";
 }

@@ -36,7 +36,9 @@ test("normalizeQuizQuestionType preserves every canonical type", () => {
 test("resolveConceptAnswer normalizes T/F variants", () => {
   assert.equal(resolveConceptAnswer("true"), "true");
   assert.equal(resolveConceptAnswer("TRUE"), "true");
+  assert.equal(resolveConceptAnswer("○"), "true");
   assert.equal(resolveConceptAnswer("false"), "false");
+  assert.equal(resolveConceptAnswer("╳"), "false");
   assert.equal(resolveConceptAnswer(""), "");
   assert.equal(resolveConceptAnswer("maybe"), "");
 });
