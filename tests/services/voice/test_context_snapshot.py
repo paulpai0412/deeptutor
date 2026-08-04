@@ -107,6 +107,19 @@ async def test_snapshot_is_bounded_access_checked_and_retrieves_prior_context() 
 
 
 @pytest.mark.asyncio
+async def test_snapshot_instructs_gpt_live_to_use_traditional_chinese() -> None:
+    snapshot = await build_realtime_context_snapshot(
+        _Store(),
+        RealtimeContextRequest(session_id="session-1", language="zh-TW"),
+    )
+
+    assert "Traditional Chinese characters" in snapshot.instructions
+    assert "Taiwan terminology" in snapshot.instructions
+    assert "provider-generated transcripts and direct replies" in snapshot.instructions
+    assert "vocalize appended backend text verbatim" in snapshot.instructions
+
+
+@pytest.mark.asyncio
 async def test_snapshot_preloads_key_points_without_a_prior_question() -> None:
     store = _Store()
     store.messages = []

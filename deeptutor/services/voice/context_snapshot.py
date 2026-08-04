@@ -90,7 +90,8 @@ class RealtimeContextRequest:
         language = str(payload.get("language") or "en").strip() or "en"
         paper_library_id = str(payload.get("paper_library_id") or "").strip()
         paper_id = str(payload.get("paper_id") or "").strip()
-        exam_mode = payload.get("exam_mode") is True
+        exam_mode_value = payload.get("exam_mode")
+        exam_mode = isinstance(exam_mode_value, bool) and exam_mode_value
         page_context = str(payload.get("page_context") or "").strip()
         question_context = str(payload.get("question_context") or "").strip()
         values = (capability, language, paper_library_id, paper_id, session_id or "")
@@ -220,6 +221,17 @@ async def build_realtime_context_snapshot(
         else rich_messages
     )
     instructions = _DELEGATE_INSTRUCTIONS
+    if request.language.casefold().replace("_", "-") in {
+        "zh-tw",
+        "zh-hant",
+        "zh-hk",
+    }:
+        instructions += (
+            " The selected locale is zh-TW. For provider-generated transcripts and direct "
+            "replies, use Traditional Chinese characters and natural Taiwan terminology; "
+            "never use Simplified Chinese. Continue to vocalize appended backend text "
+            "verbatim without translating or rewriting it."
+        )
     candidates: list[tuple[str, str]] = [
         (
             "developer",
