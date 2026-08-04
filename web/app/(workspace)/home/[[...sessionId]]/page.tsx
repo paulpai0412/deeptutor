@@ -328,11 +328,7 @@ export default function ChatPage() {
   )
   const displayMessages = useMemo(
     () =>
-      mergeRealtimeVoiceAssistant(
-        state.messages,
-        state.selectedBranches,
-        realtimeVoiceAssistant
-      ),
+      mergeRealtimeVoiceAssistant(state.messages, state.selectedBranches, realtimeVoiceAssistant),
     [realtimeVoiceAssistant, state.messages, state.selectedBranches]
   )
 

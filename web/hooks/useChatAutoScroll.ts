@@ -1,16 +1,16 @@
-"use client";
+'use client'
 
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 
 interface AutoScrollOptions {
-  hasMessages: boolean;
-  isStreaming: boolean;
-  composerHeight: number;
-  messageCount: number;
-  sessionId?: string | null;
-  lastMessageRole?: "user" | "assistant" | "system";
-  lastMessageContent?: string;
-  lastEventCount?: number;
+  hasMessages: boolean
+  isStreaming: boolean
+  composerHeight: number
+  messageCount: number
+  sessionId?: string | null
+  lastMessageRole?: 'user' | 'assistant' | 'system'
+  lastMessageContent?: string
+  lastEventCount?: number
 }
 
 /**
@@ -58,74 +58,74 @@ export function useChatAutoScroll({
   lastMessageContent,
   lastEventCount,
 }: AutoScrollOptions) {
-  const containerRef = useRef<HTMLDivElement>(null);
-  const endRef = useRef<HTMLDivElement>(null);
-  const shouldAutoScrollRef = useRef(true);
-  const scrollRafRef = useRef(0);
-  const positionedSessionRef = useRef<string | null | undefined>(undefined);
-  const [trailingSpaceHeight, setTrailingSpaceHeight] = useState(0);
+  const containerRef = useRef<HTMLDivElement>(null)
+  const endRef = useRef<HTMLDivElement>(null)
+  const shouldAutoScrollRef = useRef(true)
+  const scrollRafRef = useRef(0)
+  const positionedSessionRef = useRef<string | null | undefined>(undefined)
+  const [trailingSpaceHeight, setTrailingSpaceHeight] = useState(0)
 
   const pinnedScrollTop = useCallback(() => {
-    const container = containerRef.current;
-    if (!container) return 0;
-    if (lastMessageRole !== "assistant") return container.scrollTop;
+    const container = containerRef.current
+    if (!container) return 0
+    if (lastMessageRole !== 'assistant') return container.scrollTop
     const assistants = container.querySelectorAll<HTMLElement>(
-      '[data-chat-message-role="assistant"]',
-    );
-    const assistant = assistants.item(assistants.length - 1);
-    if (!assistant) return container.scrollTop;
-    const containerRect = container.getBoundingClientRect();
-    const assistantRect = assistant.getBoundingClientRect();
-    const assistantBottom = assistantRect.bottom - containerRect.top + container.scrollTop;
-    return Math.max(0, assistantBottom - container.clientHeight * 0.55);
-  }, [lastMessageRole]);
+      '[data-chat-message-role="assistant"]'
+    )
+    const assistant = assistants.item(assistants.length - 1)
+    if (!assistant) return container.scrollTop
+    const containerRect = container.getBoundingClientRect()
+    const assistantRect = assistant.getBoundingClientRect()
+    const assistantBottom = assistantRect.bottom - containerRect.top + container.scrollTop
+    return Math.max(0, assistantBottom - container.clientHeight * 0.55)
+  }, [lastMessageRole])
 
   const pinToLatest = useCallback(() => {
-    const container = containerRef.current;
-    if (!container || scrollRafRef.current) return;
+    const container = containerRef.current
+    if (!container || scrollRafRef.current) return
     const step = () => {
       if (!shouldAutoScrollRef.current) {
-        scrollRafRef.current = 0;
-        return;
+        scrollRafRef.current = 0
+        return
       }
-      const distance = pinnedScrollTop() - container.scrollTop;
+      const distance = pinnedScrollTop() - container.scrollTop
       if (Math.abs(distance) <= 1) {
-        scrollRafRef.current = 0;
-        return;
+        scrollRafRef.current = 0
+        return
       }
-      container.scrollTop += Math.max(-40, Math.min(distance, 40));
-      scrollRafRef.current = requestAnimationFrame(step);
-    };
-    step();
-  }, [pinnedScrollTop]);
+      container.scrollTop += Math.max(-40, Math.min(distance, 40))
+      scrollRafRef.current = requestAnimationFrame(step)
+    }
+    step()
+  }, [pinnedScrollTop])
 
   useLayoutEffect(() => {
-    const container = containerRef.current;
-    if (!container || !hasMessages || lastMessageRole !== "assistant") return;
-    const update = () => setTrailingSpaceHeight(Math.max(0, container.clientHeight * 0.5));
-    update();
-    const observer = new ResizeObserver(update);
-    observer.observe(container);
-    return () => observer.disconnect();
-  }, [hasMessages, lastMessageRole]);
+    const container = containerRef.current
+    if (!container || !hasMessages || lastMessageRole !== 'assistant') return
+    const update = () => setTrailingSpaceHeight(Math.max(0, container.clientHeight * 0.5))
+    update()
+    const observer = new ResizeObserver(update)
+    observer.observe(container)
+    return () => observer.disconnect()
+  }, [hasMessages, lastMessageRole])
 
   // Primary pin: runs in layout phase after every render that bumps
   // message count / streaming content / events / composer height / mount.
   // A newly loaded session jumps to its tail before paint; later changes
   // use the bounded animation above.
   useLayoutEffect(() => {
-    const container = containerRef.current;
-    if (!container || !hasMessages) return;
-    const sessionKey = sessionId ?? "__draft__";
+    const container = containerRef.current
+    if (!container || !hasMessages) return
+    const sessionKey = sessionId ?? '__draft__'
     if (positionedSessionRef.current !== sessionKey) {
-      if (scrollRafRef.current) cancelAnimationFrame(scrollRafRef.current);
-      scrollRafRef.current = 0;
-      shouldAutoScrollRef.current = true;
-      positionedSessionRef.current = sessionKey;
-      container.scrollTop = container.scrollHeight;
-      return;
+      if (scrollRafRef.current) cancelAnimationFrame(scrollRafRef.current)
+      scrollRafRef.current = 0
+      shouldAutoScrollRef.current = true
+      positionedSessionRef.current = sessionKey
+      container.scrollTop = container.scrollHeight
+      return
     }
-    if (shouldAutoScrollRef.current) pinToLatest();
+    if (shouldAutoScrollRef.current) pinToLatest()
   }, [
     pinToLatest,
     hasMessages,
@@ -136,7 +136,7 @@ export function useChatAutoScroll({
     lastEventCount,
     composerHeight,
     trailingSpaceHeight,
-  ]);
+  ])
 
   // Companion pin: content-change-driven, active ONLY while the turn is
   // streaming. ``useLayoutEffect`` above already pins on every page-level
@@ -163,31 +163,31 @@ export function useChatAutoScroll({
   // phase ``load`` listener (case 3), coalesced to at most one pin per
   // frame, covers the same growth for a cost proportional to actual change.
   useEffect(() => {
-    if (!isStreaming || !hasMessages) return;
-    const container = containerRef.current;
-    if (!container) return;
-    let rafId = 0;
+    if (!isStreaming || !hasMessages) return
+    const container = containerRef.current
+    if (!container) return
+    let rafId = 0
     const pin = () => {
-      rafId = 0;
-      if (shouldAutoScrollRef.current) pinToLatest();
-    };
+      rafId = 0
+      if (shouldAutoScrollRef.current) pinToLatest()
+    }
     const schedule = () => {
-      if (!rafId) rafId = requestAnimationFrame(pin);
-    };
-    const mo = new MutationObserver(schedule);
+      if (!rafId) rafId = requestAnimationFrame(pin)
+    }
+    const mo = new MutationObserver(schedule)
     mo.observe(container, {
       childList: true,
       subtree: true,
       characterData: true,
-    });
-    container.addEventListener("load", schedule, true);
-    schedule();
+    })
+    container.addEventListener('load', schedule, true)
+    schedule()
     return () => {
-      mo.disconnect();
-      container.removeEventListener("load", schedule, true);
-      if (rafId) cancelAnimationFrame(rafId);
-    };
-  }, [isStreaming, hasMessages, pinToLatest]);
+      mo.disconnect()
+      container.removeEventListener('load', schedule, true)
+      if (rafId) cancelAnimationFrame(rafId)
+    }
+  }, [isStreaming, hasMessages, pinToLatest])
 
   // After streaming ends, capability viewers loaded via ``next/dynamic``
   // (MathAnimatorViewer, QuizViewer, VisualizationViewer, RichCodeBlock,
@@ -198,51 +198,50 @@ export function useChatAutoScroll({
   // a longer window would mis-classify post-turn user interactions
   // (expanding a trace ``<details>``, clicking a citation) as
   // "streaming-style growth" and rip them back to the bottom.
-  const POST_STREAM_AUTOSCROLL_WINDOW_MS = 4000;
+  const POST_STREAM_AUTOSCROLL_WINDOW_MS = 4000
   useEffect(() => {
-    if (isStreaming) return;
-    if (!hasMessages) return;
+    if (isStreaming) return
+    if (!hasMessages) return
 
-    const container = containerRef.current;
-    if (!container) return;
+    const container = containerRef.current
+    if (!container) return
 
-    let prevHeight = container.scrollHeight;
-    let rafId = 0;
-    const deadline = performance.now() + POST_STREAM_AUTOSCROLL_WINDOW_MS;
+    let prevHeight = container.scrollHeight
+    let rafId = 0
+    const deadline = performance.now() + POST_STREAM_AUTOSCROLL_WINDOW_MS
 
     const check = () => {
-      if (rafId) return;
+      if (rafId) return
       rafId = requestAnimationFrame(() => {
-        rafId = 0;
-        if (performance.now() > deadline) return;
-        const curHeight = container.scrollHeight;
+        rafId = 0
+        if (performance.now() > deadline) return
+        const curHeight = container.scrollHeight
         if (curHeight > prevHeight && shouldAutoScrollRef.current) {
-          pinToLatest();
+          pinToLatest()
         }
-        prevHeight = curHeight;
-      });
-    };
+        prevHeight = curHeight
+      })
+    }
 
-    const mo = new MutationObserver(check);
-    mo.observe(container, { childList: true, subtree: true });
+    const mo = new MutationObserver(check)
+    mo.observe(container, { childList: true, subtree: true })
     const stopTimer = window.setTimeout(() => {
-      mo.disconnect();
-      if (rafId) cancelAnimationFrame(rafId);
-    }, POST_STREAM_AUTOSCROLL_WINDOW_MS);
+      mo.disconnect()
+      if (rafId) cancelAnimationFrame(rafId)
+    }, POST_STREAM_AUTOSCROLL_WINDOW_MS)
 
     return () => {
-      window.clearTimeout(stopTimer);
-      mo.disconnect();
-      if (rafId) cancelAnimationFrame(rafId);
-    };
-  }, [hasMessages, isStreaming, pinToLatest]);
+      window.clearTimeout(stopTimer)
+      mo.disconnect()
+      if (rafId) cancelAnimationFrame(rafId)
+    }
+  }, [hasMessages, isStreaming, pinToLatest])
 
   const handleScroll = useCallback(() => {
-    const container = containerRef.current;
-    if (!container || scrollRafRef.current) return;
-    shouldAutoScrollRef.current =
-      Math.abs(pinnedScrollTop() - container.scrollTop) < 80;
-  }, [pinnedScrollTop]);
+    const container = containerRef.current
+    if (!container || scrollRafRef.current) return
+    shouldAutoScrollRef.current = Math.abs(pinnedScrollTop() - container.scrollTop) < 80
+  }, [pinnedScrollTop])
 
   // Intent-based release. During dense streaming, position-only checks can
   // miss a user gesture while the bounded animation is active. Release the
@@ -252,57 +251,57 @@ export function useChatAutoScroll({
   // Once released the pin stops fighting, the user is free to browse, and
   // ``handleScroll`` re-arms the pin when they return near the bottom.
   useEffect(() => {
-    const container = containerRef.current;
-    if (!container) return;
+    const container = containerRef.current
+    if (!container) return
 
     const release = () => {
-      shouldAutoScrollRef.current = false;
-    };
+      shouldAutoScrollRef.current = false
+    }
 
     const onWheel = (event: WheelEvent) => {
-      if (event.deltaY < 0) release();
-    };
+      if (event.deltaY < 0) release()
+    }
 
-    let touchY = 0;
+    let touchY = 0
     const onTouchStart = (event: TouchEvent) => {
-      touchY = event.touches[0]?.clientY ?? 0;
-    };
+      touchY = event.touches[0]?.clientY ?? 0
+    }
     const onTouchMove = (event: TouchEvent) => {
-      const y = event.touches[0]?.clientY ?? 0;
+      const y = event.touches[0]?.clientY ?? 0
       // Finger dragging downward scrolls the content up (reveals earlier
       // messages) — an explicit "let me read back" gesture.
-      if (y - touchY > 4) release();
-      touchY = y;
-    };
+      if (y - touchY > 4) release()
+      touchY = y
+    }
 
-    container.addEventListener("wheel", onWheel, { passive: true });
-    container.addEventListener("touchstart", onTouchStart, { passive: true });
-    container.addEventListener("touchmove", onTouchMove, { passive: true });
+    container.addEventListener('wheel', onWheel, { passive: true })
+    container.addEventListener('touchstart', onTouchStart, { passive: true })
+    container.addEventListener('touchmove', onTouchMove, { passive: true })
     return () => {
-      container.removeEventListener("wheel", onWheel);
-      container.removeEventListener("touchstart", onTouchStart);
-      container.removeEventListener("touchmove", onTouchMove);
-    };
+      container.removeEventListener('wheel', onWheel)
+      container.removeEventListener('touchstart', onTouchStart)
+      container.removeEventListener('touchmove', onTouchMove)
+    }
     // Re-attach when the scroll container (re)mounts — it only exists once
     // there are messages to show.
-  }, [hasMessages]);
+  }, [hasMessages])
 
   useEffect(() => {
     return () => {
-      if (scrollRafRef.current) cancelAnimationFrame(scrollRafRef.current);
-    };
-  }, []);
+      if (scrollRafRef.current) cancelAnimationFrame(scrollRafRef.current)
+    }
+  }, [])
 
   // ``scrollToBottom`` is preserved as a public escape hatch for an
   // imperative jump to the latest message, kept instant so it never
   // animates against an active stream.
   const scrollToBottom = useCallback(
     (_behavior: ScrollBehavior) => {
-      void _behavior;
-      pinToLatest();
+      void _behavior
+      pinToLatest()
     },
-    [pinToLatest],
-  );
+    [pinToLatest]
+  )
 
   return {
     containerRef,
@@ -311,5 +310,5 @@ export function useChatAutoScroll({
     scrollToBottom,
     handleScroll,
     trailingSpaceHeight,
-  };
+  }
 }

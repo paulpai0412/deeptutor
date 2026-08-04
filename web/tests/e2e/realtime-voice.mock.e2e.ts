@@ -238,8 +238,7 @@ test('direct GPT-Live speech renders once and provider barge-in stays provider-o
     const assistant = assistants.item(assistants.length - 1)
     if (!container || !assistant) throw new Error('Initial chat geometry is unavailable')
     return {
-      activeEdge:
-        assistant.getBoundingClientRect().bottom - container.getBoundingClientRect().top,
+      activeEdge: assistant.getBoundingClientRect().bottom - container.getBoundingClientRect().top,
       viewportHeight: container.clientHeight,
     }
   })
@@ -369,8 +368,7 @@ test('direct GPT-Live speech renders once and provider barge-in stays provider-o
     const assistant = assistants.item(assistants.length - 1)
     if (!container || !assistant) throw new Error('Delegated chat geometry is unavailable')
     return {
-      activeEdge:
-        assistant.getBoundingClientRect().bottom - container.getBoundingClientRect().top,
+      activeEdge: assistant.getBoundingClientRect().bottom - container.getBoundingClientRect().top,
       viewportHeight: container.clientHeight,
       samples:
         (window as typeof window & { __delegateScrollSamples?: number[] })
