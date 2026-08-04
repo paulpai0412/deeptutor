@@ -543,6 +543,8 @@ async def test_realtime_bridge_forwards_provider_commentary_without_cancelling_d
     sideband = _RealtimeSideband()
     provider = _RealtimeProvider(sideband)
     runtime = _DelayedTurnRuntime()
+    store = _DirectSessionStore()
+    monkeypatch.setattr(voice_router, "get_session_store", lambda: store)
     monkeypatch.setattr(voice_router, "CodexOAuthRealtimeProvider", lambda: provider)
     monkeypatch.setattr(session_services, "get_turn_runtime_manager", lambda: runtime)
     monkeypatch.setattr(
@@ -626,6 +628,7 @@ async def test_realtime_bridge_forwards_provider_commentary_without_cancelling_d
     # Codex mode: provider commentary is forwarded, not muted.
     assert any(message.get("type") == "audio_output" for message in ws.sent)
     assert not any(message.get("type") == "error" for message in ws.sent)
+    assert not store.messages
 
 
 @pytest.mark.asyncio
@@ -799,6 +802,8 @@ async def test_realtime_bridge_keeps_direct_provider_turns_out_of_deeptutor(
     sideband = _RealtimeSideband()
     provider = _RealtimeProvider(sideband)
     runtime = _TurnRuntime()
+    store = _DirectSessionStore()
+    monkeypatch.setattr(voice_router, "get_session_store", lambda: store)
     monkeypatch.setattr(voice_router, "CodexOAuthRealtimeProvider", lambda: provider)
     monkeypatch.setattr(session_services, "get_turn_runtime_manager", lambda: runtime)
     monkeypatch.setattr(
@@ -839,19 +844,38 @@ async def test_realtime_bridge_keeps_direct_provider_turns_out_of_deeptutor(
     assert not any(message.get("type") == "handoff" for message in ws.sent)
     assert not any(message.get("state") == "interrupted" for message in ws.sent)
     assert runtime.cancelled_turns == []
-    assert {
-        "type": "transcript",
-        "phase": "final",
-        "mode": "provider",
-        "provider_turn_id": "user-final",
-        "text": "What is two plus two?",
-    } in ws.sent
-    assert {
-        "type": "assistant_transcript",
-        "phase": "final",
-        "provider_turn_id": "assistant-final",
-        "text": "Two plus two equals four.",
-    } in ws.sent
+    assert any(
+        message
+        == {
+            "type": "transcript",
+            "phase": "final",
+            "mode": "provider",
+            "provider_turn_id": "user-final",
+            "text": "What is two plus two?",
+        }
+        for message in ws.sent
+    )
+    assert any(
+        message
+        == {
+            "type": "assistant_transcript",
+            "phase": "final",
+            "mode": "provider",
+            "provider_turn_id": "assistant-final",
+            "text": "Two plus two equals four.",
+        }
+        for message in ws.sent
+    )
+    assert [message["role"] for message in store.messages] == ["user", "assistant"]
+    assert [message["content"] for message in store.messages] == [
+        "What is two plus two?",
+        "Two plus two equals four.",
+    ]
+    assert [
+        str(metadata.get("provider_turn_id")) if isinstance(metadata, dict) else ""
+        for metadata in (message.get("metadata") for message in store.messages)
+    ] == ["user-final", "assistant-final"]
+    assert all(message["capability"] == "realtime_voice" for message in store.messages)
 
 
 @pytest.mark.asyncio
@@ -924,7 +948,7 @@ async def test_realtime_bridge_never_rejects_provider_direct_output(
     # Provider audio is forwarded (single audio source, no gate).
     assert any(message.get("type") == "audio_output" for message in ws.sent)
     assert not any(message.get("type") == "playback_authorized" for message in ws.sent)
-    assert not store.messages
+    assert [message["role"] for message in store.messages] == ["user", "assistant"]
     assert ws.close_code == 1000
 
 

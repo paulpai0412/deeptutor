@@ -1401,6 +1401,7 @@ export const ChatMessageList = memo(function ChatMessageList({
           <div
             key={`${msg.role}-${i}`}
             className="w-full"
+            data-chat-message-role={msg.role}
             data-testid={msg.role === "assistant" ? "chat-assistant-message" : "chat-user-message"}
           >
             <InlineFileCardProvider

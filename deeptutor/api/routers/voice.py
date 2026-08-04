@@ -177,6 +177,7 @@ async def _serve_codex_realtime(ws: WebSocket) -> None:
     }
     seen_provider_user_turns: set[str] = set()
     seen_provider_assistant_turns: set[str] = set()
+    pending_provider_user_turn: tuple[str, str] | None = None
     cancellation_lock = asyncio.Lock()
     context_snapshot: RealtimeContextSnapshot | None = None
     session_store = get_session_store()
@@ -220,30 +221,41 @@ async def _serve_codex_realtime(ws: WebSocket) -> None:
         provider_turn_id: object,
         raw_text: object,
     ) -> None:
+        nonlocal pending_provider_user_turn
         provider_id = str(provider_turn_id or "").strip()
         if provider_id:
             provider_id = _validate_provider_id(provider_id, label="provider turn id")
             if provider_id in seen_provider_user_turns:
                 return
             seen_provider_user_turns.add(provider_id)
+        text = _validate_provider_text(raw_text)
+        pending_provider_user_turn = (provider_id, text)
+        if (
+            provider_turn.get("route") not in {"delegated", "delegated_completed"}
+            or provider_turn.get("provider_output_done")
+        ):
+            provider_turn["route"] = "provider"
+            provider_turn["provider_output_done"] = False
         await send(
             {
                 "type": "transcript",
                 "phase": "final",
                 "mode": "provider",
                 "provider_turn_id": provider_id,
-                "text": _validate_provider_text(raw_text),
+                "text": text,
             }
         )
 
     async def announce_delegation(handoff_id: object, raw_text: object) -> None:
         """Commit one native client delegation into DeepTutor's turn path."""
+        nonlocal pending_provider_user_turn
         delegation_id = _validate_provider_id(handoff_id, label="handoff id")
         text = _validate_provider_text(raw_text)
         async with cancellation_lock:
             if delegation_id in seen_handoffs:
                 return
             seen_handoffs.add(delegation_id)
+            pending_provider_user_turn = None
             provider_turn.clear()
             provider_turn.update(
                 {
@@ -271,19 +283,51 @@ async def _serve_codex_realtime(ws: WebSocket) -> None:
         provider_turn_id: object,
         raw_text: object,
     ) -> None:
+        nonlocal pending_provider_user_turn
         provider_id = str(provider_turn_id or "").strip()
         if provider_id:
             provider_id = _validate_provider_id(provider_id, label="assistant turn id")
             if provider_id in seen_provider_assistant_turns:
                 return
             seen_provider_assistant_turns.add(provider_id)
+        text = _validate_provider_text(raw_text)
+        delegated = provider_turn.get("route") in {"delegated", "delegated_completed"}
         provider_turn["provider_output_done"] = True
+        if (
+            not delegated
+            and context_snapshot is not None
+            and pending_provider_user_turn is not None
+        ):
+            try:
+                user_turn_id, user_text = pending_provider_user_turn
+                await session_store.add_message(
+                    session_id=context_snapshot.session_id,
+                    role="user",
+                    content=user_text,
+                    capability="realtime_voice",
+                    metadata={"provider_turn_id": user_turn_id},
+                )
+                await session_store.add_message(
+                    session_id=context_snapshot.session_id,
+                    role="assistant",
+                    content=text,
+                    capability="realtime_voice",
+                    metadata={"provider_turn_id": provider_id},
+                )
+            except Exception as exc:
+                raise RealtimeVoiceProviderError(
+                    "Realtime Voice transcript could not be saved."
+                ) from exc
+        pending_provider_user_turn = None
+        if not delegated:
+            provider_turn["route"] = "idle"
         await send(
             {
                 "type": "assistant_transcript",
                 "phase": "final",
+                "mode": "delegated" if delegated else "provider",
                 "provider_turn_id": provider_id,
-                "text": _validate_provider_text(raw_text),
+                "text": text,
             }
         )
 

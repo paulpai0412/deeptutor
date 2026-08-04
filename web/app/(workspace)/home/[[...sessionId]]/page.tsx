@@ -895,11 +895,13 @@ export default function ChatPage() {
     endRef: messagesEndRef,
     shouldAutoScrollRef,
     handleScroll: handleMessagesScroll,
+    trailingSpaceHeight,
   } = useChatAutoScroll({
     hasMessages,
     isStreaming: state.isStreaming,
     composerHeight,
     messageCount: displayMessages.length,
+    lastMessageRole: lastMessage?.role,
     lastMessageContent: lastMessage?.content,
     lastEventCount: lastMessage?.events?.length,
   })
@@ -2042,6 +2044,11 @@ export default function ChatPage() {
                     onEditMessage={editMessage}
                     onSwitchBranch={switchBranch}
                     onSubmitUserReply={submitUserReply}
+                  />
+                  <div
+                    aria-hidden="true"
+                    data-testid="chat-trailing-space"
+                    style={{ height: trailingSpaceHeight }}
                   />
                   <div ref={messagesEndRef} className="h-px w-full shrink-0" />
                 </div>

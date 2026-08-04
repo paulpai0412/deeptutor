@@ -1,24 +1,25 @@
 "use client";
 
-import { useCallback, useEffect, useLayoutEffect, useRef } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 
 interface AutoScrollOptions {
   hasMessages: boolean;
   isStreaming: boolean;
   composerHeight: number;
   messageCount: number;
+  lastMessageRole?: "user" | "assistant" | "system";
   lastMessageContent?: string;
   lastEventCount?: number;
 }
 
 /**
- * "Pin to bottom" autoscroll, designed for jitter-free LLM streaming.
+ * Latest-message autoscroll, designed for jitter-free LLM streaming.
  *
  * The implementation deliberately collapses what used to be three
  * separate scroll paths (a throttled timer, a rAF tick, a smooth-vs-
  * instant branch on stream state) into one: a single
- * ``useLayoutEffect`` that assigns ``scrollTop = scrollHeight`` while
- * ``autoFollow`` is true. That is the only writer to ``scrollTop``
+ * ``useLayoutEffect`` that follows one computed target while ``autoFollow``
+ * is true. That is the only writer to ``scrollTop``
  * during streaming, which removes all the races that previously made
  * the viewport visibly stutter — smooth-scroll animation interrupted
  * by the next delta's instant snap, throttle + rAF firing within the
@@ -52,22 +53,52 @@ export function useChatAutoScroll({
   isStreaming,
   composerHeight,
   messageCount,
+  lastMessageRole,
   lastMessageContent,
   lastEventCount,
 }: AutoScrollOptions) {
   const containerRef = useRef<HTMLDivElement>(null);
   const endRef = useRef<HTMLDivElement>(null);
   const shouldAutoScrollRef = useRef(true);
+  const [trailingSpaceHeight, setTrailingSpaceHeight] = useState(0);
 
-  const pinToBottom = useCallback(() => {
+  const pinnedScrollTop = useCallback(() => {
+    const container = containerRef.current;
+    if (!container) return 0;
+    if (lastMessageRole !== "assistant") return container.scrollHeight;
+    const assistants = container.querySelectorAll<HTMLElement>(
+      '[data-chat-message-role="assistant"]',
+    );
+    const assistant = assistants.item(assistants.length - 1);
+    if (!assistant) return container.scrollHeight;
+    const containerRect = container.getBoundingClientRect();
+    const assistantRect = assistant.getBoundingClientRect();
+    const assistantTop = assistantRect.top - containerRect.top + container.scrollTop;
+    const topTarget = assistantTop - 32;
+    const bottomTarget = assistantTop + assistantRect.height - container.clientHeight + 48;
+    return Math.max(topTarget, bottomTarget);
+  }, [lastMessageRole]);
+
+  const pinToLatest = useCallback(() => {
     const container = containerRef.current;
     if (!container) return;
-    // Direct assignment, not ``scrollTo({behavior})``. The browser
-    // applies it synchronously inside the same layout pass which
-    // means the user never sees the in-between frame where new
-    // content has rendered but the scroll position is still stale.
-    container.scrollTop = container.scrollHeight;
-  }, []);
+    // Short assistant replies start near the top. Once a reply grows past the
+    // viewport, the same target follows its bottom so streaming stays readable.
+    container.scrollTop = pinnedScrollTop();
+  }, [pinnedScrollTop]);
+
+  useLayoutEffect(() => {
+    const container = containerRef.current;
+    if (!container || !hasMessages || lastMessageRole !== "assistant") {
+      setTrailingSpaceHeight(0);
+      return;
+    }
+    const update = () => setTrailingSpaceHeight(Math.max(0, container.clientHeight - 64));
+    update();
+    const observer = new ResizeObserver(update);
+    observer.observe(container);
+    return () => observer.disconnect();
+  }, [hasMessages, lastMessageRole]);
 
   // Primary pin: runs in layout phase after every render that bumps
   // message count / streaming content / events / composer height /
@@ -77,15 +108,16 @@ export function useChatAutoScroll({
   // and we observe a flash.
   useLayoutEffect(() => {
     if (!hasMessages || !shouldAutoScrollRef.current) return;
-    pinToBottom();
+    pinToLatest();
   }, [
-    pinToBottom,
+    pinToLatest,
     hasMessages,
     isStreaming,
     messageCount,
     lastMessageContent,
     lastEventCount,
     composerHeight,
+    trailingSpaceHeight,
   ]);
 
   // Companion pin: content-change-driven, active ONLY while the turn is
@@ -193,7 +225,7 @@ export function useChatAutoScroll({
         if (performance.now() > deadline) return;
         const curHeight = container.scrollHeight;
         if (curHeight > prevHeight && shouldAutoScrollRef.current) {
-          pinToBottom();
+          pinToLatest();
         }
         prevHeight = curHeight;
       });
@@ -211,15 +243,14 @@ export function useChatAutoScroll({
       mo.disconnect();
       if (rafId) cancelAnimationFrame(rafId);
     };
-  }, [hasMessages, isStreaming, pinToBottom]);
+  }, [hasMessages, isStreaming, pinToLatest]);
 
   const handleScroll = useCallback(() => {
     const container = containerRef.current;
     if (!container) return;
-    const distanceFromBottom =
-      container.scrollHeight - container.scrollTop - container.clientHeight;
-    shouldAutoScrollRef.current = distanceFromBottom < 80;
-  }, []);
+    shouldAutoScrollRef.current =
+      Math.abs(pinnedScrollTop() - container.scrollTop) < 80;
+  }, [pinnedScrollTop]);
 
   // Intent-based release. During dense streaming the pin above re-snaps to
   // ``scrollHeight`` on every content change, so the position-only
@@ -268,15 +299,15 @@ export function useChatAutoScroll({
     // there are messages to show.
   }, [hasMessages]);
 
-  // ``scrollToBottom`` is preserved as a public escape hatch (e.g. an
-  // imperative "jump to latest" button) but kept ``instant`` so it
-  // never animates against an active stream.
+  // ``scrollToBottom`` is preserved as a public escape hatch for an
+  // imperative jump to the latest message, kept instant so it never
+  // animates against an active stream.
   const scrollToBottom = useCallback(
     (_behavior: ScrollBehavior) => {
       void _behavior;
-      pinToBottom();
+      pinToLatest();
     },
-    [pinToBottom],
+    [pinToLatest],
   );
 
   return {
@@ -285,5 +316,6 @@ export function useChatAutoScroll({
     shouldAutoScrollRef,
     scrollToBottom,
     handleScroll,
+    trailingSpaceHeight,
   };
 }

@@ -2,15 +2,56 @@ import { expect, test } from '@playwright/test'
 
 test.use({ permissions: ['microphone'] })
 
+let directTranscriptPersisted = false
+let historyPairs = 0
+
 test.beforeEach(async ({ page }) => {
-  await page.route('**/api/v1/sessions/voice-e2e', async route => {
+  directTranscriptPersisted = false
+  historyPairs = 0
+  await page.route('**/api/v1/sessions/voice-e2e*', async route => {
+    const messages: Array<Record<string, unknown>> = []
+    let parentId: number | null = null
+    for (let index = 0; index < historyPairs; index += 1) {
+      const userId = messages.length + 1
+      messages.push({
+        id: userId,
+        role: 'user',
+        content: `Earlier question ${index + 1}`,
+        parent_message_id: parentId,
+      })
+      const assistantId = userId + 1
+      messages.push({
+        id: assistantId,
+        role: 'assistant',
+        content: `Earlier answer ${index + 1}`,
+        parent_message_id: userId,
+      })
+      parentId = assistantId
+    }
+    if (directTranscriptPersisted) {
+      const userId = messages.length + 1
+      messages.push({
+        id: userId,
+        role: 'user',
+        content: 'Hello',
+        capability: 'realtime_voice',
+        parent_message_id: parentId,
+      })
+      messages.push({
+        id: userId + 1,
+        role: 'assistant',
+        content: 'Hi — how can I help?',
+        capability: 'realtime_voice',
+        parent_message_id: userId,
+      })
+    }
     await route.fulfill({
       contentType: 'application/json',
       body: JSON.stringify({
         id: 'voice-e2e',
         session_id: 'voice-e2e',
         title: 'New chat',
-        messages: [],
+        messages,
         active_turns: [],
         status: 'idle',
         preferences: {},
@@ -44,7 +85,12 @@ test.beforeEach(async ({ page }) => {
       }
 
       send(raw: string) {
-        const message = JSON.parse(raw) as { type?: string }
+        let message: { type?: string }
+        try {
+          message = JSON.parse(raw) as { type?: string }
+        } catch {
+          return
+        }
         if (message.type === 'prepare') {
           this.emit({ type: 'context_ready', session_id: 'voice-e2e', source_count: 0 })
         } else if (message.type === 'start') {
@@ -136,10 +182,13 @@ test.beforeEach(async ({ page }) => {
 test('direct GPT-Live speech renders once and provider barge-in stays provider-owned', async ({
   page,
 }) => {
+  historyPairs = 18
   await page.goto('/home/voice-e2e')
+  await expect(page.getByTestId('chat-assistant-message')).toHaveCount(18)
   await page.getByTestId('realtime-voice-toggle').click()
   await expect(page.getByTestId('realtime-voice-status')).toHaveText(/Listening/i)
 
+  directTranscriptPersisted = true
   await page.evaluate(() => {
     const globals = window as typeof window & {
       __emitVoiceServer: (payload: unknown) => void
@@ -169,9 +218,24 @@ test('direct GPT-Live speech renders once and provider barge-in stays provider-o
 
   await expect(page.getByTestId('realtime-turn-mode')).toHaveAttribute('data-mode', 'provider')
   await expect(page.getByTestId('realtime-audio-output')).toHaveAttribute('data-received', 'true')
-  await expect(page.getByTestId('chat-user-message')).toHaveCount(0)
-  await expect(page.getByTestId('chat-assistant-message')).toHaveCount(1)
-  await expect(page.getByTestId('chat-assistant-message')).toContainText('Hi — how can I help?')
+  await expect(
+    page.locator('[data-chat-scroll-root="true"]').getByText('Hello', { exact: true })
+  ).toBeVisible()
+  await expect(page.getByTestId('chat-assistant-message')).toHaveCount(19)
+  await expect(page.getByTestId('chat-assistant-message').last()).toContainText(
+    'Hi — how can I help?'
+  )
+  const assistantTop = await page.evaluate(() => {
+    const container = document.querySelector<HTMLElement>('[data-chat-scroll-root="true"]')
+    const assistants = document.querySelectorAll<HTMLElement>(
+      '[data-testid="chat-assistant-message"]'
+    )
+    const assistant = assistants.item(assistants.length - 1)
+    if (!container || !assistant) throw new Error('Chat geometry is unavailable')
+    return assistant.getBoundingClientRect().top - container.getBoundingClientRect().top
+  })
+  expect(assistantTop).toBeGreaterThanOrEqual(20)
+  expect(assistantTop).toBeLessThan(110)
   await expect(page.getByTestId('realtime-voice-status')).not.toHaveText(/Interrupted/i)
 
   await page.evaluate(() => {
@@ -185,5 +249,5 @@ test('direct GPT-Live speech renders once and provider barge-in stays provider-o
       text: 'Hi — how can I help?',
     })
   })
-  await expect(page.getByTestId('chat-assistant-message')).toHaveCount(1)
+  await expect(page.getByTestId('chat-assistant-message')).toHaveCount(19)
 })

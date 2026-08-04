@@ -437,15 +437,25 @@ export default memo(function ChatComposer({
     [loadSession, unifiedChatState.sessionId],
   );
   const handleRealtimeAssistantTranscript = useCallback(
-    (text: string, final: boolean, turnId: string, delegated: boolean) => {
-      if (final) {
-        commitRealtimeVoiceAssistant(text, turnId, delegated);
-        setRealtimeVoiceAssistant("", false, "", false);
+    async (
+      text: string,
+      final: boolean,
+      turnId: string,
+      delegated: boolean,
+      sessionId: string,
+    ) => {
+      if (!final) {
+        setRealtimeVoiceAssistant(text, false, turnId, delegated);
         return;
       }
-      setRealtimeVoiceAssistant(text, false, turnId, delegated);
+      setRealtimeVoiceAssistant("", false, "", false);
+      if (delegated) {
+        commitRealtimeVoiceAssistant(text, turnId, true);
+      } else if (sessionId) {
+        await loadSession(sessionId);
+      }
     },
-    [commitRealtimeVoiceAssistant],
+    [commitRealtimeVoiceAssistant, loadSession],
   );
   const realtimeVoice = useRealtimeVoiceSession(handleRealtimeTurn, {
     sessionId: unifiedChatState.sessionId,

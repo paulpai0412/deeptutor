@@ -50,7 +50,13 @@ export type RealtimeVoiceSessionOptions = {
   questionContext?: string;
   language?: string;
   onSessionReady?: (sessionId: string) => void | Promise<void>;
-  onAssistantTranscript?: (text: string, final: boolean, turnId: string, delegated: boolean) => void;
+  onAssistantTranscript?: (
+    text: string,
+    final: boolean,
+    turnId: string,
+    delegated: boolean,
+    sessionId: string,
+  ) => void | Promise<void>;
 };
 
 function waitForRealtimeContext(
@@ -206,7 +212,7 @@ export function useRealtimeVoiceSession(
     interruptionSentRef.current = false;
     transcriptStateRef.current = undefined;
     setAssistantTranscript("");
-    onAssistantTranscriptRef.current?.("", false, "", false);
+    onAssistantTranscriptRef.current?.("", false, "", false, sessionIdRef.current ?? "");
     releaseStream();
     releaseAudio();
     socketRef.current?.close();
@@ -283,7 +289,7 @@ export function useRealtimeVoiceSession(
     setLastTurnMode(null);
     setAssistantTranscript("");
     transcriptStateRef.current = undefined;
-    onAssistantTranscriptRef.current?.("", false, "", false);
+    onAssistantTranscriptRef.current?.("", false, "", false, sessionIdRef.current ?? "");
     outputActiveRef.current = false;
     interruptionSentRef.current = false;
     handoffIdRef.current = null;
@@ -500,6 +506,7 @@ export function useRealtimeVoiceSession(
               reduced.state.assistantFinal,
               reduced.state.assistantTurnId,
               reduced.state.userMode === "delegated",
+              sessionIdRef.current ?? "",
             );
           if (message.phase === "final") {
             void sessionReadyRef.current.then(publishTranscript).catch(() => {
@@ -665,7 +672,7 @@ export function useRealtimeVoiceSession(
       handoffIdRef.current = null;
       transcriptCommittedRef.current = false;
       transcriptStateRef.current = undefined;
-      onAssistantTranscriptRef.current?.("", false, "", false);
+      onAssistantTranscriptRef.current?.("", false, "", false, sessionIdRef.current ?? "");
       releaseStream();
       releaseAudio();
       socketRef.current?.close();
