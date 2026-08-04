@@ -156,6 +156,7 @@ def test_parse_case_insensitive_and_whitespace() -> None:
 def test_derive_current_is_first_unanswered() -> None:
     state = derive_exam_state(_QUESTIONS, [])
     assert state.current_index == 0
+    assert state.next_question is not None
     assert state.next_question["question_id"] == "q-2"
     assert not state.complete
 
@@ -222,6 +223,18 @@ async def test_proctor_correct_records_judgment_and_next_turn_advances(
     assert len(judgments) == 1
     assert judgments[0].metadata["question_id"] == "q-1"
     assert judgments[0].metadata["verdict"] == "correct"
+
+    snapshot = await store.get_latest_quiz_snapshot(session_id)
+    assert snapshot is not None
+    answer = await store.find_notebook_entry(
+        session_id,
+        "q-1",
+        turn_id=str(snapshot["turn_id"]),
+    )
+    assert answer is not None
+    assert answer["user_answer"] == "答案是 B"
+    assert answer["is_correct"] is True
+    assert answer["grading_method"] == "proctor"
 
     contents = [e for e in events if e.type is StreamEventType.CONTENT]
     assert contents[-1].content == "答對了！下一題：法國首都？"

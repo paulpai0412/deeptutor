@@ -284,8 +284,47 @@ class DeepQuestionCapability(BaseCapability):
                     context.metadata.get("conversation_context_text", "") or ""
                 ).strip(),
             )
-            question_id = str(state.current_question.get("question_id") or "")
+            question = state.current_question
+            question_id = str(question.get("question_id") or "")
             if verdict in {"correct", "wrong", "skip"}:
+                options = question.get("options")
+                await store.upsert_notebook_entries(
+                    session_id,
+                    [
+                        {
+                            "turn_id": question_set.turn_id,
+                            "question_id": question_id,
+                            "question": str(
+                                question.get("question_text") or question.get("question") or ""
+                            ),
+                            "question_type": str(question.get("question_type") or ""),
+                            "options": options if isinstance(options, dict) else {},
+                            "correct_answer": str(
+                                question.get("answer") or question.get("correct_answer") or ""
+                            ),
+                            "explanation": str(question.get("explanation") or ""),
+                            "difficulty": str(question.get("difficulty") or ""),
+                            "user_answer": str(context.user_message or ""),
+                            "is_correct": (
+                                True
+                                if verdict == "correct"
+                                else False if verdict == "wrong" else None
+                            ),
+                            "source_type": question_set.source,
+                            "paper_id": question_set.paper_id,
+                            "paper_display_name": question_set.paper_display_name,
+                            "source_question_number": str(
+                                question.get("question_number") or ""
+                            ),
+                            "source_snapshot_id": (
+                                question_set.set_id
+                                if question_set.source == "original_paper"
+                                else ""
+                            ),
+                            "grading_method": "proctor",
+                        }
+                    ],
+                )
                 await stream.progress(
                     "",
                     source=self.name,

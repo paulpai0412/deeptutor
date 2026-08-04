@@ -25,6 +25,7 @@ class QuestionSet:
     other)."""
 
     set_id: str
+    turn_id: str
     questions: list[dict[str, Any]]
     source: str  # "original_paper" | "generated"
     paper_id: str = ""
@@ -116,21 +117,27 @@ async def resolve_latest_question_set(
 
     snapshot = await store.get_latest_quiz_snapshot(session_id)
     if snapshot and isinstance(snapshot.get("questions"), list) and snapshot["questions"]:
+        snapshot_created_at = snapshot.get("created_at")
         candidates.append(
             QuestionSet(
                 set_id=str(snapshot.get("snapshot_id") or ""),
+                turn_id=str(snapshot.get("turn_id") or ""),
                 questions=list(snapshot["questions"]),
                 source="original_paper",
                 paper_id=str(snapshot.get("paper_id") or ""),
                 paper_display_name=str(snapshot.get("paper_display_name") or ""),
-                created_at=float(snapshot.get("created_at") or 0.0),
+                created_at=(
+                    snapshot_created_at
+                    if isinstance(snapshot_created_at, (int, float))
+                    else 0.0
+                ),
             )
         )
 
     quiz_turn_id = await store.get_latest_quiz_turn_id(session_id)
     if quiz_turn_id:
         events = await store.get_turn_events(quiz_turn_id)
-        emitted: list[tuple[int, dict[str, Any], float]] = []
+        emitted: list[tuple[int | float, dict[str, Any], int | float]] = []
         for event in events:
             if str(event.get("type") or "") != "content":
                 continue
@@ -143,11 +150,12 @@ async def resolve_latest_question_set(
             if not isinstance(qa_pair, dict) or not str(qa_pair.get("question") or "").strip():
                 continue
             index = metadata.get("question_index")
+            created_at = event.get("timestamp") or event.get("created_at")
             emitted.append(
                 (
-                    int(index) if isinstance(index, (int, float)) else len(emitted),
+                    index if isinstance(index, (int, float)) else len(emitted),
                     qa_pair,
-                    float(event.get("timestamp") or event.get("created_at") or 0.0),
+                    created_at if isinstance(created_at, (int, float)) else 0.0,
                 )
             )
         if emitted:
@@ -159,6 +167,7 @@ async def resolve_latest_question_set(
             candidates.append(
                 QuestionSet(
                     set_id=str(quiz_turn_id),
+                    turn_id=str(quiz_turn_id),
                     questions=questions,
                     source="generated",
                     created_at=max(ts for _i, _q, ts in emitted),
