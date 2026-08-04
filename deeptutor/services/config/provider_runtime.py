@@ -233,17 +233,13 @@ TTS_PROVIDERS: dict[str, VoiceProviderSpec] = {
         default_model="openai/gpt-4o-mini-tts",
         default_voice="alloy",
     ),
-    "groq": VoiceProviderSpec(
-        label="Groq",
-        default_api_base="https://api.groq.com/openai/v1",
-        default_model="canopylabs/orpheus-v1-english",
-        default_voice="autumn",
-    ),
+    # Groq currently exposes only English/Arabic TTS, so its fallback cannot
+    # synthesize Chinese. SiliconFlow's CosyVoice2 covers Chinese and English.
     "siliconflow": VoiceProviderSpec(
         label="SiliconFlow",
         default_api_base="https://api.siliconflow.cn/v1",
         default_model="FunAudioLLM/CosyVoice2-0.5B",
-        default_voice="FunAudioLLM/CosyVoice2-0.5B:alex",
+        default_voice="FunAudioLLM/CosyVoice2-0.5B:diana",
     ),
     "azure_openai": VoiceProviderSpec(
         label="Azure OpenAI",

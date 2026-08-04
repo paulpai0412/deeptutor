@@ -327,6 +327,16 @@ def test_resolve_tts_config_picks_openrouter_adapter() -> None:
     assert cfg.adapter == "openrouter_tts"
 
 
+def test_groq_tts_is_not_offered_as_chinese_default() -> None:
+    from deeptutor.services.config.provider_runtime import TTS_PROVIDERS
+
+    # Groq's hosted TTS models are English/Arabic-only today; offering it as a
+    # default TTS provider would silently fail for Chinese replies.
+    assert "groq" not in TTS_PROVIDERS
+    assert TTS_PROVIDERS["siliconflow"].default_model == "FunAudioLLM/CosyVoice2-0.5B"
+    assert TTS_PROVIDERS["siliconflow"].default_voice == "FunAudioLLM/CosyVoice2-0.5B:diana"
+
+
 def test_resolve_tts_config_raises_without_model() -> None:
     catalog = {"version": 1, "services": {"tts": {"profiles": []}}}
     with pytest.raises(ValueError, match="No active TTS model"):
