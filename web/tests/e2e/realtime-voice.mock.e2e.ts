@@ -173,9 +173,7 @@ test.beforeEach(async ({ page }) => {
     }
     globals.__emitVoiceServer = payload => globals.__voiceSocket?.emit(payload)
     globals.__emitVoiceProvider = payload =>
-      providerChannel.onmessage?.(
-        new MessageEvent('message', { data: JSON.stringify(payload) })
-      )
+      providerChannel.onmessage?.(new MessageEvent('message', { data: JSON.stringify(payload) }))
   })
 })
 
@@ -188,6 +186,13 @@ test('direct GPT-Live speech renders once and provider barge-in stays provider-o
   await page.getByTestId('realtime-voice-toggle').click()
   await expect(page.getByTestId('realtime-voice-status')).toHaveText(/Listening/i)
 
+  await page.evaluate(() => {
+    const container = document.querySelector<HTMLElement>('[data-chat-scroll-root="true"]')
+    if (!container) throw new Error('Chat scroll container is unavailable')
+    const samples = [container.scrollTop]
+    container.addEventListener('scroll', () => samples.push(container.scrollTop))
+    ;(window as typeof window & { __voiceScrollSamples?: number[] }).__voiceScrollSamples = samples
+  })
   directTranscriptPersisted = true
   await page.evaluate(() => {
     const globals = window as typeof window & {
@@ -225,17 +230,44 @@ test('direct GPT-Live speech renders once and provider barge-in stays provider-o
   await expect(page.getByTestId('chat-assistant-message').last()).toContainText(
     'Hi — how can I help?'
   )
-  const assistantTop = await page.evaluate(() => {
+  await expect
+    .poll(async () =>
+      page.evaluate(() => {
+        const container = document.querySelector<HTMLElement>('[data-chat-scroll-root="true"]')
+        const assistants = document.querySelectorAll<HTMLElement>(
+          '[data-testid="chat-assistant-message"]'
+        )
+        const assistant = assistants.item(assistants.length - 1)
+        if (!container || !assistant) return Number.POSITIVE_INFINITY
+        return (
+          (assistant.getBoundingClientRect().bottom - container.getBoundingClientRect().top) /
+          container.clientHeight
+        )
+      })
+    )
+    .toBeLessThan(0.7)
+  const geometry = await page.evaluate(() => {
     const container = document.querySelector<HTMLElement>('[data-chat-scroll-root="true"]')
     const assistants = document.querySelectorAll<HTMLElement>(
       '[data-testid="chat-assistant-message"]'
     )
     const assistant = assistants.item(assistants.length - 1)
     if (!container || !assistant) throw new Error('Chat geometry is unavailable')
-    return assistant.getBoundingClientRect().top - container.getBoundingClientRect().top
+    const containerRect = container.getBoundingClientRect()
+    return {
+      activeEdge: assistant.getBoundingClientRect().bottom - containerRect.top,
+      viewportHeight: container.clientHeight,
+      samples:
+        (window as typeof window & { __voiceScrollSamples?: number[] }).__voiceScrollSamples ?? [],
+    }
   })
-  expect(assistantTop).toBeGreaterThanOrEqual(20)
-  expect(assistantTop).toBeLessThan(110)
+  expect(geometry.activeEdge / geometry.viewportHeight).toBeGreaterThan(0.4)
+  expect(geometry.activeEdge / geometry.viewportHeight).toBeLessThan(0.7)
+  for (let index = 1; index < geometry.samples.length; index += 1) {
+    const step = geometry.samples[index] - geometry.samples[index - 1]
+    expect(step).toBeGreaterThanOrEqual(-1)
+    expect(step).toBeLessThanOrEqual(48)
+  }
   await expect(page.getByTestId('realtime-voice-status')).not.toHaveText(/Interrupted/i)
 
   await page.evaluate(() => {

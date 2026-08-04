@@ -60,6 +60,7 @@ export function useChatAutoScroll({
   const containerRef = useRef<HTMLDivElement>(null);
   const endRef = useRef<HTMLDivElement>(null);
   const shouldAutoScrollRef = useRef(true);
+  const scrollRafRef = useRef(0);
   const [trailingSpaceHeight, setTrailingSpaceHeight] = useState(0);
 
   const pinnedScrollTop = useCallback(() => {
@@ -73,18 +74,27 @@ export function useChatAutoScroll({
     if (!assistant) return container.scrollHeight;
     const containerRect = container.getBoundingClientRect();
     const assistantRect = assistant.getBoundingClientRect();
-    const assistantTop = assistantRect.top - containerRect.top + container.scrollTop;
-    const topTarget = assistantTop - 32;
-    const bottomTarget = assistantTop + assistantRect.height - container.clientHeight + 48;
-    return Math.max(topTarget, bottomTarget);
+    const assistantBottom = assistantRect.bottom - containerRect.top + container.scrollTop;
+    return Math.max(0, assistantBottom - container.clientHeight * 0.55);
   }, [lastMessageRole]);
 
   const pinToLatest = useCallback(() => {
     const container = containerRef.current;
-    if (!container) return;
-    // Short assistant replies start near the top. Once a reply grows past the
-    // viewport, the same target follows its bottom so streaming stays readable.
-    container.scrollTop = pinnedScrollTop();
+    if (!container || scrollRafRef.current) return;
+    const step = () => {
+      if (!shouldAutoScrollRef.current) {
+        scrollRafRef.current = 0;
+        return;
+      }
+      const distance = pinnedScrollTop() - container.scrollTop;
+      if (distance <= 1) {
+        scrollRafRef.current = 0;
+        return;
+      }
+      container.scrollTop += Math.min(distance, 40);
+      scrollRafRef.current = requestAnimationFrame(step);
+    };
+    step();
   }, [pinnedScrollTop]);
 
   useLayoutEffect(() => {
@@ -93,7 +103,7 @@ export function useChatAutoScroll({
       setTrailingSpaceHeight(0);
       return;
     }
-    const update = () => setTrailingSpaceHeight(Math.max(0, container.clientHeight - 64));
+    const update = () => setTrailingSpaceHeight(Math.max(0, container.clientHeight * 0.5));
     update();
     const observer = new ResizeObserver(update);
     observer.observe(container);
@@ -247,7 +257,7 @@ export function useChatAutoScroll({
 
   const handleScroll = useCallback(() => {
     const container = containerRef.current;
-    if (!container) return;
+    if (!container || scrollRafRef.current) return;
     shouldAutoScrollRef.current =
       Math.abs(pinnedScrollTop() - container.scrollTop) < 80;
   }, [pinnedScrollTop]);
@@ -298,6 +308,12 @@ export function useChatAutoScroll({
     // Re-attach when the scroll container (re)mounts — it only exists once
     // there are messages to show.
   }, [hasMessages]);
+
+  useEffect(() => {
+    return () => {
+      if (scrollRafRef.current) cancelAnimationFrame(scrollRafRef.current);
+    };
+  }, []);
 
   // ``scrollToBottom`` is preserved as a public escape hatch for an
   // imperative jump to the latest message, kept instant so it never
