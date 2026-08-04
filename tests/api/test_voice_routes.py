@@ -467,6 +467,73 @@ async def test_realtime_bridge_streams_delegated_speech_before_turn_completion(
 
 
 @pytest.mark.asyncio
+async def test_realtime_bridge_absorbs_short_final_after_delegated_speech_starts(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import deeptutor.services.session as session_services
+
+    ws = _RealtimeWebSocket()
+    sideband = _RealtimeSideband()
+    runtime = _TurnRuntime()
+    monkeypatch.setattr(
+        voice_router,
+        "CodexOAuthRealtimeProvider",
+        lambda: _RealtimeProvider(sideband),
+    )
+    monkeypatch.setattr(session_services, "get_turn_runtime_manager", lambda: runtime)
+    monkeypatch.setattr(
+        voice_router,
+        "build_realtime_context_snapshot",
+        _fake_context_snapshot,
+    )
+
+    await ws.incoming.put({"type": "start", "sdp": "controlled-offer"})
+    await sideband.incoming.put(
+        {
+            "type": "delegation.created",
+            "item": {
+                "id": "short-answer-delegation",
+                "type": "delegation",
+                "target": "client",
+                "content": [{"type": "input_text", "text": "C"}],
+            },
+        }
+    )
+    task = asyncio.create_task(voice_router._serve_codex_realtime(ws))
+    await _wait_for(lambda: any(message.get("type") == "handoff" for message in ws.sent))
+    await ws.incoming.put(
+        {
+            "type": "turn_started",
+            "handoff_id": "short-answer-delegation",
+            "turn_id": "short-answer-turn",
+            "session_id": "chat-session",
+        }
+    )
+    await _wait_for(lambda: bool(sideband.speech))
+
+    # The provider's final event is the other representation of the same
+    # utterance, even though its transcript contains extra words.
+    await sideband.incoming.put(
+        {
+            "type": "turn.done",
+            "turn": {
+                "id": "short-answer-final",
+                "role": "user",
+                "transcript": "答案 C",
+            },
+        }
+    )
+    await asyncio.sleep(0.05)
+    await ws.incoming.put({"type": "stop"})
+    await task
+
+    handoffs = [message for message in ws.sent if message.get("type") == "handoff"]
+    assert [message.get("handoff_id") for message in handoffs] == ["short-answer-delegation"]
+    assert runtime.cancelled_turns == []
+    assert not any(message.get("state") == "interrupted" for message in ws.sent)
+
+
+@pytest.mark.asyncio
 async def test_realtime_bridge_forwards_provider_commentary_without_cancelling_delegation(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -685,7 +752,7 @@ async def test_realtime_bridge_merges_late_delegation_into_synthetic_turn(
         _fake_context_snapshot,
     )
 
-    text = "請使用目前選取的知識庫先檢索，再回答這個新問題。"
+    text = "答案 C"
     await ws.incoming.put({"type": "start", "sdp": "controlled-offer"})
     task = asyncio.create_task(voice_router._serve_codex_realtime(ws))
     # The final transcript arrives BEFORE GPT-Live's delegation: the bridge
@@ -697,8 +764,17 @@ async def test_realtime_bridge_merges_late_delegation_into_synthetic_turn(
         }
     )
     await _wait_for(lambda: any(message.get("type") == "handoff" for message in ws.sent))
-    # The late delegation for the same utterance merges instead of starting
-    # a duplicate DeepTutor turn.
+    await ws.incoming.put(
+        {
+            "type": "turn_started",
+            "handoff_id": "tx-explicit-user-turn",
+            "turn_id": "short-synthetic-turn",
+            "session_id": "chat-session",
+        }
+    )
+    await _wait_for(lambda: bool(sideband.session_speech))
+    # The late delegation is the other representation of the same utterance,
+    # even though GPT-Live shortened the transcript after speech started.
     await sideband.incoming.put(
         {
             "type": "delegation.created",
@@ -706,7 +782,7 @@ async def test_realtime_bridge_merges_late_delegation_into_synthetic_turn(
                 "id": "explicit-delegation",
                 "type": "delegation",
                 "target": "client",
-                "content": [{"type": "input_text", "text": text}],
+                "content": [{"type": "input_text", "text": "C"}],
             },
         }
     )
@@ -718,6 +794,8 @@ async def test_realtime_bridge_merges_late_delegation_into_synthetic_turn(
     assert len(handoffs) == 1
     assert handoffs[0].get("handoff_id") == "tx-explicit-user-turn"
     assert handoffs[0].get("text") == text
+    assert runtime.cancelled_turns == []
+    assert not any(message.get("state") == "interrupted" for message in ws.sent)
     assert not any(message.get("type") == "turn_rejected" for message in ws.sent)
     assert not any(message.get("type") == "error" for message in ws.sent)
     assert sideband.closed
