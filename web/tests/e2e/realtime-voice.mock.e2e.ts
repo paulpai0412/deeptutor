@@ -116,8 +116,55 @@ test.beforeEach(async ({ page }) => {
       }
     }
 
+    class TurnSocket extends EventTarget {
+      readyState = VoiceSocket.CONNECTING
+      onopen: ((event: Event) => void) | null = null
+      onmessage: ((event: MessageEvent) => void) | null = null
+      onerror: ((event: Event) => void) | null = null
+      onclose: ((event: CloseEvent) => void) | null = null
+
+      constructor() {
+        super()
+        window.setTimeout(() => {
+          this.readyState = VoiceSocket.OPEN
+          this.onopen?.(new Event('open'))
+        }, 0)
+      }
+
+      send(raw: string) {
+        const message = JSON.parse(raw) as { type?: string }
+        if (message.type !== 'start_turn') return
+        this.emit({
+          type: 'session',
+          session_id: 'voice-e2e',
+          turn_id: 'deep-turn-1',
+          seq: 1,
+          metadata: { session_id: 'voice-e2e', turn_id: 'deep-turn-1' },
+        })
+        window.setTimeout(() => {
+          this.emit({
+            type: 'content',
+            content: 'DeepTutor delegated answer',
+            turn_id: 'deep-turn-1',
+            seq: 2,
+            metadata: { call_kind: 'llm_final_response' },
+          })
+        }, 50)
+      }
+
+      emit(payload: unknown) {
+        this.onmessage?.(new MessageEvent('message', { data: JSON.stringify(payload) }))
+      }
+
+      close() {
+        this.readyState = VoiceSocket.CLOSED
+        this.onclose?.(new CloseEvent('close'))
+      }
+    }
+
     const WebSocketProxy = function (url: string | URL, protocols?: string | string[]) {
       if (String(url).includes('/api/v1/voice/realtime')) return new VoiceSocket()
+      if (String(url).includes('/api/v1/ws')) return new TurnSocket()
       return new NativeWebSocket(url, protocols)
     } as unknown as typeof WebSocket
     Object.assign(WebSocketProxy, {
@@ -183,6 +230,21 @@ test('direct GPT-Live speech renders once and provider barge-in stays provider-o
   historyPairs = 18
   await page.goto('/home/voice-e2e')
   await expect(page.getByTestId('chat-assistant-message')).toHaveCount(18)
+  const initialGeometry = await page.evaluate(() => {
+    const container = document.querySelector<HTMLElement>('[data-chat-scroll-root="true"]')
+    const assistants = document.querySelectorAll<HTMLElement>(
+      '[data-testid="chat-assistant-message"]'
+    )
+    const assistant = assistants.item(assistants.length - 1)
+    if (!container || !assistant) throw new Error('Initial chat geometry is unavailable')
+    return {
+      activeEdge:
+        assistant.getBoundingClientRect().bottom - container.getBoundingClientRect().top,
+      viewportHeight: container.clientHeight,
+    }
+  })
+  expect(initialGeometry.activeEdge).toBeGreaterThan(0)
+  expect(initialGeometry.activeEdge).toBeLessThan(initialGeometry.viewportHeight * 1.5)
   await page.getByTestId('realtime-voice-toggle').click()
   await expect(page.getByTestId('realtime-voice-status')).toHaveText(/Listening/i)
 
@@ -265,10 +327,63 @@ test('direct GPT-Live speech renders once and provider barge-in stays provider-o
   expect(geometry.activeEdge / geometry.viewportHeight).toBeLessThan(0.7)
   for (let index = 1; index < geometry.samples.length; index += 1) {
     const step = geometry.samples[index] - geometry.samples[index - 1]
-    expect(step).toBeGreaterThanOrEqual(-1)
-    expect(step).toBeLessThanOrEqual(48)
+    expect(Math.abs(step)).toBeLessThanOrEqual(48)
   }
   await expect(page.getByTestId('realtime-voice-status')).not.toHaveText(/Interrupted/i)
+
+  await page.evaluate(() => {
+    const container = document.querySelector<HTMLElement>('[data-chat-scroll-root="true"]')
+    if (!container) throw new Error('Chat scroll container is unavailable')
+    const samples = [container.scrollTop]
+    container.addEventListener('scroll', () => samples.push(container.scrollTop))
+    ;(window as typeof window & { __delegateScrollSamples?: number[] }).__delegateScrollSamples =
+      samples
+    const globals = window as typeof window & {
+      __emitVoiceServer: (payload: unknown) => void
+    }
+    globals.__emitVoiceServer({
+      type: 'handoff',
+      handoff_id: 'handoff-1',
+      text: 'Please record this answer',
+    })
+    globals.__emitVoiceServer({
+      type: 'transcript',
+      phase: 'final',
+      mode: 'delegated',
+      handoff_id: 'handoff-1',
+      text: 'Please record this answer',
+    })
+  })
+  await expect(page.getByTestId('realtime-turn-mode')).toHaveAttribute('data-mode', 'delegated')
+  await expect(
+    page.locator('[data-chat-scroll-root="true"]').getByText('Please record this answer', {
+      exact: true,
+    })
+  ).toBeVisible()
+  await expect(page.getByText('DeepTutor delegated answer', { exact: true })).toBeVisible()
+  const delegateGeometry = await page.evaluate(() => {
+    const container = document.querySelector<HTMLElement>('[data-chat-scroll-root="true"]')
+    const assistants = document.querySelectorAll<HTMLElement>(
+      '[data-testid="chat-assistant-message"]'
+    )
+    const assistant = assistants.item(assistants.length - 1)
+    if (!container || !assistant) throw new Error('Delegated chat geometry is unavailable')
+    return {
+      activeEdge:
+        assistant.getBoundingClientRect().bottom - container.getBoundingClientRect().top,
+      viewportHeight: container.clientHeight,
+      samples:
+        (window as typeof window & { __delegateScrollSamples?: number[] })
+          .__delegateScrollSamples ?? [],
+    }
+  })
+  expect(delegateGeometry.activeEdge / delegateGeometry.viewportHeight).toBeGreaterThan(0.35)
+  expect(delegateGeometry.activeEdge / delegateGeometry.viewportHeight).toBeLessThan(0.75)
+  for (let index = 1; index < delegateGeometry.samples.length; index += 1) {
+    expect(
+      Math.abs(delegateGeometry.samples[index] - delegateGeometry.samples[index - 1])
+    ).toBeLessThanOrEqual(48)
+  }
 
   await page.evaluate(() => {
     const globals = window as typeof window & {
@@ -281,5 +396,5 @@ test('direct GPT-Live speech renders once and provider barge-in stays provider-o
       text: 'Hi — how can I help?',
     })
   })
-  await expect(page.getByTestId('chat-assistant-message')).toHaveCount(19)
+  await expect(page.getByTestId('chat-assistant-message')).toHaveCount(20)
 })

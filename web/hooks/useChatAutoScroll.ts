@@ -7,6 +7,7 @@ interface AutoScrollOptions {
   isStreaming: boolean;
   composerHeight: number;
   messageCount: number;
+  sessionId?: string | null;
   lastMessageRole?: "user" | "assistant" | "system";
   lastMessageContent?: string;
   lastEventCount?: number;
@@ -30,9 +31,8 @@ interface AutoScrollOptions {
  * Three companion mechanisms keep behaviour correct in edge cases:
  *
  *  - ``handleScroll`` watches the user's scroll position. The instant
- *    they move more than 80px above the bottom we release the pin so
- *    they can browse history without being yanked back. Scrolling
- *    back near the bottom re-arms it.
+ *    they move more than 80px from the reading target we release the pin
+ *    so they can browse history without being yanked back.
  *  - ``composerHeight`` changes (e.g. when the composer grows for a
  *    multi-line draft) re-pin once via a layout effect so the freshly-
  *    revealed content stays on screen.
@@ -53,6 +53,7 @@ export function useChatAutoScroll({
   isStreaming,
   composerHeight,
   messageCount,
+  sessionId,
   lastMessageRole,
   lastMessageContent,
   lastEventCount,
@@ -61,17 +62,18 @@ export function useChatAutoScroll({
   const endRef = useRef<HTMLDivElement>(null);
   const shouldAutoScrollRef = useRef(true);
   const scrollRafRef = useRef(0);
+  const positionedSessionRef = useRef<string | null | undefined>(undefined);
   const [trailingSpaceHeight, setTrailingSpaceHeight] = useState(0);
 
   const pinnedScrollTop = useCallback(() => {
     const container = containerRef.current;
     if (!container) return 0;
-    if (lastMessageRole !== "assistant") return container.scrollHeight;
+    if (lastMessageRole !== "assistant") return container.scrollTop;
     const assistants = container.querySelectorAll<HTMLElement>(
       '[data-chat-message-role="assistant"]',
     );
     const assistant = assistants.item(assistants.length - 1);
-    if (!assistant) return container.scrollHeight;
+    if (!assistant) return container.scrollTop;
     const containerRect = container.getBoundingClientRect();
     const assistantRect = assistant.getBoundingClientRect();
     const assistantBottom = assistantRect.bottom - containerRect.top + container.scrollTop;
@@ -87,11 +89,11 @@ export function useChatAutoScroll({
         return;
       }
       const distance = pinnedScrollTop() - container.scrollTop;
-      if (distance <= 1) {
+      if (Math.abs(distance) <= 1) {
         scrollRafRef.current = 0;
         return;
       }
-      container.scrollTop += Math.min(distance, 40);
+      container.scrollTop += Math.max(-40, Math.min(distance, 40));
       scrollRafRef.current = requestAnimationFrame(step);
     };
     step();
@@ -99,10 +101,7 @@ export function useChatAutoScroll({
 
   useLayoutEffect(() => {
     const container = containerRef.current;
-    if (!container || !hasMessages || lastMessageRole !== "assistant") {
-      setTrailingSpaceHeight(0);
-      return;
-    }
+    if (!container || !hasMessages || lastMessageRole !== "assistant") return;
     const update = () => setTrailingSpaceHeight(Math.max(0, container.clientHeight * 0.5));
     update();
     const observer = new ResizeObserver(update);
@@ -111,17 +110,26 @@ export function useChatAutoScroll({
   }, [hasMessages, lastMessageRole]);
 
   // Primary pin: runs in layout phase after every render that bumps
-  // message count / streaming content / events / composer height /
-  // mount. ``useLayoutEffect`` (not ``useEffect``) is required so the
-  // assignment happens before the browser paints — otherwise the
-  // viewer briefly shows the new layout at the old scroll position
-  // and we observe a flash.
+  // message count / streaming content / events / composer height / mount.
+  // A newly loaded session jumps to its tail before paint; later changes
+  // use the bounded animation above.
   useLayoutEffect(() => {
-    if (!hasMessages || !shouldAutoScrollRef.current) return;
-    pinToLatest();
+    const container = containerRef.current;
+    if (!container || !hasMessages) return;
+    const sessionKey = sessionId ?? "__draft__";
+    if (positionedSessionRef.current !== sessionKey) {
+      if (scrollRafRef.current) cancelAnimationFrame(scrollRafRef.current);
+      scrollRafRef.current = 0;
+      shouldAutoScrollRef.current = true;
+      positionedSessionRef.current = sessionKey;
+      container.scrollTop = container.scrollHeight;
+      return;
+    }
+    if (shouldAutoScrollRef.current) pinToLatest();
   }, [
     pinToLatest,
     hasMessages,
+    sessionId,
     isStreaming,
     messageCount,
     lastMessageContent,
@@ -159,37 +167,13 @@ export function useChatAutoScroll({
     const container = containerRef.current;
     if (!container) return;
     let rafId = 0;
-    // ``scrollTop`` this effect last pinned. A position below it means the
-    // user moved up by some means the gesture listeners below don't cover —
-    // dragging the scrollbar thumb, PageUp/Home, arrow keys — so we release
-    // the pin instead of yanking them back to the bottom (issue #649).
-    // Comparing against our own last write (rather than raw ``scrollTop``)
-    // is what makes this immune to the pin-vs-user fight: content growth
-    // never lowers ``scrollTop`` (the container opts into
-    // ``overflow-anchor: none``), so a decrease is always user intent.
-    let lastPinned: number | null = null;
-
     const pin = () => {
       rafId = 0;
-      if (!shouldAutoScrollRef.current) return;
-      if (lastPinned !== null && container.scrollTop < lastPinned - 4) {
-        shouldAutoScrollRef.current = false;
-        return;
-      }
-      container.scrollTop = container.scrollHeight;
-      lastPinned = container.scrollTop;
+      if (shouldAutoScrollRef.current) pinToLatest();
     };
     const schedule = () => {
       if (!rafId) rafId = requestAnimationFrame(pin);
     };
-    // The user's own scrolls fire this too; our pins write
-    // ``scrollTop === lastPinned`` so they never trip the release check.
-    const onScroll = () => {
-      if (lastPinned !== null && container.scrollTop < lastPinned - 4) {
-        shouldAutoScrollRef.current = false;
-      }
-    };
-
     const mo = new MutationObserver(schedule);
     mo.observe(container, {
       childList: true,
@@ -197,20 +181,18 @@ export function useChatAutoScroll({
       characterData: true,
     });
     container.addEventListener("load", schedule, true);
-    container.addEventListener("scroll", onScroll, { passive: true });
     schedule();
     return () => {
       mo.disconnect();
       container.removeEventListener("load", schedule, true);
-      container.removeEventListener("scroll", onScroll);
       if (rafId) cancelAnimationFrame(rafId);
     };
-  }, [isStreaming, hasMessages]);
+  }, [isStreaming, hasMessages, pinToLatest]);
 
   // After streaming ends, capability viewers loaded via ``next/dynamic``
   // (MathAnimatorViewer, QuizViewer, VisualizationViewer, RichCodeBlock,
-  // Mermaid …) finish hydrating and grow the content height. The user
-  // expects to land at the bottom so they see the full result.
+  // Mermaid …) finish hydrating and grow the content height. Keep the
+  // active assistant edge in the same reading zone while they mount.
   //
   // The observer is intentionally short-lived (4s after stream stop):
   // a longer window would mis-classify post-turn user interactions
@@ -262,12 +244,8 @@ export function useChatAutoScroll({
       Math.abs(pinnedScrollTop() - container.scrollTop) < 80;
   }, [pinnedScrollTop]);
 
-  // Intent-based release. During dense streaming the pin above re-snaps to
-  // ``scrollHeight`` on every content change, so the position-only
-  // ``handleScroll`` check can rarely observe the user trying to scroll up
-  // mid-stream: the pin snaps them back to the bottom before the ``scroll``
-  // event is even handled, so ``distanceFromBottom`` always reads ~0 and the
-  // pin never releases — the viewport feels frozen. We therefore release the
+  // Intent-based release. During dense streaming, position-only checks can
+  // miss a user gesture while the bounded animation is active. Release the
   // pin the instant we see an UPWARD scroll *gesture* (wheel up, or a touch
   // drag that pulls earlier content into view), which is unambiguous user
   // intent and independent of where the pin has parked the scroll position.

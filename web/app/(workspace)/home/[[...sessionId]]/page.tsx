@@ -901,6 +901,7 @@ export default function ChatPage() {
     isStreaming: state.isStreaming,
     composerHeight,
     messageCount: displayMessages.length,
+    sessionId: state.sessionId,
     lastMessageRole: lastMessage?.role,
     lastMessageContent: lastMessage?.content,
     lastEventCount: lastMessage?.events?.length,
