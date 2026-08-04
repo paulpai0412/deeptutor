@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
 import zipfile
 
-import pytest
+import pytest  # type: ignore[import-not-found]
 
 from deeptutor.services.parsing.engines import factory
 from deeptutor.services.parsing.types import ParserError
@@ -133,7 +134,7 @@ def test_pymupdf4llm_readiness_reflects_install() -> None:
     # Name lookup is case-insensitive (the metadata label is mixed-case).
     assert type(factory.get_parser("PyMuPDF4LLM")) is type(parser)
     report = parser.is_ready(parser.resolve_config())
-    if parser.is_available():
+    if getattr(parser, "is_available")():
         assert report.ready is True
     else:
         # Absent optional package → gated with a pip-install hint, not a crash.
@@ -238,6 +239,39 @@ def test_background_job_manager_idle_status() -> None:
     assert status["kind"] in {"", "install", "models"}
     assert "engine" in status
     assert isinstance(status["lines"], list)
+
+
+def test_docling_parser_exports_picture_and_page_images(tmp_path, monkeypatch) -> None:
+    from deeptutor.services.parsing.engines.docling.config import DoclingConfig
+
+    class FakeImage:
+        def save(self, path) -> None:
+            path.write_bytes(b"png")
+
+    document = SimpleNamespace(
+        export_to_markdown=lambda: "Text with a figure.\n\n<!-- image -->",
+        pictures=[
+            SimpleNamespace(
+                prov=[SimpleNamespace(page_no=2)],
+                get_image=lambda _document: FakeImage(),
+            )
+        ],
+        pages={1: SimpleNamespace(image=SimpleNamespace(pil_image=FakeImage()))},
+    )
+    converter = SimpleNamespace(convert=lambda _source: SimpleNamespace(document=document))
+    parser = factory.get_parser("docling")
+    monkeypatch.setattr(parser, "_build_converter", lambda _config: converter)
+    source = tmp_path / "exam.pdf"
+    source.write_bytes(b"pdf")
+    workdir = tmp_path / "parsed"
+    workdir.mkdir()
+
+    parser.parse(source, workdir, config=DoclingConfig())
+
+    assert (workdir / "exam.md").exists()
+    assert (workdir / "images" / "exam.pdf-1-0.png").read_bytes() == b"png"
+    assert (workdir / "images" / "__page_context_001.png").read_bytes() == b"png"
+    assert ("asset_export", "pictures-pages-v1") in parser.signature(DoclingConfig()).params
 
 
 def test_docling_models_dir_honors_cache_env(monkeypatch, tmp_path) -> None:

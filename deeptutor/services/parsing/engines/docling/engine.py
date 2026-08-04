@@ -91,7 +91,11 @@ class DoclingParser:
         return ParserSignature.build(
             "docling",
             package_version("docling"),
-            {"do_ocr": config.do_ocr, "do_table_structure": config.do_table_structure},
+            {
+                "do_ocr": config.do_ocr,
+                "do_table_structure": config.do_table_structure,
+                "asset_export": "pictures-pages-v1",
+            },
         )
 
     def is_ready(self, config: DoclingConfig) -> ReadinessReport:
@@ -127,11 +131,51 @@ class DoclingParser:
             converter = self._build_converter(config)
             result = converter.convert(str(source_path))
             markdown = result.document.export_to_markdown()
+            self._export_assets(result.document, Path(source_path), Path(workdir))
         except Exception as exc:  # noqa: BLE001 - surface as a parser error
             raise ParserError(f"Docling failed to convert {Path(source_path).name}: {exc}")
 
         stem = Path(source_path).stem
         (workdir / f"{stem}.md").write_text(str(markdown), encoding="utf-8")
+
+    @classmethod
+    def _export_assets(cls, document: object, source_path: Path, workdir: Path) -> None:
+        images_dir = workdir / "images"
+        picture_counts: dict[int, int] = {}
+
+        for picture in getattr(document, "pictures", ()) or ():
+            try:
+                image = picture.get_image(document)
+                provenance = getattr(picture, "prov", ()) or ()
+                page_no = int(provenance[0].page_no) if provenance else 1
+                page_index = max(page_no - 1, 0)
+                image_index = picture_counts.get(page_index, 0)
+                target = images_dir / f"{source_path.name}-{page_index}-{image_index}.png"
+                if cls._save_image(image, target):
+                    picture_counts[page_index] = image_index + 1
+            except Exception:  # noqa: BLE001 - one bad figure must not drop the document
+                continue
+
+        pages = getattr(document, "pages", {}) or {}
+        for page_no, page in pages.items():
+            try:
+                image = getattr(getattr(page, "image", None), "pil_image", None)
+                target = images_dir / f"__page_context_{int(page_no):03d}.png"
+                cls._save_image(image, target)
+            except Exception:  # noqa: BLE001 - page renders are a best-effort fallback
+                continue
+
+        if images_dir.is_dir() and not any(images_dir.iterdir()):
+            images_dir.rmdir()
+
+    @staticmethod
+    def _save_image(image: object | None, target: Path) -> bool:
+        save = getattr(image, "save", None)
+        if not callable(save):
+            return False
+        target.parent.mkdir(parents=True, exist_ok=True)
+        save(target)
+        return target.is_file() and target.stat().st_size > 0
 
     @staticmethod
     def _build_converter(config: DoclingConfig):
@@ -140,16 +184,20 @@ class DoclingParser:
         Docling's options API varies across versions; if option wiring fails we
         fall back to the default converter rather than break the parse.
         """
-        from docling.document_converter import DocumentConverter
+        from docling.document_converter import DocumentConverter  # type: ignore[import-not-found]
 
         try:
-            from docling.datamodel.base_models import InputFormat
-            from docling.datamodel.pipeline_options import PdfPipelineOptions
-            from docling.document_converter import PdfFormatOption
+            from docling.datamodel.base_models import InputFormat  # type: ignore[import-not-found]
+            from docling.datamodel.pipeline_options import (  # type: ignore[import-not-found]
+                PdfPipelineOptions,
+            )
+            from docling.document_converter import PdfFormatOption  # type: ignore[import-not-found]
 
             pipeline_options = PdfPipelineOptions()
             pipeline_options.do_ocr = config.do_ocr
             pipeline_options.do_table_structure = config.do_table_structure
+            pipeline_options.generate_page_images = True
+            pipeline_options.images_scale = 1.5
             return DocumentConverter(
                 format_options={InputFormat.PDF: PdfFormatOption(pipeline_options=pipeline_options)}
             )

@@ -116,13 +116,35 @@ def _build_doc_visual_context(
     pdf_path: Path, extracted_assets: Path | None, output_dir: Path
 ) -> Path | None:
     """Combine extracted crops with full-page renders for visual transcription."""
+    context_dir = output_dir / "vision-context"
+    context_dir.mkdir(parents=True, exist_ok=True)
+    context_root = context_dir.resolve()
+    copied = False
+    has_page_context = False
+    if extracted_assets is not None and extracted_assets.is_dir():
+        asset_root = extracted_assets.resolve()
+        for source in extracted_assets.rglob("*"):
+            if not source.is_file() or source.suffix.lower() not in _IMAGE_SUFFIXES:
+                continue
+            resolved_source = source.resolve()
+            try:
+                relative = resolved_source.relative_to(asset_root)
+                target = (context_root / relative).resolve()
+                target.relative_to(context_root)
+            except ValueError:
+                continue
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(resolved_source, target)
+            copied = True
+            has_page_context = has_page_context or source.name.startswith("__page_context_")
+    if has_page_context:
+        return context_dir
+
     try:
         import pymupdf  # type: ignore[import-not-found]
     except ImportError:
-        return extracted_assets
+        return context_dir if copied else extracted_assets
 
-    context_dir = output_dir / "vision-context"
-    context_dir.mkdir(parents=True, exist_ok=True)
     rendered = False
     try:
         with pymupdf.open(pdf_path) as document:
@@ -131,27 +153,21 @@ def _build_doc_visual_context(
                 pixmap.save(context_dir / f"__page_context_{page_index + 1:03d}.png")
                 rendered = True
     except (OSError, RuntimeError):
+        if copied:
+            return context_dir
         try:
             shutil.rmtree(context_dir)
         except OSError:
-            pass
+            return extracted_assets
         return extracted_assets
 
-    if not rendered:
-        try:
-            shutil.rmtree(context_dir)
-        except OSError:
-            pass
+    if rendered or copied:
+        return context_dir
+    try:
+        shutil.rmtree(context_dir)
+    except OSError:
         return extracted_assets
-    if extracted_assets is not None and extracted_assets.is_dir():
-        for source in extracted_assets.rglob("*"):
-            if not source.is_file() or source.suffix.lower() not in _IMAGE_SUFFIXES:
-                continue
-            relative = source.relative_to(extracted_assets)
-            target = context_dir / relative
-            target.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(source, target)
-    return context_dir
+    return extracted_assets
 
 
 ProgressCallback = Callable[[str, int, str], None]

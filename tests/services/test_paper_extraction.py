@@ -8,7 +8,7 @@ from types import SimpleNamespace
 
 from pypdf import PdfReader, PdfWriter  # type: ignore[import-not-found]
 import pytest  # type: ignore[import-not-found]
-from reportlab.pdfgen import canvas
+from reportlab.pdfgen import canvas  # type: ignore[import-not-found]
 
 from deeptutor.services.paper_extraction import extract_paper
 from deeptutor.services.paper_library import PaperLibraryService, PaperValidationError
@@ -221,6 +221,24 @@ def test_legacy_doc_converter_requires_libreoffice(
 
     with pytest.raises(paper_extraction.PaperExtractionError, match="requires LibreOffice"):
         paper_extraction._convert_legacy_doc_to_pdf(tmp_path / "paper.doc", tmp_path / "out")
+
+
+def test_visual_context_reuses_parser_page_images(tmp_path: Path) -> None:
+    from deeptutor.services import paper_extraction
+
+    assets = tmp_path / "assets"
+    assets.mkdir()
+    (assets / "__page_context_001.png").write_bytes(b"page")
+    (assets / "exam.pdf-0-0.png").write_bytes(b"figure")
+
+    context_dir = paper_extraction._build_doc_visual_context(
+        tmp_path / "missing.pdf", assets, tmp_path / "context"
+    )
+
+    assert context_dir is not None
+    assert context_dir == tmp_path / "context" / "vision-context"
+    assert (context_dir / "__page_context_001.png").read_bytes() == b"page"
+    assert (context_dir / "exam.pdf-0-0.png").read_bytes() == b"figure"
 
 
 def test_real_legacy_doc_conversion_preserves_images_for_deeptutor_parsing(
