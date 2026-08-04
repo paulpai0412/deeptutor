@@ -735,7 +735,7 @@ async def test_realtime_bridge_tolerates_autonomous_output_without_user_turn(
 
 
 @pytest.mark.asyncio
-async def test_realtime_bridge_merges_late_delegation_into_synthetic_turn(
+async def test_realtime_bridge_routes_late_delegation_without_replaying_final(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     import deeptutor.services.session as session_services
@@ -752,29 +752,14 @@ async def test_realtime_bridge_merges_late_delegation_into_synthetic_turn(
         _fake_context_snapshot,
     )
 
-    text = "答案 C"
     await ws.incoming.put({"type": "start", "sdp": "controlled-offer"})
     task = asyncio.create_task(voice_router._serve_codex_realtime(ws))
-    # The final transcript arrives BEFORE GPT-Live's delegation: the bridge
-    # commits a synthetic turn immediately.
     await sideband.incoming.put(
         {
             "type": "turn.done",
-            "turn": {"id": "explicit-user-turn", "role": "user", "transcript": text},
+            "turn": {"id": "explicit-user-turn", "role": "user", "transcript": "答案 C"},
         }
     )
-    await _wait_for(lambda: any(message.get("type") == "handoff" for message in ws.sent))
-    await ws.incoming.put(
-        {
-            "type": "turn_started",
-            "handoff_id": "tx-explicit-user-turn",
-            "turn_id": "short-synthetic-turn",
-            "session_id": "chat-session",
-        }
-    )
-    await _wait_for(lambda: bool(sideband.session_speech))
-    # The late delegation is the other representation of the same utterance,
-    # even though GPT-Live shortened the transcript after speech started.
     await sideband.incoming.put(
         {
             "type": "delegation.created",
@@ -786,23 +771,26 @@ async def test_realtime_bridge_merges_late_delegation_into_synthetic_turn(
             },
         }
     )
-    await asyncio.sleep(0.05)
+    await _wait_for(lambda: any(message.get("type") == "handoff" for message in ws.sent))
     await ws.incoming.put({"type": "stop"})
     await task
 
     handoffs = [message for message in ws.sent if message.get("type") == "handoff"]
-    assert len(handoffs) == 1
-    assert handoffs[0].get("handoff_id") == "tx-explicit-user-turn"
-    assert handoffs[0].get("text") == text
+    assert [message.get("handoff_id") for message in handoffs] == ["explicit-delegation"]
+    assert len(
+        [
+            message
+            for message in ws.sent
+            if message.get("type") == "transcript" and message.get("phase") == "final"
+        ]
+    ) == 2
     assert runtime.cancelled_turns == []
     assert not any(message.get("state") == "interrupted" for message in ws.sent)
-    assert not any(message.get("type") == "turn_rejected" for message in ws.sent)
-    assert not any(message.get("type") == "error" for message in ws.sent)
     assert sideband.closed
 
 
 @pytest.mark.asyncio
-async def test_realtime_bridge_commits_synthetic_turn_from_final_transcript(
+async def test_realtime_bridge_keeps_direct_provider_turns_out_of_deeptutor(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     import deeptutor.services.session as session_services
@@ -811,9 +799,7 @@ async def test_realtime_bridge_commits_synthetic_turn_from_final_transcript(
     sideband = _RealtimeSideband()
     provider = _RealtimeProvider(sideband)
     runtime = _TurnRuntime()
-    store = _DirectSessionStore()
     monkeypatch.setattr(voice_router, "CodexOAuthRealtimeProvider", lambda: provider)
-    monkeypatch.setattr(voice_router, "get_session_store", lambda: store)
     monkeypatch.setattr(session_services, "get_turn_runtime_manager", lambda: runtime)
     monkeypatch.setattr(
         voice_router,
@@ -823,22 +809,6 @@ async def test_realtime_bridge_commits_synthetic_turn_from_final_transcript(
 
     await ws.incoming.put({"type": "start", "sdp": "controlled-offer"})
     task = asyncio.create_task(voice_router._serve_codex_realtime(ws))
-    # GPT-Live answered directly: assistant terminal arrives first and is
-    # tolerated, not buffered for a later rejection.
-    await sideband.incoming.put(
-        {
-            "type": "turn.done",
-            "turn": {
-                "id": "assistant-turn-race",
-                "role": "assistant",
-                "transcript": "Two plus two equals four.",
-            },
-        }
-    )
-    await asyncio.sleep(0.05)
-    assert not any(message.get("type") == "error" for message in ws.sent)
-    # The finalized user transcript commits a synthetic handoff even though
-    # GPT-Live never delegated.
     await sideband.incoming.put(
         {
             "type": "turn.done",
@@ -849,26 +819,39 @@ async def test_realtime_bridge_commits_synthetic_turn_from_final_transcript(
             },
         }
     )
-    await _wait_for(lambda: any(message.get("type") == "handoff" for message in ws.sent))
-    await ws.incoming.put(
+    await sideband.incoming.put({"type": "output_audio.delta", "audio": "AQID"})
+    await sideband.incoming.put(
         {
-            "type": "turn_started",
-            "handoff_id": "tx-user-final",
-            "turn_id": "turn-1",
-            "session_id": "chat-session",
+            "type": "turn.done",
+            "turn": {
+                "id": "assistant-final",
+                "role": "assistant",
+                "transcript": "Two plus two equals four.",
+            },
         }
     )
-    await _wait_for(lambda: bool(sideband.session_speech))
+    await _wait_for(
+        lambda: any(message.get("type") == "assistant_transcript" for message in ws.sent)
+    )
     await ws.incoming.put({"type": "stop"})
     await task
 
-    # Synthetic turns speak through the session-level speakable append, not
-    # a delegation append.
-    assert sideband.session_speech == ["DeepTutor answer"]
-    assert sideband.speech == []
-    assert not any(message.get("type") == "turn_rejected" for message in ws.sent)
-    assert not any(message.get("type") == "playback_authorized" for message in ws.sent)
-    assert not any(message.get("type") == "error" for message in ws.sent)
+    assert not any(message.get("type") == "handoff" for message in ws.sent)
+    assert not any(message.get("state") == "interrupted" for message in ws.sent)
+    assert runtime.cancelled_turns == []
+    assert {
+        "type": "transcript",
+        "phase": "final",
+        "mode": "provider",
+        "provider_turn_id": "user-final",
+        "text": "What is two plus two?",
+    } in ws.sent
+    assert {
+        "type": "assistant_transcript",
+        "phase": "final",
+        "provider_turn_id": "assistant-final",
+        "text": "Two plus two equals four.",
+    } in ws.sent
 
 
 @pytest.mark.asyncio
@@ -915,12 +898,12 @@ async def test_realtime_bridge_never_rejects_provider_direct_output(
             },
         }
     )
-    # The finalized transcript committed a synthetic turn; the direct answer
-    # is playable audio, and nothing is rejected.
-    await _wait_for(lambda: any(message.get("type") == "handoff" for message in ws.sent))
+    await _wait_for(
+        lambda: any(message.get("type") == "assistant_transcript" for message in ws.sent)
+    )
     assert not ws.closed
 
-    # A later native delegation for a DIFFERENT utterance still uses the
+    # A later native delegation is the only event that enters DeepTutor.
     # normal delegated path in the same microphone session.
     await sideband.incoming.put(_DELEGATION_EVENT)
     await _wait_for(
@@ -933,10 +916,8 @@ async def test_realtime_bridge_never_rejects_provider_direct_output(
     await task
 
     handoffs = [message for message in ws.sent if message.get("type") == "handoff"]
-    assert [message.get("handoff_id") for message in handoffs] == [
-        "tx-exam-user-turn",
-        "delegation-1",
-    ]
+    assert [message.get("handoff_id") for message in handoffs] == ["delegation-1"]
+    assert not any(message.get("state") == "interrupted" for message in ws.sent)
     assert not any(message.get("type") == "turn_rejected" for message in ws.sent)
     assert not any(message.get("code") == "delegation_required" for message in ws.sent)
     assert not any("answered without native delegation" in record.message for record in caplog.records)
@@ -948,65 +929,52 @@ async def test_realtime_bridge_never_rejects_provider_direct_output(
 
 
 @pytest.mark.asyncio
-async def test_realtime_bridge_dedupes_duplicate_final_transcript(
+async def test_realtime_bridge_dedupes_provider_final_by_turn_id(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    import deeptutor.services.session as session_services
-
     ws = _RealtimeWebSocket()
     sideband = _RealtimeSideband()
     provider = _RealtimeProvider(sideband)
-    runtime = _TurnRuntime()
-    store = _DirectSessionStore()
     monkeypatch.setattr(voice_router, "CodexOAuthRealtimeProvider", lambda: provider)
-    monkeypatch.setattr(voice_router, "get_session_store", lambda: store)
-    monkeypatch.setattr(session_services, "get_turn_runtime_manager", lambda: runtime)
     monkeypatch.setattr(
         voice_router,
         "build_realtime_context_snapshot",
         _fake_context_snapshot,
     )
 
+    event = {
+        "type": "turn.done",
+        "turn": {
+            "id": "voice-turn-direct",
+            "role": "user",
+            "transcript": "What is two plus two?",
+        },
+    }
     await ws.incoming.put({"type": "start", "sdp": "controlled-offer"})
     task = asyncio.create_task(voice_router._serve_codex_realtime(ws))
-    await sideband.incoming.put(
-        {
-            "type": "turn.done",
-            "turn": {
-                "id": "voice-turn-direct",
-                "role": "user",
-                "transcript": "What is two plus two?",
-            },
-        }
+    await sideband.incoming.put(event)
+    await sideband.incoming.put(event)
+    await _wait_for(
+        lambda: any(
+            message.get("type") == "transcript" and message.get("phase") == "final"
+            for message in ws.sent
+        )
     )
-    await _wait_for(lambda: any(message.get("type") == "handoff" for message in ws.sent))
-    # A duplicate provider event with the same turn id commits nothing twice.
-    await sideband.incoming.put(
-        {
-            "type": "turn.done",
-            "turn": {
-                "id": "voice-turn-direct",
-                "role": "user",
-                "transcript": "What is two plus two?",
-            },
-        }
-    )
-    await asyncio.sleep(0.05)
-    handoffs = [message for message in ws.sent if message.get("type") == "handoff"]
-    assert len(handoffs) == 1
-    # A stale cross-channel speech-start signal must not break the session.
-    await ws.incoming.put({"type": "cancel_output"})
-    await asyncio.sleep(0.05)
     await ws.incoming.put({"type": "stop"})
     await task
 
-    assert len([message for message in ws.sent if message.get("type") == "handoff"]) == 1
-    assert not any(message.get("type") == "turn_rejected" for message in ws.sent)
-    assert not any(message.get("type") == "playback_authorized" for message in ws.sent)
+    finals = [
+        message
+        for message in ws.sent
+        if message.get("type") == "transcript" and message.get("phase") == "final"
+    ]
+    assert len(finals) == 1
+    assert not any(message.get("type") == "handoff" for message in ws.sent)
+    assert not any(message.get("state") == "interrupted" for message in ws.sent)
 
 
 @pytest.mark.asyncio
-async def test_realtime_bridge_commits_barge_in_as_synthetic_turn(
+async def test_realtime_bridge_leaves_provider_barge_in_to_gpt_live(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     import deeptutor.services.session as session_services
@@ -1036,25 +1004,11 @@ async def test_realtime_bridge_commits_barge_in_as_synthetic_turn(
         }
     )
     await _wait_for(lambda: bool(sideband.speech))
-
-    # The learner answers while the delegated question is still being
-    # spoken: a barge-in. Its finalized transcript commits a synthetic turn
-    # even though GPT-Live answered it directly instead of delegating.
     await sideband.incoming.put(
         {
             "type": "turn.done",
-            "turn": {
-                "id": "barge-in-user",
-                "role": "user",
-                "transcript": "答案 C",
-            },
+            "turn": {"id": "barge-in-user", "role": "user", "transcript": "答案 C"},
         }
-    )
-    await _wait_for(
-        lambda: any(
-            message.get("type") == "handoff" and message.get("handoff_id") == "tx-barge-in-user"
-            for message in ws.sent
-        )
     )
     await sideband.incoming.put(
         {
@@ -1066,19 +1020,74 @@ async def test_realtime_bridge_commits_barge_in_as_synthetic_turn(
             },
         }
     )
-    await asyncio.sleep(0.05)
+    await _wait_for(
+        lambda: any(message.get("type") == "assistant_transcript" for message in ws.sent)
+    )
 
-    handoffs = [message for message in ws.sent if message.get("type") == "handoff"]
     runtime.release.set()
     await ws.incoming.put({"type": "stop"})
     await task
 
-    assert [message.get("handoff_id") for message in handoffs] == [
-        "delegation-1",
-        "tx-barge-in-user",
-    ]
-    assert not any(message.get("type") == "turn_rejected" for message in ws.sent)
-    assert not any(message.get("type") == "error" for message in ws.sent)
+    handoffs = [message for message in ws.sent if message.get("type") == "handoff"]
+    assert [message.get("handoff_id") for message in handoffs] == ["delegation-1"]
+    assert runtime.cancelled_turns == []
+    assert not any(message.get("state") == "interrupted" for message in ws.sent)
+
+
+@pytest.mark.asyncio
+async def test_realtime_bridge_routes_new_delegation_without_voice_interruption(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import deeptutor.services.session as session_services
+
+    ws = _RealtimeWebSocket()
+    sideband = _RealtimeSideband()
+    provider = _RealtimeProvider(sideband)
+    runtime = _StreamingTurnRuntime()
+    monkeypatch.setattr(voice_router, "CodexOAuthRealtimeProvider", lambda: provider)
+    monkeypatch.setattr(session_services, "get_turn_runtime_manager", lambda: runtime)
+    monkeypatch.setattr(
+        voice_router,
+        "build_realtime_context_snapshot",
+        _fake_context_snapshot,
+    )
+
+    await ws.incoming.put({"type": "start", "sdp": "controlled-offer"})
+    await sideband.incoming.put(_DELEGATION_EVENT)
+    task = asyncio.create_task(voice_router._serve_codex_realtime(ws))
+    await _wait_for(lambda: any(message.get("type") == "handoff" for message in ws.sent))
+    await ws.incoming.put(
+        {
+            "type": "turn_started",
+            "handoff_id": "delegation-1",
+            "turn_id": "turn-1",
+            "session_id": "chat-session",
+        }
+    )
+    await _wait_for(lambda: bool(sideband.speech))
+    await sideband.incoming.put(
+        {
+            "type": "delegation.created",
+            "item": {
+                "id": "delegation-2",
+                "type": "delegation",
+                "target": "client",
+                "content": [{"type": "input_text", "text": "new instruction"}],
+            },
+        }
+    )
+    await _wait_for(
+        lambda: any(message.get("handoff_id") == "delegation-2" for message in ws.sent)
+    )
+
+    runtime.release.set()
+    await ws.incoming.put({"type": "stop"})
+    await task
+
+    handoffs = [message.get("handoff_id") for message in ws.sent if message.get("type") == "handoff"]
+    assert handoffs == ["delegation-1", "delegation-2"]
+    assert runtime.cancelled_turns == []
+    assert not any(message.get("state") == "interrupted" for message in ws.sent)
 
 
 @pytest.mark.asyncio
@@ -1103,17 +1112,17 @@ async def test_realtime_bridge_cancel_output_stays_fail_open(
 
     await ws.incoming.put({"type": "start", "sdp": "controlled-offer"})
     task = asyncio.create_task(voice_router._serve_codex_realtime(ws))
-    await sideband.incoming.put(
+    await sideband.incoming.put(_DELEGATION_EVENT)
+    await _wait_for(lambda: any(message.get("type") == "handoff" for message in ws.sent))
+    await ws.incoming.put(
         {
-            "type": "turn.done",
-            "turn": {
-                "id": "voice-turn-cancel",
-                "role": "user",
-                "transcript": "Explain this slowly",
-            },
+            "type": "turn_started",
+            "handoff_id": "delegation-1",
+            "turn_id": "turn-cancel",
+            "session_id": "chat-session",
         }
     )
-    await _wait_for(lambda: any(message.get("type") == "handoff" for message in ws.sent))
+    await _wait_for(lambda: bool(sideband.speech))
     await sideband.incoming.put(
         {
             "type": "output_transcript.added",

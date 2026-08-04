@@ -80,6 +80,7 @@ import {
   type RealtimeStartedTurn,
 } from "@/hooks/useRealtimeVoiceSession";
 import { useVoiceRecorder } from "@/hooks/useVoiceRecorder";
+import { setRealtimeVoiceAssistant } from "@/lib/realtime-voice-activity";
 
 interface PendingAttachment {
   type: string;
@@ -385,7 +386,11 @@ export default memo(function ChatComposer({
     inputHandleRef.current?.setValue(next);
   }, []);
   const recorder = useVoiceRecorder(handleTranscript);
-  const { state: unifiedChatState, loadSession } = useUnifiedChat();
+  const {
+    state: unifiedChatState,
+    commitRealtimeVoiceAssistant,
+    loadSession,
+  } = useUnifiedChat();
   const quizQuestions = useMemo(() => {
     if (!["exam", "deep_question"].includes(activeCap.value)) return [];
     for (
@@ -431,6 +436,17 @@ export default memo(function ChatComposer({
     },
     [loadSession, unifiedChatState.sessionId],
   );
+  const handleRealtimeAssistantTranscript = useCallback(
+    (text: string, final: boolean, turnId: string, delegated: boolean) => {
+      if (final) {
+        commitRealtimeVoiceAssistant(text, turnId, delegated);
+        setRealtimeVoiceAssistant("", false, "", false);
+        return;
+      }
+      setRealtimeVoiceAssistant(text, false, turnId, delegated);
+    },
+    [commitRealtimeVoiceAssistant],
+  );
   const realtimeVoice = useRealtimeVoiceSession(handleRealtimeTurn, {
     sessionId: unifiedChatState.sessionId,
     capability: activeCap.value || "chat",
@@ -445,6 +461,7 @@ export default memo(function ChatComposer({
       .map((entry) => entry.question)
       .join("\n"),
     onSessionReady: handleRealtimeSessionReady,
+    onAssistantTranscript: handleRealtimeAssistantTranscript,
   });
   const handleRealtimeInterrupt = useCallback(() => {
     realtimeVoice.interrupt();

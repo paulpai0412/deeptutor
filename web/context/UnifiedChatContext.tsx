@@ -41,6 +41,7 @@ import {
   shouldAppendEventContent,
 } from "@/lib/stream";
 import { hasPendingAskUserInMessages } from "@/lib/ask-user-state";
+import { mergeRealtimeVoiceAssistant } from "@/lib/realtime-voice";
 import { notify } from "@/lib/notifications";
 import i18n from "i18next";
 import {
@@ -169,6 +170,8 @@ export interface MessageItem {
   requestSnapshot?: MessageRequestSnapshot;
   /** Edit-branching: id of the message this row continues. */
   parentMessageId?: number | null;
+  /** Ephemeral GPT-Live identity used to collapse duplicate provider finals. */
+  providerTurnId?: string;
 }
 
 interface SessionEntry extends ChatState {
@@ -203,6 +206,14 @@ type Action =
       attachments?: MessageAttachment[];
       requestSnapshot?: MessageRequestSnapshot;
       parentMessageId?: number | null;
+    }
+  | {
+      type: "COMMIT_REALTIME_ASSISTANT";
+      key: string;
+      text: string;
+      turnId: string;
+      delegated: boolean;
+      optimisticId: number;
     }
   | { type: "POP_LAST_ASSISTANT"; key: string }
   | { type: "RESTORE_ASSISTANT"; key: string; message: MessageItem }
@@ -377,6 +388,32 @@ function reducer(state: ProviderState, action: Action): ProviderState {
                   : {}),
               },
             ],
+            updatedAt: Date.now(),
+          },
+        },
+      };
+    }
+    case "COMMIT_REALTIME_ASSISTANT": {
+      const session = state.sessions[action.key];
+      if (!session || !action.text.trim()) return state;
+      return {
+        ...state,
+        sessions: {
+          ...state.sessions,
+          [action.key]: {
+            ...session,
+            messages: mergeRealtimeVoiceAssistant(
+              session.messages,
+              session.selectedBranches,
+              {
+                text: action.text,
+                final: true,
+                turnId: action.turnId,
+                delegated: action.delegated,
+                revision: 1,
+              },
+              action.optimisticId,
+            ),
             updatedAt: Date.now(),
           },
         },
@@ -790,6 +827,11 @@ interface ChatContextValue {
     persona?: string,
     memoryReferences?: MemoryReferencePayload,
   ) => Promise<StartedTurn | null>;
+  commitRealtimeVoiceAssistant: (
+    text: string,
+    turnId: string,
+    delegated: boolean,
+  ) => void;
   cancelStreamingTurn: () => void;
   /**
    * Deliver the user's reply for a turn that is paused on an
@@ -1645,6 +1687,22 @@ export function UnifiedChatProvider({
     [makeDraftKey, sendThroughRunner],
   );
 
+  const commitRealtimeVoiceAssistant = useCallback(
+    (text: string, turnId: string, delegated: boolean) => {
+      const key = stateRef.current.selectedKey;
+      if (!key || !text.trim()) return;
+      dispatch({
+        type: "COMMIT_REALTIME_ASSISTANT",
+        key,
+        text,
+        turnId,
+        delegated,
+        optimisticId: -Date.now(),
+      });
+    },
+    [],
+  );
+
   const cancelStreamingTurn = useCallback(() => {
     const currentState = stateRef.current;
     const key = currentState.selectedKey;
@@ -1949,6 +2007,7 @@ export function UnifiedChatProvider({
       setPersonaSelection,
       setLanguage,
       sendMessage,
+      commitRealtimeVoiceAssistant,
       cancelStreamingTurn,
       submitUserReply,
       regenerateLastMessage,
@@ -1971,6 +2030,7 @@ export function UnifiedChatProvider({
       setPersonaSelection,
       setLanguage,
       sendMessage,
+      commitRealtimeVoiceAssistant,
       cancelStreamingTurn,
       submitUserReply,
       regenerateLastMessage,

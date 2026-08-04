@@ -11,7 +11,9 @@ import RealtimeVoiceControl from '../components/chat/home/RealtimeVoiceControl'
 import { AppShellProvider } from '../context/AppShellContext'
 import {
   getRealtimeVoiceActive,
+  getRealtimeVoiceAssistant,
   setRealtimeVoiceActive,
+  setRealtimeVoiceAssistant,
   subscribeRealtimeVoiceActive,
 } from '../lib/realtime-voice-activity'
 import { voicePetAnimationFor } from '../lib/voice-pet'
@@ -112,6 +114,29 @@ test('voice activity signal: store round-trip and unmount-safe default', () => {
   assert.equal(getRealtimeVoiceActive(), false)
   assert.equal(notified, 2)
   unsubscribe()
+})
+
+test('voice assistant transcript store replaces one provider turn in place', () => {
+  setRealtimeVoiceAssistant('下一', false, 'assistant-1')
+  const partial = getRealtimeVoiceAssistant()
+  assert.deepEqual(partial, {
+    text: '下一',
+    final: false,
+    turnId: 'assistant-1',
+    delegated: false,
+    revision: 1,
+  })
+
+  setRealtimeVoiceAssistant('下一題。', true, 'assistant-1')
+  assert.deepEqual(getRealtimeVoiceAssistant(), {
+    text: '下一題。',
+    final: true,
+    turnId: 'assistant-1',
+    delegated: false,
+    revision: 2,
+  })
+
+  setRealtimeVoiceAssistant('', false, '')
 })
 
 test('ambient pet yields the stage while a voice session is live', () => {

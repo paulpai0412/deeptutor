@@ -2,7 +2,15 @@
 
 import dynamic from 'next/dynamic'
 import Image from 'next/image'
-import { type KeyboardEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import {
+  type KeyboardEvent,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from 'react'
 import { useParams, useRouter, useSearchParams } from 'next/navigation'
 
 import {
@@ -92,6 +100,12 @@ import { getEnabledOptionalTools, invalidateEnabledOptionalToolsCache } from '@/
 import { downloadChatMarkdown } from '@/lib/chat-export'
 import type { SpaceMemoryFile } from '@/lib/space-items'
 import { selectedBooksToPayload, type SelectedBookReference } from '@/lib/book-references'
+import {
+  getRealtimeVoiceAssistant,
+  getRealtimeVoiceAssistantServer,
+  subscribeRealtimeVoiceAssistant,
+} from '@/lib/realtime-voice-activity'
+import { mergeRealtimeVoiceAssistant } from '@/lib/realtime-voice'
 
 const NotebookRecordPicker = dynamic(() => import('@/components/notebook/NotebookRecordPicker'), {
   ssr: false,
@@ -307,6 +321,20 @@ export default function ChatPage() {
     loadSession,
     renameSessionTitle,
   } = useUnifiedChat()
+  const realtimeVoiceAssistant = useSyncExternalStore(
+    subscribeRealtimeVoiceAssistant,
+    getRealtimeVoiceAssistant,
+    getRealtimeVoiceAssistantServer
+  )
+  const displayMessages = useMemo(
+    () =>
+      mergeRealtimeVoiceAssistant(
+        state.messages,
+        state.selectedBranches,
+        realtimeVoiceAssistant
+      ),
+    [realtimeVoiceAssistant, state.messages, state.selectedBranches]
+  )
 
   const [knowledgeBases, setKnowledgeBases] = useState<KnowledgeBase[]>([])
   const [paperLibraries, setPaperLibraries] = useState<PaperLibrarySummary[]>([])
@@ -618,7 +646,7 @@ export default function ChatPage() {
       ensureActivityPanelOpen()
     }
   }, [capabilityNeedsConfig, ensureActivityPanelOpen])
-  const hasMessages = state.messages.length > 0
+  const hasMessages = displayMessages.length > 0
   // Time-of-day greeting: seeded once on mount from the user's local clock so
   // the heading stays stable while they're on the page. State (not useMemo)
   // because the random pick would otherwise mismatch SSR ↔ client hydration.
@@ -861,7 +889,7 @@ export default function ChatPage() {
       },
     }
   }, [state.activeCapability, state.language, state.messages, state.sessionId])
-  const lastMessage = state.messages[state.messages.length - 1]
+  const lastMessage = displayMessages[displayMessages.length - 1]
   const {
     containerRef: messagesContainerRef,
     endRef: messagesEndRef,
@@ -871,7 +899,7 @@ export default function ChatPage() {
     hasMessages,
     isStreaming: state.isStreaming,
     composerHeight,
-    messageCount: state.messages.length,
+    messageCount: displayMessages.length,
     lastMessageContent: lastMessage?.content,
     lastEventCount: lastMessage?.events?.length,
   })
@@ -2001,7 +2029,7 @@ export default function ChatPage() {
               >
                 <div className="mx-auto w-full max-w-[960px] space-y-9 px-6">
                   <ChatMessageList
-                    messages={state.messages}
+                    messages={displayMessages}
                     isStreaming={state.isStreaming}
                     sessionId={state.sessionId}
                     language={state.language}

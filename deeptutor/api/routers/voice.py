@@ -11,7 +11,6 @@ from __future__ import annotations
 import asyncio
 import io
 import logging
-import unicodedata
 from uuid import uuid4
 import wave
 
@@ -181,10 +180,6 @@ async def _serve_codex_realtime(ws: WebSocket) -> None:
     cancellation_lock = asyncio.Lock()
     context_snapshot: RealtimeContextSnapshot | None = None
     session_store = get_session_store()
-    # Speech channel per committed handoff: native delegations append to the
-    # provider's delegation item; synthetic transcript handoffs use a
-    # session-level speakable append (Codex has no delegation item for them).
-    handoff_modes: dict[str, str] = {}
 
     async def send(payload: dict[str, object]) -> None:
         nonlocal closed
@@ -221,133 +216,23 @@ async def _serve_codex_realtime(ws: WebSocket) -> None:
             )
         return text
 
-    # ponytail: text correlation bridges provider events with no shared utterance
-    # id; replace this matcher when the protocol exposes one.
-    def _same_provider_utterance(left: object, right: object) -> bool:
-        def normalize(value: object) -> str:
-            text = unicodedata.normalize("NFKC", str(value or "")).casefold()
-            return "".join(char for char in text if char.isalnum())
-
-        left_text = normalize(left)
-        right_text = normalize(right)
-        if not left_text or not right_text:
-            return False
-        if left_text == right_text:
-            return True
-        shorter, longer = sorted((left_text, right_text), key=len)
-        return (len(shorter) >= 8 and shorter in longer) or (
-            len(shorter) == 1 and longer.endswith(shorter)
-        )
-
-    def reset_provider_turn(
-        *,
-        text: str = "",
-        provisional: bool = True,
-        provider_event_id: str = "",
-    ) -> None:
-        provider_turn.clear()
-        provider_turn.update(
-            {
-                "route": "pending",
-                "text": text,
-                "provisional": provisional,
-                "finalized": not provisional,
-                "provider_user_event_id": provider_event_id,
-                "provider_output_done": False,
-            }
-        )
-
-    async def register_provider_user_turn(
+    async def forward_provider_user_turn(
         provider_turn_id: object,
         raw_text: object,
-        *,
-        provisional: bool = False,
     ) -> None:
         provider_id = str(provider_turn_id or "").strip()
         if provider_id:
             provider_id = _validate_provider_id(provider_id, label="provider turn id")
-        text = _validate_provider_text(raw_text)
-        if not provisional and provider_id:
             if provider_id in seen_provider_user_turns:
                 return
             seen_provider_user_turns.add(provider_id)
-
-        route = str(provider_turn.get("route") or "idle")
-        if (
-            not provisional
-            and route in {"delegated", "delegated_completed"}
-            and provider_turn.get("counterpart_pending") == "final"
-            and _same_provider_utterance(provider_turn.get("text"), text)
-        ):
-            provider_turn["counterpart_pending"] = None
-            logger.info("Realtime Voice duplicate final merged into delegated turn")
-            return
-        if route == "delegated" and not provider_turn.get("handoff_response_sent"):
-            # Before response speech starts, a finalized user event belongs to
-            # the native delegation already committed for this utterance.
-            if not provisional and provider_turn.get("counterpart_pending") == "final":
-                provider_turn["counterpart_pending"] = None
-            return
-        if provisional:
-            if route in {"idle", "delegated", "delegated_completed", "cancelled"}:
-                reset_provider_turn(
-                    text=text,
-                    provisional=True,
-                    provider_event_id=provider_id,
-                )
-            else:
-                provider_turn["text"] = f"{provider_turn.get('text') or ''}{text}"
-            return
-        # Final user transcript without a preceding native delegation: commit
-        # it deterministically instead of rejecting the utterance. GPT-Live's
-        # delegation is a model choice, not a protocol guarantee — every
-        # finalized utterance must reach DeepTutor exactly once (issue #33).
-        await commit_synthetic_turn(provider_id, text)
-
-    async def commit_synthetic_turn(provider_id: str, text: str) -> None:
-        """Commit one finalized provider transcript as a DeepTutor turn.
-
-        Codex can leave transcripts display-only because a direct GPT-Live
-        answer is harmless there. DeepTutor owns state the voice model cannot
-        see (exam progress, knowledge bases, memory), so every finalized
-        utterance must reach the orchestrator — including the ones GPT-Live
-        answered directly. The synthetic handoff id binds the turn exactly
-        like a native delegation; speech returns through a session-level
-        speakable append instead of a delegation append.
-        """
-        synthetic_id = f"tx-{provider_id}" if provider_id else f"tx-{uuid4().hex[:12]}"
-        async with cancellation_lock:
-            if synthetic_id in seen_handoffs:
-                return
-            seen_handoffs.add(synthetic_id)
-            has_previous_turn = bool(pending_handoffs or active_turns)
-        if has_previous_turn:
-            await send({"type": "state", "state": "interrupted"})
-            await cancel_active_turns()
-        async with cancellation_lock:
-            provider_turn.clear()
-            provider_turn.update(
-                {
-                    "route": "delegated",
-                    "text": text,
-                    "finalized": True,
-                    "delegation_id": synthetic_id,
-                    "handoff_response_sent": False,
-                    "synthetic": True,
-                    "counterpart_pending": "delegation",
-                }
-            )
-            pending_handoffs.add(synthetic_id)
-            handoff_modes[synthetic_id] = "session"
-        logger.info("Realtime Voice route committed: synthetic transcript handoff")
-        await send({"type": "handoff", "handoff_id": synthetic_id, "text": text})
         await send(
             {
                 "type": "transcript",
                 "phase": "final",
-                "mode": "transcript",
-                "handoff_id": synthetic_id,
-                "text": text,
+                "mode": "provider",
+                "provider_turn_id": provider_id,
+                "text": _validate_provider_text(raw_text),
             }
         )
 
@@ -359,22 +244,6 @@ async def _serve_codex_realtime(ws: WebSocket) -> None:
             if delegation_id in seen_handoffs:
                 return
             seen_handoffs.add(delegation_id)
-            if (
-                provider_turn.get("route") in {"delegated", "delegated_completed"}
-                and provider_turn.get("counterpart_pending") == "delegation"
-                and _same_provider_utterance(provider_turn.get("text"), text)
-            ):
-                provider_turn["counterpart_pending"] = None
-                # GPT-Live delegated an utterance already committed from its
-                # final transcript. The synthetic turn owns the DeepTutor
-                # pipeline; absorb the duplicate delegation.
-                logger.info("Realtime Voice late delegation merged into synthetic turn")
-                return
-            has_previous_turn = bool(pending_handoffs or active_turns)
-        if has_previous_turn:
-            await send({"type": "state", "state": "interrupted"})
-            await cancel_active_turns()
-        async with cancellation_lock:
             provider_turn.clear()
             provider_turn.update(
                 {
@@ -383,11 +252,9 @@ async def _serve_codex_realtime(ws: WebSocket) -> None:
                     "finalized": True,
                     "delegation_id": delegation_id,
                     "handoff_response_sent": False,
-                    "counterpart_pending": "final",
                 }
             )
             pending_handoffs.add(delegation_id)
-            handoff_modes[delegation_id] = "delegation"
         logger.info("Realtime Voice route committed: delegated")
         await send({"type": "handoff", "handoff_id": delegation_id, "text": text})
         await send(
@@ -400,7 +267,7 @@ async def _serve_codex_realtime(ws: WebSocket) -> None:
             }
         )
 
-    async def register_provider_assistant_turn(
+    async def forward_provider_assistant_turn(
         provider_turn_id: object,
         raw_text: object,
     ) -> None:
@@ -410,12 +277,15 @@ async def _serve_codex_realtime(ws: WebSocket) -> None:
             if provider_id in seen_provider_assistant_turns:
                 return
             seen_provider_assistant_turns.add(provider_id)
-        text = _validate_provider_text(raw_text)
-        # Provider-owned assistant output is playable in every route (Codex
-        # mode): there is exactly one audio source — GPT-Live — so there is
-        # nothing to authorize, mute, or reject. Track only completion so
-        # cancellation bookkeeping stays accurate.
         provider_turn["provider_output_done"] = True
+        await send(
+            {
+                "type": "assistant_transcript",
+                "phase": "final",
+                "provider_turn_id": provider_id,
+                "text": _validate_provider_text(raw_text),
+            }
+        )
 
     async def cancel_active_turns() -> bool:
         """Establish the cancellation boundary before awaiting runtime cleanup."""
@@ -458,21 +328,13 @@ async def _serve_codex_realtime(ws: WebSocket) -> None:
             if provider_turn.get("delegation_id") == handoff_id:
                 provider_turn["handoff_response_sent"] = True
                 provider_turn["provider_output_done"] = False
-            mode = handoff_modes.get(handoff_id, "delegation")
             provider_turn["audio_logged"] = False
             logger.info(
-                "Realtime Voice speech appended: handoff=%s mode=%s chars=%d",
+                "Realtime Voice speech appended: handoff=%s chars=%d",
                 handoff_id,
-                mode,
                 len(text),
             )
-            if mode == "session":
-                # Synthetic transcript handoff: no provider delegation item
-                # exists, so speech returns through a session-level speakable
-                # append (the Frameless Bidi appendSpeech contract).
-                await session.send_speech(text)
-            else:
-                await session.send_handoff_speech(handoff_id, text)
+            await session.send_handoff_speech(handoff_id, text)
         return True
 
     async def forward_turn(handoff_id: str, turn_id: str, session_id: str) -> None:
@@ -547,7 +409,6 @@ async def _serve_codex_realtime(ws: WebSocket) -> None:
         finally:
             async with cancellation_lock:
                 active_turns.pop(handoff_id, None)
-                handoff_modes.pop(handoff_id, None)
                 cancelled_handoffs.discard(handoff_id)
                 if (
                     provider_turn.get("route") == "delegated"
@@ -729,19 +590,13 @@ async def _serve_codex_realtime(ws: WebSocket) -> None:
                         )
                         continue
                     if event_type == "provider_user_turn":
-                        await register_provider_user_turn(
+                        await forward_provider_user_turn(
                             normalized.get("provider_turn_id"),
                             normalized.get("text"),
                         )
                         continue
-                    if event_type == "transcript" and normalized.get("phase") == "partial":
-                        await register_provider_user_turn(
-                            normalized.get("provider_turn_id"),
-                            normalized.get("text"),
-                            provisional=True,
-                        )
                     if event_type == "provider_assistant_turn":
-                        await register_provider_assistant_turn(
+                        await forward_provider_assistant_turn(
                             normalized.get("provider_turn_id"),
                             normalized.get("text"),
                         )

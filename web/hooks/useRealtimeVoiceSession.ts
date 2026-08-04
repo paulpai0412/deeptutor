@@ -5,7 +5,9 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { wsUrl } from "@/lib/api";
 import {
   appendRealtimeTranscript,
+  reduceRealtimeVoiceTranscript,
   waitForRealtimeIceGatheringComplete,
+  type RealtimeVoiceTranscriptState,
 } from "@/lib/realtime-voice";
 import { setRealtimeVoiceActive } from "@/lib/realtime-voice-activity";
 
@@ -27,7 +29,8 @@ type RealtimeVoiceMessage = {
   message?: string;
   handoff_id?: string;
   session_id?: string;
-  mode?: "delegated" | "transcript";
+  mode?: "delegated" | "provider";
+  provider_turn_id?: string;
   sdp?: string;
 };
 
@@ -47,6 +50,7 @@ export type RealtimeVoiceSessionOptions = {
   questionContext?: string;
   language?: string;
   onSessionReady?: (sessionId: string) => void | Promise<void>;
+  onAssistantTranscript?: (text: string, final: boolean, turnId: string, delegated: boolean) => void;
 };
 
 function waitForRealtimeContext(
@@ -128,7 +132,8 @@ export function useRealtimeVoiceSession(
   }, []);
   const [audioOutputReceived, setAudioOutputReceived] = useState(false);
   const [audioOutputCount, setAudioOutputCount] = useState(0);
-  const [lastTurnMode, setLastTurnMode] = useState<"delegated" | "transcript" | null>(null);
+  const [lastTurnMode, setLastTurnMode] = useState<"delegated" | "provider" | null>(null);
+  const [assistantTranscript, setAssistantTranscript] = useState("");
   const [error, setError] = useState<string | null>(null);
   const socketRef = useRef<WebSocket | null>(null);
   const peerRef = useRef<RTCPeerConnection | null>(null);
@@ -137,19 +142,14 @@ export function useRealtimeVoiceSession(
   const remoteStreamRef = useRef<MediaStream | null>(null);
   const remoteAudioRef = useRef<HTMLAudioElement | null>(null);
   const endFallbackRef = useRef<number | null>(null);
-  // Soft interruption: speech-start pauses playback locally while a grace
-  // timer decides whether a real delegation follows. False starts (stumble,
-  // cough, "uh…") resume the in-flight answer instead of killing the turn.
-  const softInterruptTimerRef = useRef<number | null>(null);
-  const softSuppressedRef = useRef(false);
   const intentionalCloseRef = useRef(false);
-  const ignoreAudioRef = useRef(false);
   const mutedRef = useRef(false);
-  const assistantPendingRef = useRef(false);
   const outputActiveRef = useRef(false);
   const interruptionSentRef = useRef(false);
+  const transcriptStateRef = useRef<RealtimeVoiceTranscriptState | undefined>(undefined);
   const onFinalTranscriptRef = useRef(onFinalTranscript);
   const onSessionReadyRef = useRef(options.onSessionReady);
+  const onAssistantTranscriptRef = useRef(options.onAssistantTranscript);
   const sessionReadyRef = useRef<Promise<void>>(Promise.resolve());
   const handoffIdRef = useRef<string | null>(null);
   const transcriptCommittedRef = useRef(false);
@@ -166,7 +166,8 @@ export function useRealtimeVoiceSession(
 
   useEffect(() => {
     onSessionReadyRef.current = options.onSessionReady;
-  }, [options.onSessionReady]);
+    onAssistantTranscriptRef.current = options.onAssistantTranscript;
+  }, [options.onAssistantTranscript, options.onSessionReady]);
 
   const pauseRemoteAudio = useCallback(() => {
     remoteAudioRef.current?.pause();
@@ -194,51 +195,37 @@ export function useRealtimeVoiceSession(
     mutedRef.current = false;
   }, []);
 
-  const clearSoftInterrupt = useCallback(() => {
-    if (softInterruptTimerRef.current !== null) {
-      window.clearTimeout(softInterruptTimerRef.current);
-      softInterruptTimerRef.current = null;
-    }
-    softSuppressedRef.current = false;
-  }, []);
-
   const closeSession = useCallback(() => {
     intentionalCloseRef.current = true;
-    clearSoftInterrupt();
     if (endFallbackRef.current !== null) {
       window.clearTimeout(endFallbackRef.current);
       endFallbackRef.current = null;
     }
     handoffIdRef.current = null;
     transcriptCommittedRef.current = false;
-    assistantPendingRef.current = false;
     interruptionSentRef.current = false;
-    ignoreAudioRef.current = false;
+    transcriptStateRef.current = undefined;
+    setAssistantTranscript("");
+    onAssistantTranscriptRef.current?.("", false, "", false);
     releaseStream();
     releaseAudio();
     socketRef.current?.close();
     socketRef.current = null;
     setPartialTranscript("");
     setState("idle");
-  }, [clearSoftInterrupt, releaseAudio, releaseStream]);
+  }, [releaseAudio, releaseStream]);
 
   const requestInterruption = useCallback(() => {
-    if (
-      interruptionSentRef.current ||
-      (!assistantPendingRef.current && !outputActiveRef.current)
-    ) {
+    if (interruptionSentRef.current || !outputActiveRef.current) {
       return;
     }
     interruptionSentRef.current = true;
-    ignoreAudioRef.current = true;
-    assistantPendingRef.current = false;
-    clearSoftInterrupt();
     pauseRemoteAudio();
     if (socketRef.current?.readyState === WebSocket.OPEN) {
       socketRef.current.send(JSON.stringify({ type: "cancel_output" }));
     }
     setState("interrupted");
-  }, [clearSoftInterrupt, pauseRemoteAudio]);
+  }, [pauseRemoteAudio]);
 
   const reportAudioEvent = useCallback((name: string, detail = "") => {
     if (reportedAudioEventsRef.current.has(name)) return;
@@ -287,33 +274,6 @@ export function useRealtimeVoiceSession(
     return true;
   }, [primeRemoteAudio]);
 
-  // Speech-start: pause playback locally and wait to see whether this becomes
-  // a real delegated utterance. Only then is the running turn cancelled
-  // (server-side, by the delegation); a false start resumes playback.
-  const requestSoftInterruption = useCallback(() => {
-    if (
-      softSuppressedRef.current ||
-      interruptionSentRef.current ||
-      (!assistantPendingRef.current && !outputActiveRef.current)
-    ) {
-      return;
-    }
-    softSuppressedRef.current = true;
-    if (remoteAudioRef.current) remoteAudioRef.current.muted = true;
-    pauseRemoteAudio();
-    if (softInterruptTimerRef.current !== null) {
-      window.clearTimeout(softInterruptTimerRef.current);
-    }
-    softInterruptTimerRef.current = window.setTimeout(() => {
-      softInterruptTimerRef.current = null;
-      softSuppressedRef.current = false;
-      // Re-arm the shared WebRTC element even if this answer ended during the
-      // grace window; future RTP uses the same track and does not fire ontrack.
-      if (remoteAudioRef.current) remoteAudioRef.current.muted = false;
-      void resumeRemoteAudio();
-    }, 1200);
-  }, [pauseRemoteAudio, resumeRemoteAudio]);
-
   const start = useCallback(async () => {
     if (state !== "idle") return;
     setError(null);
@@ -321,8 +281,9 @@ export function useRealtimeVoiceSession(
     setAudioOutputReceived(false);
     setAudioOutputCount(0);
     setLastTurnMode(null);
-    ignoreAudioRef.current = false;
-    assistantPendingRef.current = false;
+    setAssistantTranscript("");
+    transcriptStateRef.current = undefined;
+    onAssistantTranscriptRef.current?.("", false, "", false);
     outputActiveRef.current = false;
     interruptionSentRef.current = false;
     handoffIdRef.current = null;
@@ -381,18 +342,11 @@ export function useRealtimeVoiceSession(
             type?: string;
             turn?: { role?: string };
           };
-          if (payload.type === "input_transcript.added") {
-            requestSoftInterruption();
-            return;
-          }
-          if (payload.type === "output_audio.delta" && softSuppressedRef.current) {
-            return;
-          }
+          if (payload.type === "input_transcript.added") return;
           if (payload.type === "output_audio.delta") {
             // The PCM/base64 field is intentionally ignored. WebRTC plays the
             // media track; React stores only this content-free receipt signal.
             reportAudioEvent("provider_audio_delta");
-            ignoreAudioRef.current = false;
             interruptionSentRef.current = false;
             if (!outputActiveRef.current) {
               outputActiveRef.current = true;
@@ -415,7 +369,6 @@ export function useRealtimeVoiceSession(
                 break;
               }
             });
-            assistantPendingRef.current = false;
             outputActiveRef.current = false;
             setState(mutedRef.current ? "muted" : "listening");
           }
@@ -524,8 +477,6 @@ export function useRealtimeVoiceSession(
           return;
         }
         if (message.type === "audio_output") {
-          if (softSuppressedRef.current) return;
-          ignoreAudioRef.current = false;
           interruptionSentRef.current = false;
           if (!outputActiveRef.current) {
             outputActiveRef.current = true;
@@ -536,8 +487,29 @@ export function useRealtimeVoiceSession(
           void resumeRemoteAudio();
           return;
         }
-        if (message.type === "assistant_transcript" && message.phase === "final") {
-          assistantPendingRef.current = false;
+        if (message.type === "assistant_transcript") {
+          const reduced = reduceRealtimeVoiceTranscript(
+            transcriptStateRef.current,
+            message,
+          );
+          transcriptStateRef.current = reduced.state;
+          setAssistantTranscript(reduced.state.assistantText);
+          const publishTranscript = () =>
+            onAssistantTranscriptRef.current?.(
+              reduced.state.assistantText,
+              reduced.state.assistantFinal,
+              reduced.state.assistantTurnId,
+              reduced.state.userMode === "delegated",
+            );
+          if (message.phase === "final") {
+            void sessionReadyRef.current.then(publishTranscript).catch(() => {
+              setError("Realtime Voice Session could not save the assistant transcript.");
+            });
+            outputActiveRef.current = false;
+            setState(mutedRef.current ? "muted" : "listening");
+          } else {
+            publishTranscript();
+          }
           return;
         }
         if (message.type === "handoff") {
@@ -555,14 +527,17 @@ export function useRealtimeVoiceSession(
             setPartialTranscript((current) =>
               appendRealtimeTranscript(reset ? "" : current, update),
             );
-          } else if (
-            message.phase === "final" &&
-            (message.mode === "delegated" || message.mode === "transcript")
-          ) {
+          } else if (message.phase === "final") {
+            const reduced = reduceRealtimeVoiceTranscript(
+              transcriptStateRef.current,
+              message,
+            );
+            transcriptStateRef.current = reduced.state;
             const text = update.trim();
-            setLastTurnMode(message.mode);
+            setLastTurnMode(message.mode ?? null);
             transcriptCommittedRef.current = true;
             setPartialTranscript(text);
+            if (reduced.action !== "delegate") return;
             const handoffId = handoffIdRef.current;
             handoffIdRef.current = null;
             if (!text || !handoffId) {
@@ -570,7 +545,6 @@ export function useRealtimeVoiceSession(
               closeSession();
               return;
             }
-            assistantPendingRef.current = true;
             interruptionSentRef.current = false;
             void sessionReadyRef.current
               .then(() => onFinalTranscriptRef.current(text))
@@ -582,7 +556,6 @@ export function useRealtimeVoiceSession(
                   !started.sessionId ||
                   socket.readyState !== WebSocket.OPEN
                 ) {
-                  assistantPendingRef.current = false;
                   setError("The finalized voice turn could not start.");
                   closeSession();
                   return;
@@ -597,7 +570,6 @@ export function useRealtimeVoiceSession(
                 );
               })
               .catch(() => {
-                assistantPendingRef.current = false;
                 setError("The finalized voice turn could not start.");
                 closeSession();
               });
@@ -642,7 +614,6 @@ export function useRealtimeVoiceSession(
     releaseAudio,
     releaseStream,
     reportAudioEvent,
-    requestSoftInterruption,
     resumeRemoteAudio,
     state,
     options,
@@ -693,6 +664,8 @@ export function useRealtimeVoiceSession(
       }
       handoffIdRef.current = null;
       transcriptCommittedRef.current = false;
+      transcriptStateRef.current = undefined;
+      onAssistantTranscriptRef.current?.("", false, "", false);
       releaseStream();
       releaseAudio();
       socketRef.current?.close();
@@ -702,6 +675,7 @@ export function useRealtimeVoiceSession(
   return {
     state,
     partialTranscript,
+    assistantTranscript,
     audioOutputReceived,
     audioOutputCount,
     lastTurnMode,
