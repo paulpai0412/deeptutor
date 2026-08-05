@@ -233,6 +233,14 @@ TTS_PROVIDERS: dict[str, VoiceProviderSpec] = {
         default_model="openai/gpt-4o-mini-tts",
         default_voice="alloy",
     ),
+    # Free Microsoft neural voices; no API key and broad Chinese coverage.
+    "edge_tts": VoiceProviderSpec(
+        label="Microsoft Edge TTS (Free)",
+        default_api_base="",
+        adapter="edge_tts",
+        default_model="edge-tts",
+        default_voice="zh-TW-HsiaoChenNeural",
+    ),
     # Groq currently exposes only English/Arabic TTS, so its fallback cannot
     # synthesize Chinese. SiliconFlow's CosyVoice2 covers Chinese and English.
     "siliconflow": VoiceProviderSpec(
@@ -517,6 +525,7 @@ def _to_headers(value: Any) -> dict[str, str]:
     if isinstance(value, str) and value.strip():
         try:
             parsed = json.loads(value)
+        # pi-lens-ignore: no-bare-except
         except json.JSONDecodeError:
             return {}
         if isinstance(parsed, dict):
@@ -596,9 +605,16 @@ def _choose_resolved_provider(
         return model_spec
 
     if _is_local_base_url(api_base):
-        if api_base and "11434" in api_base:
-            return find_by_name("ollama") or find_by_name("vllm") or find_by_name("openai")
-        return find_by_name("vllm") or find_by_name("ollama") or find_by_name("openai")
+        preferred = ("ollama", "vllm", "openai") if api_base and "11434" in api_base else (
+            "vllm",
+            "ollama",
+            "openai",
+        )
+        for name in preferred:
+            spec = find_by_name(name)
+            if spec is not None:
+                return spec
+        return PROVIDERS[0]
 
     for spec in PROVIDERS:
         configured = provider_pool.get(spec.name)

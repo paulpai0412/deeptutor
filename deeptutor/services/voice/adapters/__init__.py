@@ -8,6 +8,9 @@ OpenRouter, Azure OpenAI and local vLLM/LM Studio; add bespoke providers
 
 from __future__ import annotations
 
+from deeptutor.services.voice.adapters.edge import (  # pyright: ignore[reportMissingImports]
+    EdgeTTSAdapter,
+)
 from deeptutor.services.voice.adapters.openai_compat import (
     OpenAICompatSTTAdapter,
     OpenAICompatTTSAdapter,
@@ -16,6 +19,7 @@ from deeptutor.services.voice.adapters.openai_compat import (
 from deeptutor.services.voice.base import BaseSTTAdapter, BaseTTSAdapter, VoiceProviderError
 
 TTS_ADAPTERS: dict[str, BaseTTSAdapter] = {
+    "edge_tts": EdgeTTSAdapter(),
     "openai_compat": OpenAICompatTTSAdapter(),
     "openrouter_tts": OpenRouterTTSAdapter(),
 }

@@ -11,14 +11,17 @@ import base64
 import json
 from typing import Any
 
-import httpx
-import pytest
+import httpx  # type: ignore[import-not-found]
+import pytest  # type: ignore[import-not-found]
 
 from deeptutor.services.config.provider_runtime import (
     resolve_stt_runtime_config,
     resolve_tts_runtime_config,
 )
 from deeptutor.services.voice import synthesize_speech, transcribe_audio
+from deeptutor.services.voice.adapters.edge import (  # type: ignore[import-not-found]
+    EdgeTTSAdapter,
+)
 from deeptutor.services.voice.adapters.openai_compat import (
     OpenAICompatSTTAdapter,
     OpenAICompatTTSAdapter,
@@ -132,6 +135,57 @@ async def test_tts_adapter_raises_on_http_error(monkeypatch: pytest.MonkeyPatch)
     config = TTSConfig(model="m", base_url="https://x/v1", api_key="k", voice="alloy")
     with pytest.raises(VoiceProviderError, match="401"):
         await OpenAICompatTTSAdapter().synthesize("hi", config)
+
+
+@pytest.mark.asyncio
+async def test_edge_tts_adapter_streams_chinese_audio(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import edge_tts  # type: ignore[import-not-found]
+
+    captured: dict[str, Any] = {}
+
+    class FakeCommunicate:
+        def __init__(self, text: str, voice: str, **kwargs: Any) -> None:
+            captured["text"] = text
+            captured["voice"] = voice
+            captured["kwargs"] = kwargs
+
+        async def stream(self):
+            yield {"type": "audio", "data": b"mp3-"}
+            yield {"type": "WordBoundary"}
+            yield {"type": "audio", "data": b"bytes"}
+
+    monkeypatch.setattr(edge_tts, "Communicate", FakeCommunicate)
+    config = TTSConfig(
+        model="edge-tts",
+        adapter="edge_tts",
+        voice="zh-TW-HsiaoChenNeural",
+        response_format="mp3",
+        speed=1.1,
+    )
+
+    audio, content_type = await EdgeTTSAdapter().synthesize("你好，這是測試。", config)
+
+    assert audio == b"mp3-bytes"
+    assert content_type == "audio/mpeg"
+    assert captured["text"] == "你好，這是測試。"
+    assert captured["voice"] == "zh-TW-HsiaoChenNeural"
+    assert captured["kwargs"]["rate"] == "+10%"
+
+
+@pytest.mark.asyncio
+async def test_edge_tts_adapter_rejects_non_mp3_output() -> None:
+    from deeptutor.services.voice.base import VoiceProviderError
+
+    config = TTSConfig(
+        model="edge-tts",
+        adapter="edge_tts",
+        voice="zh-TW-HsiaoChenNeural",
+        response_format="wav",
+    )
+    with pytest.raises(VoiceProviderError, match="MP3"):
+        await EdgeTTSAdapter().synthesize("你好", config)
 
 
 @pytest.mark.asyncio
@@ -327,14 +381,34 @@ def test_resolve_tts_config_picks_openrouter_adapter() -> None:
     assert cfg.adapter == "openrouter_tts"
 
 
-def test_groq_tts_is_not_offered_as_chinese_default() -> None:
+def test_edge_tts_is_the_free_chinese_tts_provider() -> None:
     from deeptutor.services.config.provider_runtime import TTS_PROVIDERS
 
-    # Groq's hosted TTS models are English/Arabic-only today; offering it as a
-    # default TTS provider would silently fail for Chinese replies.
+    # Groq's hosted TTS models are English/Arabic-only today; Edge TTS provides
+    # the free Chinese path without an API key.
     assert "groq" not in TTS_PROVIDERS
-    assert TTS_PROVIDERS["siliconflow"].default_model == "FunAudioLLM/CosyVoice2-0.5B"
-    assert TTS_PROVIDERS["siliconflow"].default_voice == "FunAudioLLM/CosyVoice2-0.5B:diana"
+    spec = TTS_PROVIDERS["edge_tts"]
+    assert spec.adapter == "edge_tts"
+    assert spec.default_api_base == ""
+    assert spec.default_model == "edge-tts"
+    assert spec.default_voice == "zh-TW-HsiaoChenNeural"
+
+
+def test_resolve_tts_config_uses_edge_tts_without_api_key() -> None:
+    catalog = _voice_catalog()
+    tts = catalog["services"]["tts"]
+    tts["profiles"][0].update({"binding": "edge_tts", "base_url": "", "api_key": ""})
+    tts["profiles"][0]["models"][0].update(
+        {"model": "edge-tts", "voice": "", "response_format": "mp3"}
+    )
+
+    cfg = resolve_tts_runtime_config(catalog=catalog)
+
+    assert cfg.provider_name == "edge_tts"
+    assert cfg.adapter == "edge_tts"
+    assert cfg.base_url == ""
+    assert cfg.api_key == ""
+    assert cfg.voice == "zh-TW-HsiaoChenNeural"
 
 
 def test_resolve_tts_config_raises_without_model() -> None:
