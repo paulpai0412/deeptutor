@@ -1083,9 +1083,8 @@ function hasExpandableContent(callEvents: StreamEvent[], group: string, role: st
  * header and no always-visible chevron — a faint chevron only appears on
  * hover for rows that carry extra detail.
  *
- * The live step is auto-expanded so its reasoning streams in full; once it
- * completes it folds to a one-line preview (the activity-feed look). A
- * manual toggle pins the row from then on.
+ * Steps stay expanded after completion so earlier workspace details remain
+ * visible. A manual toggle pins the row from then on.
  */
 function TraceRowItem({
   trace,
@@ -1122,14 +1121,10 @@ function TraceRowItem({
   // it always streams in full and is never collapsed behind a chevron.
   const isThinking =
     isChatRound || role === 'thought' || kind === 'llm_reasoning' || kind === 'llm_planning'
-  // Thinking rows pin open; everything else folds to a preview once settled
-  // unless the user pins it. The context-exploration pre-pass is the
-  // exception to "auto-open while live": its briefing can be long, and
-  // auto-opening it lets the trace climb the viewport (the page is pinned to
-  // the bottom while streaming). Keep it folded by default — a compact,
-  // pulsing one-liner the user can expand to read/watch the briefing.
+  // Keep completed rows visible across later turns. The context-exploration
+  // pre-pass is folded only while live because its briefing can be long.
   const isContextExploration = kind === 'context_exploration'
-  const autoOpen = isContextExploration ? false : active
+  const autoOpen = !isContextExploration || !active
   const open = isThinking ? true : expandable && (userOpen ?? autoOpen)
   const canToggle = expandable && !isThinking
 
@@ -2157,9 +2152,9 @@ function hasRenderableCallTrace(events: StreamEvent[]): boolean {
 /**
  * Inline trace rows for the assistant message flow: each trace renders as
  * its own one-line, expandable, live-streaming row — there is no outer
- * trace card. Group-level fold (open while working, collapsed once the
- * final answer lands) is handled by ``AssistantActivity``, which nests this
- * directly under the status header.
+ * trace card. Group-level disclosure is handled by ``AssistantActivity``,
+ * which nests this directly under the status header and keeps it open by
+ * default.
  */
 export function TraceFlow({
   events,
