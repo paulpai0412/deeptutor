@@ -31,6 +31,7 @@ import { normalizeMarkdownForDisplay } from "@/lib/markdown-display";
 import { normalizeMessageContent } from "@/lib/message-content";
 import {
   buildVisiblePath,
+  nextOptimisticChildId,
   resolveOutgoingParentIds,
   tipMessageId,
 } from "@/lib/message-branches";
@@ -372,7 +373,7 @@ function reducer(state: ProviderState, action: Action): ProviderState {
             messages: [
               ...session.messages,
               {
-                id: -Date.now(),
+                id: nextOptimisticChildId(action.parentMessageId),
                 role: "user",
                 content: action.content,
                 capability: action.capability || "",
@@ -484,7 +485,7 @@ function reducer(state: ProviderState, action: Action): ProviderState {
             messages: [
               ...existing,
               {
-                id: -Date.now(),
+                id: nextOptimisticChildId(tip?.id),
                 role: "assistant",
                 content: "",
                 events: [],
@@ -509,7 +510,7 @@ function reducer(state: ProviderState, action: Action): ProviderState {
       let last = msgs[msgs.length - 1];
       if (last?.role !== "assistant") {
         msgs.push({
-          id: -Date.now(),
+          id: nextOptimisticChildId(last?.id),
           role: "assistant",
           content: "",
           events: [],
@@ -1689,15 +1690,22 @@ export function UnifiedChatProvider({
 
   const commitRealtimeVoiceAssistant = useCallback(
     (text: string, turnId: string, delegated: boolean) => {
-      const key = stateRef.current.selectedKey;
+      const current = stateRef.current;
+      const key = current.selectedKey;
       if (!key || !text.trim()) return;
+      const session = current.sessions[key];
+      const parentId = session
+        ? tipMessageId(
+            buildVisiblePath(session.messages, session.selectedBranches).messages,
+          )
+        : null;
       dispatch({
         type: "COMMIT_REALTIME_ASSISTANT",
         key,
         text,
         turnId,
         delegated,
-        optimisticId: -Date.now(),
+        optimisticId: nextOptimisticChildId(parentId),
       });
     },
     [],

@@ -39,6 +39,40 @@ function siblingRank(message: MessageItem): number {
   return id < 0 ? OPTIMISTIC_RANK_OFFSET - id : id;
 }
 
+/** Create a negative child id that cannot equal its immediate parent. */
+export function nextOptimisticChildId(
+  parentId?: number | null,
+  now = Date.now(),
+): number {
+  return Math.min(-Math.abs(now), (parentId ?? 0) - 1);
+}
+
+/**
+ * Repair the legacy same-millisecond optimistic-id corruption. It persisted a
+ * new user row beside the preceding assistant (same parent) instead of under
+ * it, making the assistant disappear when the branch walker chose the user.
+ */
+function repairMalformedLinearParents(
+  allMessages: MessageItem[],
+): MessageItem[] {
+  let repaired = allMessages;
+  for (let index = 1; index < allMessages.length; index += 1) {
+    const previous = repaired[index - 1];
+    const message = repaired[index];
+    if (
+      message.role !== "user" ||
+      previous.role !== "assistant" ||
+      previous.id === undefined ||
+      message.parentMessageId !== previous.parentMessageId
+    ) {
+      continue;
+    }
+    if (repaired === allMessages) repaired = [...allMessages];
+    repaired[index] = { ...message, parentMessageId: previous.id };
+  }
+  return repaired;
+}
+
 export interface SiblingInfo {
   /** Number of alternative branches at this point, including this one. */
   total: number;
@@ -62,9 +96,10 @@ export function buildVisiblePath(
   allMessages: MessageItem[],
   selectedBranches: Record<string, number> | undefined,
 ): VisiblePathResult {
+  const messages = repairMalformedLinearParents(allMessages);
   // Group by parent.
   const childrenByParent = new Map<string, MessageItem[]>();
-  for (const msg of allMessages) {
+  for (const msg of messages) {
     if (msg.id === undefined) continue;
     const key = parentKey(msg.parentMessageId);
     const arr = childrenByParent.get(key);
