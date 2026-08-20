@@ -78,3 +78,41 @@ A Committed Voice Turn whose response delivery was stopped by Barge-in. No new t
 
 **Voice Input Mode**:
 The user-selected meaning of the chat microphone: **Dictation** records one utterance for one-shot transcription into the composer; **Realtime Conversation** opens a Realtime Voice Session. The default is Dictation. It is a global Voice setting shared by chats.
+
+## Teaching whiteboard
+
+**Whiteboard Presentation Mode**:
+An optional way for existing capabilities to present a turn through a persistent interactive board alongside text and voice. It is not a Capability or a separate Reasoning Owner.
+_Avoid_: Whiteboard Capability, Canvas Agent
+
+**Board Document**:
+The persistent, session-owned collection of learner board content and tutor annotations.
+_Avoid_: treating a screenshot, viewport, or unfinished animation as the board
+
+**Board Action**:
+A validated semantic instruction from the Reasoning Owner to write, draw, mark, highlight, focus, or clear tutor-owned content. It does not contain raw canvas-engine data or executable content.
+_Avoid_: Canvas Command, raw Excalidraw operation
+
+**Teaching Beat**:
+The smallest semantic presentation unit: normally one to three spoken sentences plus the correlated Board Actions that support them. It is produced once by DeepTutor and delivered through independent speech and board channels.
+_Avoid_: audio timestamp, individual stroke, Whiteboard Agent turn
+
+**Dual-Channel Delivery**:
+Non-blocking fan-out of one Teaching Beat: narration goes to GPT-Live's `speakable` sideband while Board Actions go through StreamBus and the Unified WebSocket. Neither channel waits for the other.
+_Avoid_: transcript-to-board conversion, board acknowledgement barrier
+
+**Learner Board Content**:
+Any board element created by the learner, including handwriting, text, shapes, and arrows. Tutor actions may reference it but never edit or delete it.
+_Avoid_: Student Annotation
+
+**Tutor Annotation**:
+Board content created by a Board Action to explain or respond to learner work. It may be cleared or replaced without affecting Learner Board Content.
+_Avoid_: AI Shape, Agent Ink
+
+**Board Context**:
+A bounded representation of selected or relevant board elements, optionally with one region image, submitted with an explicit learner turn.
+_Avoid_: continuous canvas stream, full board dump
+
+**Presentation Interruption**:
+A Barge-in or newer learner turn that stops pending speech and Board Action delivery while preserving completed board content.
+_Avoid_: board rollback, clearing interrupted work
