@@ -90,7 +90,7 @@ CONTEXT_TOKEN_MAX_AGE_S = 60
 MAX_CONSECUTIVE_FAILURES = 3
 BACKOFF_DELAY_S = 30
 RETRY_DELAY_S = 2
-MAX_QR_REFRESH_COUNT = 3
+MAX_QR_REFRESH_COUNT = 30
 TYPING_STATUS_TYPING = 1
 TYPING_STATUS_CANCEL = 2
 TYPING_TICKET_TTL_S = 24 * 60 * 60
@@ -497,10 +497,13 @@ class WeixinChannel(BaseChannel):
             try:
                 await self._poll_once()
                 consecutive_failures = 0
-            except httpx.TimeoutException:
-                # Normal for long-poll, just retry
-                continue
-            except Exception:
+            except Exception as exc:
+                if isinstance(exc, httpx.TimeoutException) or (
+                    isinstance(exc, httpx.HTTPStatusError)
+                    and getattr(getattr(exc, "response", None), "status_code", None) == 524
+                ):
+                    # Client and upstream proxy timeouts are normal for long-poll.
+                    continue
                 if not self._running:
                     break
                 self.logger.exception("WeChat poll loop error")

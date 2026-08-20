@@ -497,7 +497,15 @@ class PartnerRunner:
     def _language(self) -> str:
         from deeptutor.services.config import parse_language
 
-        return parse_language(str(getattr(self.config, "language", "") or ""))
+        configured = str(getattr(self.config, "language", "") or "").strip()
+        if configured:
+            return parse_language(configured)
+        # Unset → follow the owner's interface language (same fallback as the
+        # chat router) so e.g. a zh-TW UI yields Traditional replies; the old
+        # parse_language("") default silently resolved to Simplified "zh".
+        from deeptutor.services.settings.interface_settings import get_ui_language
+
+        return get_ui_language(default="en")
 
     def _channel_delivery_flag(self, channel_name: str, name: str, *, default: bool) -> bool:
         channels = getattr(self.config, "channels", None) or {}

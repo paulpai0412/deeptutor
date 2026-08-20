@@ -1,4 +1,4 @@
-"use client";
+'use client'
 
 /**
  * New-partner wizard: five full-page steps —
@@ -7,124 +7,108 @@
  * partner's Channels tab.
  */
 
-import { useEffect, useMemo, useState } from "react";
-import Link from "next/link";
-import { useRouter } from "next/navigation";
-import { ArrowLeft, ArrowRight, Check, Loader2, Sparkles } from "lucide-react";
-import { useTranslation } from "react-i18next";
-import {
-  listLLMOptions,
-  sameLLMSelection,
-  type LLMOption,
-} from "@/lib/llm-options";
-import type { LLMSelection } from "@/lib/unified-ws";
-import {
-  createPartner,
-  getToolOptions,
-  type SoulSpec,
-  type ToolOptions,
-} from "@/lib/partners-api";
-import AssetPicker, {
-  type AssetSelection,
-} from "@/components/partners/AssetPicker";
-import PartnerAvatar from "@/components/partners/PartnerAvatar";
-import FaceEditor, { type FaceValue } from "@/components/partners/FaceEditor";
-import PartnerModelPicker from "@/components/partners/PartnerModelPicker";
-import PartnerModelSelect from "@/components/partners/PartnerModelSelect";
-import SoulPicker from "@/components/partners/SoulPicker";
-import ToolPicker from "@/components/partners/ToolPicker";
+import { useEffect, useMemo, useState } from 'react'
+import Link from 'next/link'
+import { useRouter } from 'next/navigation'
+import { ArrowLeft, ArrowRight, Check, Loader2, Sparkles } from 'lucide-react'
+import { useTranslation } from 'react-i18next'
+import { listLLMOptions, sameLLMSelection, type LLMOption } from '@/lib/llm-options'
+import type { LLMSelection } from '@/lib/unified-ws'
+import { createPartner, getToolOptions, type SoulSpec, type ToolOptions } from '@/lib/partners-api'
+import AssetPicker, { type AssetSelection } from '@/components/partners/AssetPicker'
+import PartnerAvatar from '@/components/partners/PartnerAvatar'
+import FaceEditor, { type FaceValue } from '@/components/partners/FaceEditor'
+import PartnerModelPicker from '@/components/partners/PartnerModelPicker'
+import PartnerModelSelect from '@/components/partners/PartnerModelSelect'
+import SoulPicker from '@/components/partners/SoulPicker'
+import ToolPicker from '@/components/partners/ToolPicker'
 
-type StepKey = "identity" | "soul" | "mind" | "library" | "review";
+type StepKey = 'identity' | 'soul' | 'mind' | 'library' | 'review'
 
 export default function NewPartnerPage() {
-  const router = useRouter();
-  const { t } = useTranslation();
+  const router = useRouter()
+  const { t } = useTranslation()
 
   const steps: { key: StepKey; label: string }[] = [
-    { key: "identity", label: t("Identity") },
-    { key: "soul", label: t("Soul") },
-    { key: "mind", label: t("Mind") },
-    { key: "library", label: t("Library") },
-    { key: "review", label: t("Review") },
-  ];
-  const [stepIndex, setStepIndex] = useState(0);
-  const step = steps[stepIndex].key;
+    { key: 'identity', label: t('Identity') },
+    { key: 'soul', label: t('Soul') },
+    { key: 'mind', label: t('Mind') },
+    { key: 'library', label: t('Library') },
+    { key: 'review', label: t('Review') },
+  ]
+  const [stepIndex, setStepIndex] = useState(0)
+  const step = steps[stepIndex].key
 
   // ── form state ────────────────────────────────────────────────
-  const [name, setName] = useState("");
-  const [description, setDescription] = useState("");
+  const [name, setName] = useState('')
+  const [description, setDescription] = useState('')
   const [face, setFace] = useState<FaceValue>({
-    emoji: "",
-    color: "",
-    avatar: "",
-  });
-  const [language, setLanguage] = useState("");
-  const [soul, setSoul] = useState<SoulSpec>({ source: "default" });
-  const [selection, setSelection] = useState<LLMSelection | null>(null);
-  const [backupSelection, setBackupSelection] = useState<LLMSelection | null>(
-    null,
-  );
+    emoji: '',
+    color: '',
+    avatar: '',
+  })
+  const [language, setLanguage] = useState('')
+  const [soul, setSoul] = useState<SoulSpec>({ source: 'default' })
+  const [selection, setSelection] = useState<LLMSelection | null>(null)
+  const [backupSelection, setBackupSelection] = useState<LLMSelection | null>(null)
   const [assets, setAssets] = useState<AssetSelection>({
     knowledge_bases: [],
     skills: [],
     notebooks: [],
-  });
+  })
 
-  const [llmOptions, setLLMOptions] = useState<LLMOption[]>([]);
-  const [activeLLMDefault, setActiveLLMDefault] = useState<LLMSelection | null>(
-    null,
-  );
-  const [llmLoading, setLLMLoading] = useState(true);
-  const [llmError, setLLMError] = useState(false);
+  const [llmOptions, setLLMOptions] = useState<LLMOption[]>([])
+  const [activeLLMDefault, setActiveLLMDefault] = useState<LLMSelection | null>(null)
+  const [llmLoading, setLLMLoading] = useState(true)
+  const [llmError, setLLMError] = useState(false)
 
-  const [toolOptions, setToolOptions] = useState<ToolOptions | null>(null);
-  const [enabledTools, setEnabledTools] = useState<string[]>([]);
-  const [builtinTools, setBuiltinTools] = useState<string[]>([]);
-  const [mcpTools, setMcpTools] = useState<string[]>([]);
-  const [toolsTouched, setToolsTouched] = useState(false);
+  const [toolOptions, setToolOptions] = useState<ToolOptions | null>(null)
+  const [enabledTools, setEnabledTools] = useState<string[]>([])
+  const [builtinTools, setBuiltinTools] = useState<string[]>([])
+  const [mcpTools, setMcpTools] = useState<string[]>([])
+  const [toolsTouched, setToolsTouched] = useState(false)
 
-  const [creating, setCreating] = useState(false);
-  const [error, setError] = useState("");
+  const [creating, setCreating] = useState(false)
+  const [error, setError] = useState('')
 
   useEffect(() => {
     void (async () => {
       try {
-        const payload = await listLLMOptions();
-        setLLMOptions(payload.options);
-        setActiveLLMDefault(payload.active);
+        const payload = await listLLMOptions()
+        setLLMOptions(payload.options)
+        setActiveLLMDefault(payload.active)
       } catch {
-        setLLMError(true);
+        setLLMError(true)
       } finally {
-        setLLMLoading(false);
+        setLLMLoading(false)
       }
-    })();
+    })()
     void getToolOptions()
-      .then((options) => {
-        setToolOptions(options);
-        setEnabledTools(options.tools.map((tool) => tool.name));
-        setBuiltinTools(options.builtin_tools.map((tool) => tool.name));
-        setMcpTools(options.mcp_tools.map((tool) => tool.name));
+      .then(options => {
+        setToolOptions(options)
+        setEnabledTools(options.tools.map(tool => tool.name))
+        setBuiltinTools(options.builtin_tools.map(tool => tool.name))
+        setMcpTools(options.mcp_tools.map(tool => tool.name))
       })
-      .catch(() => {});
-  }, []);
+      .catch(() => {})
+  }, [])
 
-  const canContinue = step !== "identity" || Boolean(name.trim());
+  const canContinue = step !== 'identity' || Boolean(name.trim())
 
   const goNext = () => {
-    if (!canContinue) return;
-    setStepIndex((index) => Math.min(index + 1, steps.length - 1));
-  };
-  const goBack = () => setStepIndex((index) => Math.max(index - 1, 0));
+    if (!canContinue) return
+    setStepIndex(index => Math.min(index + 1, steps.length - 1))
+  }
+  const goBack = () => setStepIndex(index => Math.max(index - 1, 0))
 
   const submit = async () => {
-    if (!name.trim()) return;
-    setCreating(true);
-    setError("");
+    if (!name.trim()) return
+    setCreating(true)
+    setError('')
     try {
-      const allTools = toolOptions?.tools.map((tool) => tool.name) ?? [];
-      const allBuiltin =
-        toolOptions?.builtin_tools.map((tool) => tool.name) ?? [];
-      const allMcp = toolOptions?.mcp_tools.map((tool) => tool.name) ?? [];
+      const allTools = toolOptions?.tools.map(tool => tool.name) ?? []
+      const allBuiltin = toolOptions?.builtin_tools.map(tool => tool.name) ?? []
+      const allMcp = toolOptions?.mcp_tools.map(tool => tool.name) ?? []
       const result = await createPartner({
         name: name.trim(),
         description: description.trim() || undefined,
@@ -147,84 +131,73 @@ export default function NewPartnerPage() {
           : builtinTools.length === allBuiltin.length
             ? null
             : builtinTools,
-        mcp_tools: toolsTouched
-          ? mcpTools
-          : mcpTools.length === allMcp.length
-            ? null
-            : mcpTools,
+        mcp_tools: toolsTouched ? mcpTools : mcpTools.length === allMcp.length ? null : mcpTools,
         assets,
         start: true,
-      });
+      })
       // Land in the chat tab — the partner is ready to talk to right away
       // (any provisioning misses are visible on the Configure tab's library).
-      router.push(`/partners/${result.partner_id}`);
+      router.push(`/partners/${result.partner_id}`)
     } catch (e) {
-      setError(e instanceof Error ? e.message : t("Create failed"));
-      setCreating(false);
+      setError(e instanceof Error ? e.message : t('Create failed'))
+      setCreating(false)
     }
-  };
+  }
 
   // ── review summary helpers ────────────────────────────────────
   const soulSummary = useMemo(() => {
     switch (soul.source) {
-      case "library":
-        return `${t("Soul library")} · ${soul.id ?? ""}`;
-      case "persona":
-        return `${t("Clone a persona")} · ${soul.id ?? ""}`;
-      case "custom":
-        return t("Write your own");
+      case 'library':
+        return `${t('Soul library')} · ${soul.id ?? ''}`
+      case 'persona':
+        return `${t('Clone a persona')} · ${soul.id ?? ''}`
+      case 'custom':
+        return t('Write your own')
       default:
-        return t("Default soul");
+        return t('Default soul')
     }
-  }, [soul, t]);
+  }, [soul, t])
 
   const describeSelection = useMemo(
     () =>
       (candidate: LLMSelection | null, noneText: string): string => {
-        if (!candidate) return noneText;
-        const option = llmOptions.find((opt) =>
-          sameLLMSelection(opt, candidate),
-        );
-        return option ? option.model_name || option.model : candidate.model_id;
+        if (!candidate) return noneText
+        const option = llmOptions.find(opt => sameLLMSelection(opt, candidate))
+        return option ? option.model_name || option.model : candidate.model_id
       },
-    [llmOptions],
-  );
-  const modelSummary = describeSelection(selection, t("System default"));
-  const backupSummary = describeSelection(backupSelection, t("No backup"));
+    [llmOptions]
+  )
+  const modelSummary = describeSelection(selection, t('System default'))
+  const backupSummary = describeSelection(backupSelection, t('No backup'))
 
-  const assetCount =
-    assets.knowledge_bases.length +
-    assets.skills.length +
-    assets.notebooks.length;
+  const assetCount = assets.knowledge_bases.length + assets.skills.length + assets.notebooks.length
 
   const stepTitle: Record<StepKey, { title: string; subtitle: string }> = {
     identity: {
-      title: t("Who is this partner?"),
-      subtitle: t("A name and a face — everything else can change later."),
+      title: t('Who is this partner?'),
+      subtitle: t('A name and a face — everything else can change later.'),
     },
     soul: {
-      title: t("Give it a soul"),
+      title: t('Give it a soul'),
       subtitle: t(
-        "Who this partner is. Start from a template, clone a chat persona, or write it yourself.",
+        'Who this partner is. Start from a template, clone a chat persona, or write it yourself.'
       ),
     },
     mind: {
-      title: t("Shape its mind"),
-      subtitle: t("The model it thinks with and the tools it may use."),
+      title: t('Shape its mind'),
+      subtitle: t('The model it thinks with and the tools it may use.'),
     },
     library: {
-      title: t("Hand over some knowledge"),
-      subtitle: t(
-        "Give it a slice of your knowledge — copied into the partner's own workspace.",
-      ),
+      title: t('Hand over some knowledge'),
+      subtitle: t("Give it a slice of your knowledge — copied into the partner's own workspace."),
     },
     review: {
-      title: t("Ready to meet {{name}}?", {
-        name: name.trim() || t("your partner"),
+      title: t('Ready to meet {{name}}?', {
+        name: name.trim() || t('your partner'),
       }),
-      subtitle: t("Almost there — check the essentials before creating."),
+      subtitle: t('Almost there — check the essentials before creating.'),
     },
-  };
+  }
 
   return (
     <div className="flex h-full flex-col">
@@ -235,24 +208,22 @@ export default function NewPartnerPage() {
           className="inline-flex items-center gap-1.5 text-[13px] text-[var(--muted-foreground)] transition-colors hover:text-[var(--foreground)]"
         >
           <ArrowLeft className="h-4 w-4" />
-          {t("Partners")}
+          {t('Partners')}
         </Link>
         <ol className="flex items-center gap-1.5">
           {steps.map(({ key, label }, index) => {
             const stateClass =
               index === stepIndex
-                ? "border-[var(--primary)] bg-[var(--primary)] text-[var(--primary-foreground)]"
+                ? 'border-[var(--primary)] bg-[var(--primary)] text-[var(--primary-foreground)]'
                 : index < stepIndex
-                  ? "border-[var(--primary)] text-[var(--primary)]"
-                  : "border-[var(--border)] text-[var(--muted-foreground)]";
+                  ? 'border-[var(--primary)] text-[var(--primary)]'
+                  : 'border-[var(--border)] text-[var(--muted-foreground)]'
             return (
               <li key={key} className="flex items-center gap-1.5">
                 {index > 0 && (
                   <span
                     className={`h-px w-5 transition-colors ${
-                      index <= stepIndex
-                        ? "bg-[var(--primary)]/40"
-                        : "bg-[var(--border)]"
+                      index <= stepIndex ? 'bg-[var(--primary)]/40' : 'bg-[var(--border)]'
                     }`}
                   />
                 )}
@@ -275,15 +246,15 @@ export default function NewPartnerPage() {
                   <span
                     className={`hidden text-[12.5px] transition-colors sm:block ${
                       index === stepIndex
-                        ? "font-medium text-[var(--foreground)]"
-                        : "text-[var(--muted-foreground)] group-enabled:group-hover:text-[var(--foreground)]"
+                        ? 'font-medium text-[var(--foreground)]'
+                        : 'text-[var(--muted-foreground)] group-enabled:group-hover:text-[var(--foreground)]'
                     }`}
                   >
                     {label}
                   </span>
                 </button>
               </li>
-            );
+            )
           })}
         </ol>
         <span className="w-16" />
@@ -291,14 +262,11 @@ export default function NewPartnerPage() {
 
       {/* Step body */}
       <div className="min-h-0 flex-1 overflow-y-auto">
-        <div
-          key={step}
-          className="mx-auto w-full max-w-2xl px-6 pb-8 pt-10 animate-fade-in"
-        >
+        <div key={step} className="mx-auto w-full max-w-2xl px-6 pb-8 pt-10 animate-fade-in">
           <header className="mb-7 flex items-start gap-4">
-            {step === "identity" || step === "review" ? (
+            {step === 'identity' || step === 'review' ? (
               <PartnerAvatar
-                name={name || "?"}
+                name={name || '?'}
                 emoji={face.emoji}
                 color={face.color}
                 image={face.avatar}
@@ -315,64 +283,59 @@ export default function NewPartnerPage() {
             </div>
           </header>
 
-          {step === "identity" && (
+          {step === 'identity' && (
             <div className="space-y-5">
               <div>
-                <label className="mb-1.5 block text-[13px] font-medium">
-                  {t("Name")}
-                </label>
+                <label className="mb-1.5 block text-[13px] font-medium">{t('Name')}</label>
                 <input
                   value={name}
-                  onChange={(e) => setName(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") goNext();
+                  onChange={e => setName(e.target.value)}
+                  onKeyDown={e => {
+                    if (e.key === 'Enter') goNext()
                   }}
-                  placeholder={t("e.g. Ada")}
+                  placeholder={t('e.g. Ada')}
                   autoFocus
                   className="w-full rounded-xl border border-[var(--border)] bg-transparent px-3.5 py-2.5 text-[14px] outline-none transition-colors focus:border-[var(--ring)]"
                 />
               </div>
               <div>
-                <label className="mb-1.5 block text-[13px] font-medium">
-                  {t("Description")}
-                </label>
+                <label className="mb-1.5 block text-[13px] font-medium">{t('Description')}</label>
                 <input
                   value={description}
-                  onChange={(e) => setDescription(e.target.value)}
-                  placeholder={t("What is this partner for?")}
+                  onChange={e => setDescription(e.target.value)}
+                  placeholder={t('What is this partner for?')}
                   className="w-full rounded-xl border border-[var(--border)] bg-transparent px-3.5 py-2.5 text-[14px] outline-none transition-colors focus:border-[var(--ring)]"
                 />
               </div>
               <div>
-                <label className="mb-2 block text-[13px] font-medium">
-                  {t("Face")}
-                </label>
+                <label className="mb-2 block text-[13px] font-medium">{t('Face')}</label>
                 <FaceEditor name={name} value={face} onChange={setFace} />
               </div>
               <div>
                 <label className="mb-1.5 block text-[13px] font-medium">
-                  {t("Reply language")}
+                  {t('Reply language')}
                 </label>
                 <select
                   value={language}
-                  onChange={(e) => setLanguage(e.target.value)}
+                  onChange={e => setLanguage(e.target.value)}
                   className="w-48 rounded-xl border border-[var(--border)] bg-transparent px-3 py-2 text-[14px] outline-none transition-colors focus:border-[var(--ring)]"
                 >
-                  <option value="">{t("Auto (English)")}</option>
-                  <option value="en">{t("English")}</option>
-                  <option value="zh">{t("Chinese")}</option>
+                  <option value="">{t('Auto (interface language)')}</option>
+                  <option value="en">{t('English')}</option>
+                  <option value="zh">{t('Simplified Chinese')}</option>
+                  <option value="zh-TW">{t('Traditional Chinese')}</option>
                 </select>
               </div>
             </div>
           )}
 
-          {step === "soul" && <SoulPicker value={soul} onChange={setSoul} />}
+          {step === 'soul' && <SoulPicker value={soul} onChange={setSoul} />}
 
-          {step === "mind" && (
+          {step === 'mind' && (
             <div className="space-y-6">
               <div>
                 <h3 className="mb-2 text-[13px] font-medium text-[var(--muted-foreground)]">
-                  {t("Primary model")}
+                  {t('Primary model')}
                 </h3>
                 <PartnerModelPicker
                   options={llmOptions}
@@ -385,7 +348,7 @@ export default function NewPartnerPage() {
               </div>
               <div>
                 <h3 className="mb-2 text-[13px] font-medium text-[var(--muted-foreground)]">
-                  {t("Backup model")}
+                  {t('Backup model')}
                 </h3>
                 <PartnerModelSelect
                   options={llmOptions}
@@ -393,8 +356,8 @@ export default function NewPartnerPage() {
                   value={backupSelection}
                   loading={llmLoading}
                   error={llmError}
-                  noneLabel={t("No backup")}
-                  noneDetail={t("Failed turns are not retried.")}
+                  noneLabel={t('No backup')}
+                  noneDetail={t('Failed turns are not retried.')}
                   onChange={setBackupSelection}
                 />
               </div>
@@ -403,62 +366,51 @@ export default function NewPartnerPage() {
                 enabledTools={enabledTools}
                 builtinTools={builtinTools}
                 mcpTools={mcpTools}
-                onChangeEnabledTools={(next) => {
-                  setToolsTouched(true);
-                  setEnabledTools(next);
+                onChangeEnabledTools={next => {
+                  setToolsTouched(true)
+                  setEnabledTools(next)
                 }}
-                onChangeBuiltinTools={(next) => {
-                  setToolsTouched(true);
-                  setBuiltinTools(next);
+                onChangeBuiltinTools={next => {
+                  setToolsTouched(true)
+                  setBuiltinTools(next)
                 }}
-                onChangeMcpTools={(next) => {
-                  setToolsTouched(true);
-                  setMcpTools(next);
+                onChangeMcpTools={next => {
+                  setToolsTouched(true)
+                  setMcpTools(next)
                 }}
               />
             </div>
           )}
 
-          {step === "library" && (
-            <AssetPicker
-              value={assets}
-              onChange={setAssets}
-              preselectAllSkills
-            />
+          {step === 'library' && (
+            <AssetPicker value={assets} onChange={setAssets} preselectAllSkills />
           )}
 
-          {step === "review" && (
+          {step === 'review' && (
             <div className="space-y-3">
               <dl className="divide-y divide-[var(--border)] rounded-2xl border border-[var(--border)]">
                 {[
-                  [t("Name"), name.trim() || "—"],
-                  [t("Description"), description.trim() || "—"],
-                  [t("Soul"), soulSummary],
-                  [t("Model"), modelSummary],
-                  [t("Backup model"), backupSummary],
+                  [t('Name'), name.trim() || '—'],
+                  [t('Description'), description.trim() || '—'],
+                  [t('Soul'), soulSummary],
+                  [t('Model'), modelSummary],
+                  [t('Backup model'), backupSummary],
                   [
-                    t("Tools"),
-                    `${enabledTools.length} ${t("System tools")}${
-                      mcpTools.length
-                        ? ` · ${mcpTools.length} ${t("MCP tools")}`
-                        : ""
+                    t('Tools'),
+                    `${enabledTools.length} ${t('System tools')}${
+                      mcpTools.length ? ` · ${mcpTools.length} ${t('MCP tools')}` : ''
                     }`,
                   ],
                   [
-                    t("Library"),
+                    t('Library'),
                     assetCount > 0
-                      ? t("{{count}} items will be copied", {
+                      ? t('{{count}} items will be copied', {
                           count: assetCount,
                         })
-                      : t(
-                          "Nothing assigned yet — this partner only knows what you tell it.",
-                        ),
+                      : t('Nothing assigned yet — this partner only knows what you tell it.'),
                   ],
                 ].map(([label, valueText]) => (
-                  <div
-                    key={label}
-                    className="flex items-baseline gap-4 px-4 py-3"
-                  >
+                  <div key={label} className="flex items-baseline gap-4 px-4 py-3">
                     <dt className="w-24 shrink-0 text-[12.5px] text-[var(--muted-foreground)]">
                       {label}
                     </dt>
@@ -469,9 +421,7 @@ export default function NewPartnerPage() {
                 ))}
               </dl>
               <p className="text-[12.5px] text-[var(--muted-foreground)]">
-                {t(
-                  "You can connect Feishu, Telegram, Slack and more right after creating.",
-                )}
+                {t('You can connect Feishu, Telegram, Slack and more right after creating.')}
               </p>
               {error && (
                 <p className="rounded-lg border border-[var(--destructive)] bg-[var(--secondary)] px-3 py-2 text-[13px] text-[var(--destructive)]">
@@ -493,9 +443,9 @@ export default function NewPartnerPage() {
             className="inline-flex items-center gap-1.5 rounded-xl px-3 py-2 text-[13.5px] text-[var(--muted-foreground)] transition-colors hover:text-[var(--foreground)] disabled:invisible"
           >
             <ArrowLeft className="h-4 w-4" />
-            {t("Back")}
+            {t('Back')}
           </button>
-          {step === "review" ? (
+          {step === 'review' ? (
             <button
               type="button"
               onClick={() => void submit()}
@@ -507,7 +457,7 @@ export default function NewPartnerPage() {
               ) : (
                 <Sparkles className="h-4 w-4" />
               )}
-              {t("Create partner")}
+              {t('Create partner')}
             </button>
           ) : (
             <button
@@ -516,12 +466,12 @@ export default function NewPartnerPage() {
               disabled={!canContinue}
               className="inline-flex items-center gap-2 rounded-xl bg-[var(--primary)] px-5 py-2.5 text-[13.5px] font-medium text-[var(--primary-foreground)] shadow-sm transition-all duration-150 hover:opacity-90 active:scale-[0.98] disabled:opacity-40"
             >
-              {t("Continue")}
+              {t('Continue')}
               <ArrowRight className="h-4 w-4" />
             </button>
           )}
         </div>
       </div>
     </div>
-  );
+  )
 }

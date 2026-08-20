@@ -155,6 +155,41 @@ class TestStateAndHeaders:
         assert base64.b64decode(headers["X-WECHAT-UIN"]).decode().isdigit()
 
 
+class TestPolling:
+    @pytest.mark.asyncio
+    async def test_http_524_is_a_soft_long_poll_timeout(self, state_dir, monkeypatch):
+        ch = _make_channel(state_dir=str(state_dir))
+        ch.logger = MagicMock()
+        client = MagicMock()
+        client.aclose = AsyncMock()
+        monkeypatch.setattr(weixin_mod.httpx, "AsyncClient", MagicMock(return_value=client))
+        sleep = AsyncMock()
+        monkeypatch.setattr(weixin_mod.asyncio, "sleep", sleep)
+
+        request = weixin_mod.httpx.Request("POST", "https://example.test/ilink/bot/getupdates")
+        response = weixin_mod.httpx.Response(524, request=request)
+        timeout = weixin_mod.httpx.HTTPStatusError(
+            "long poll timed out", request=request, response=response
+        )
+        attempts = 0
+
+        async def poll_once():
+            nonlocal attempts
+            attempts += 1
+            if attempts == 1:
+                raise timeout
+            ch._running = False
+
+        ch._poll_once = AsyncMock(side_effect=poll_once)
+
+        await ch.start()
+        await ch.stop()
+
+        assert attempts == 2
+        ch.logger.exception.assert_not_called()
+        sleep.assert_not_awaited()
+
+
 class TestInboundProcessing:
     @pytest.mark.asyncio
     async def test_text_message_published_to_bus(self, state_dir):

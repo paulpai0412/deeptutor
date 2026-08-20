@@ -347,6 +347,14 @@ class TestContextAssembly:
         assert context.metadata["agent_identity"]["name"] == "Ada"
         assert "wait_for_user_reply" not in context.metadata
 
+    def test_unset_language_follows_interface_language(self, partners_root, monkeypatch):
+        monkeypatch.setattr(
+            "deeptutor.services.settings.interface_settings.get_ui_language",
+            lambda default: "zh-TW",
+        )
+
+        assert _runner(partners_root)._language() == "zh-TW"
+
     @pytest.mark.asyncio
     async def test_default_tools_resolve_to_full_toggleable_set(
         self, partners_root, fake_orchestrator
