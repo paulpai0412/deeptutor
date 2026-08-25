@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+from typing import Any
+
+import pytest
+
 from deeptutor.core.context import Attachment, UnifiedContext
 from deeptutor.core.errors import (
     ConfigurationError,
@@ -26,6 +30,19 @@ from deeptutor.core.trace import (
 
 
 class TestAttachment:
+    @pytest.mark.parametrize("attachment_type", ["image", "file", "pdf"])
+    def test_valid_types(self, attachment_type: str) -> None:
+        assert Attachment(type=attachment_type).type == attachment_type
+
+    @pytest.mark.parametrize(
+        "invalid_type", ["video", "Image", "unsupported-attachment-kind", "", None, 0, ["image"]]
+    )
+    def test_invalid_types_include_type_and_value_in_message(self, invalid_type: Any) -> None:
+        with pytest.raises(ValueError) as exc_info:
+            Attachment(type=invalid_type)
+
+        assert str(exc_info.value) == f"Invalid attachment type: {invalid_type!r}"
+
     def test_default_fields(self) -> None:
         att = Attachment(type="image")
         assert att.type == "image"
@@ -33,6 +50,8 @@ class TestAttachment:
         assert att.base64 == ""
         assert att.filename == ""
         assert att.mime_type == ""
+        assert att.id == ""
+        assert att.extracted_text == ""
 
     def test_full_construction(self) -> None:
         att = Attachment(
@@ -57,12 +76,15 @@ class TestUnifiedContext:
         assert ctx.user_message == ""
         assert ctx.conversation_history == []
         assert ctx.enabled_tools is None
+        assert ctx.allowed_builtin_tools is None
         assert ctx.active_capability is None
         assert ctx.knowledge_bases == []
         assert ctx.attachments == []
         assert ctx.config_overrides == {}
         assert ctx.language == "en"
         assert ctx.memory_context == ""
+        assert ctx.persona_context == ""
+        assert ctx.skills_manifest == ""
         assert ctx.source_manifest == ""
         assert ctx.metadata == {}
 
@@ -70,7 +92,16 @@ class TestUnifiedContext:
         ctx_a = UnifiedContext()
         ctx_b = UnifiedContext()
         ctx_a.conversation_history.append({"role": "user", "content": "hi"})
+        ctx_a.knowledge_bases.append("kb")
+        ctx_a.attachments.append(Attachment(type="file"))
+        ctx_a.config_overrides["temperature"] = 0.5
+        ctx_a.metadata["turn_id"] = "t1"
+
         assert ctx_b.conversation_history == []
+        assert ctx_b.knowledge_bases == []
+        assert ctx_b.attachments == []
+        assert ctx_b.config_overrides == {}
+        assert ctx_b.metadata == {}
 
     def test_full_construction(self) -> None:
         att = Attachment(type="image", url="https://img.png")

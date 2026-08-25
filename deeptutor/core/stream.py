@@ -58,6 +58,30 @@ class StreamEvent:
     seq: int = 0
     timestamp: float = field(default_factory=time.time)
 
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> StreamEvent:
+        """Create an event from its dictionary representation."""
+        if "type" not in data:
+            raise ValueError("Missing required field 'type'")
+
+        try:
+            event_type = StreamEventType(data["type"])
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"Invalid value for field 'type': {data['type']!r}") from exc
+
+        optional_fields = (
+            "source",
+            "stage",
+            "content",
+            "metadata",
+            "session_id",
+            "turn_id",
+            "seq",
+            "timestamp",
+        )
+        values = {name: data[name] for name in optional_fields if name in data}
+        return cls(type=event_type, **values)
+
     def to_dict(self) -> dict[str, Any]:
         return {
             "type": self.type.value,

@@ -29,6 +29,10 @@ class Attachment:
     # show "what the LLM saw" when previewing office files.
     extracted_text: str = ""
 
+    def __post_init__(self) -> None:
+        if not isinstance(self.type, str) or self.type not in ("image", "file", "pdf"):
+            raise ValueError(f"Invalid attachment type: {self.type!r}")
+
 
 @dataclass
 class UnifiedContext:
