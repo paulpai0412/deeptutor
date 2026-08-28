@@ -27,6 +27,8 @@ and are synced into the global :class:`ToolRegistry` so the regular dispatch
 path executes them.
 """
 
+# The MCP SDK is an optional ``partners`` extra, imported lazily at runtime.
+# pyright: reportMissingImports=false, reportAttributeAccessIssue=false
 from __future__ import annotations
 
 import asyncio
@@ -48,6 +50,7 @@ from deeptutor.services.mcp.pageindex_server import with_builtin_servers
 logger = logging.getLogger(__name__)
 
 _CONNECT_TIMEOUT_S = 15
+MAX_MCP_TOOL_OUTPUT_CHARS = 50_000
 _NAME_SANITIZE_RE = re.compile(r"[^a-zA-Z0-9_-]")
 
 # Transient transport errors worth exactly one retry (mirrors nanobot).
@@ -60,6 +63,17 @@ _TRANSIENT_ERRORS = (
 def wrapped_tool_name(server: str, tool: str) -> str:
     """``mcp_<server>_<tool>`` with non-identifier characters sanitised."""
     return f"mcp_{_NAME_SANITIZE_RE.sub('_', server)}_{_NAME_SANITIZE_RE.sub('_', tool)}"
+
+
+def _cap_tool_output(text: str) -> tuple[str, bool]:
+    if len(text) <= MAX_MCP_TOOL_OUTPUT_CHARS:
+        return text, False
+    half = MAX_MCP_TOOL_OUTPUT_CHARS // 2
+    marker = (
+        f"\n\n... ({len(text):,} chars total; MCP output truncated) ...\n"
+        "Narrow the query or lower its limit, then call the tool again.\n\n"
+    )
+    return text[:half].rstrip() + marker + text[-half:].lstrip(), True
 
 
 class MCPToolAdapter(BaseTool):
@@ -104,9 +118,16 @@ class MCPToolAdapter(BaseTool):
             kwargs,
             timeout=self._tool_timeout,
         )
+        original_chars = len(text)
+        text, truncated = _cap_tool_output(text)
         return ToolResult(
             content=text,
-            metadata={"mcp_server": self._server_name, "mcp_tool": self._original_name},
+            metadata={
+                "mcp_server": self._server_name,
+                "mcp_tool": self._original_name,
+                "mcp_output_truncated": truncated,
+                "mcp_output_chars": original_chars,
+            },
         )
 
 
@@ -218,7 +239,7 @@ class MCPConnectionManager:
                 return f"(MCP tool call failed after retry: {type(exc).__name__})"
         except asyncio.TimeoutError:
             return f"(MCP tool call timed out after {timeout}s)"
-        except asyncio.CancelledError:
+        except asyncio.exceptions.CancelledError:
             # The MCP SDK's anyio scopes can leak CancelledError on internal
             # failures; re-raise only when our own task was cancelled.
             task = asyncio.current_task()

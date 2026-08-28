@@ -1124,7 +1124,7 @@ function TraceRowItem({
   // Keep completed rows visible across later turns. The context-exploration
   // pre-pass is folded only while live because its briefing can be long.
   const isContextExploration = kind === 'context_exploration'
-  const autoOpen = !isContextExploration || !active
+  const autoOpen = isToolRow ? false : !isContextExploration || !active
   const open = isThinking ? true : expandable && (userOpen ?? autoOpen)
   const canToggle = expandable && !isThinking
 
